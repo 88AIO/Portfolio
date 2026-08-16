@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio, refreshPrices, signOut } from "./actions";
 import { getRates } from "@/lib/marketdata";
-import { money, pct, num } from "@/lib/format";
+import { money, pct, num, timeAgo } from "@/lib/format";
 import AddHoldingForm from "@/components/AddHoldingForm";
 import AllocationChart from "@/components/AllocationChart";
 
@@ -21,6 +21,7 @@ type Position = {
   day_change_pct: number | null;
   year_total_divs: number | null;
   div_yield_current: number | null;
+  price_as_of: string | null;
 };
 
 export default async function Dashboard() {
@@ -60,6 +61,14 @@ export default async function Dashboard() {
   const alloc = rows
     .map((p) => ({ name: p.symbol, value: (p.last_price ?? 0) * p.shares * fx(p.currency) }))
     .filter((a) => a.value > 0);
+
+  // "Prices as of…" — honest freshness = the OLDEST price timestamp among priced holdings,
+  // so the label guarantees every price shown is at least that current.
+  const asOfTimes = rows
+    .filter((p) => p.last_price != null && p.price_as_of)
+    .map((p) => new Date(p.price_as_of as string).getTime())
+    .filter((t) => !isNaN(t));
+  const pricesAsOf = asOfTimes.length ? new Date(Math.min(...asOfTimes)).toISOString() : null;
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-800">
@@ -104,7 +113,12 @@ export default async function Dashboard() {
           {/* Holdings table */}
           <section className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-semibold">Holdings</h2>
+              <div>
+                <h2 className="font-semibold">Holdings</h2>
+                {pricesAsOf && (
+                  <p className="text-xs text-slate-400">Prices as of {timeAgo(pricesAsOf)}</p>
+                )}
+              </div>
               <form action={refreshPrices}>
                 <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
                   Refresh prices
@@ -144,7 +158,10 @@ export default async function Dashboard() {
                           </td>
                           <td className="py-2.5 text-right">{num(p.shares, 4)}</td>
                           <td className="py-2.5 text-right">{money(p.avg_cost, p.currency)}</td>
-                          <td className="py-2.5 text-right">
+                          <td
+                            className="py-2.5 text-right"
+                            title={p.price_as_of ? `as of ${timeAgo(p.price_as_of)}` : undefined}
+                          >
                             {p.last_price == null ? (
                               <span className="text-slate-300">—</span>
                             ) : (
