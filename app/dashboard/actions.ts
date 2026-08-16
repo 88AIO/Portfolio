@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote, searchInstrument } from "@/lib/marketdata";
+import { getQuote, searchInstrument, getDividendInfo } from "@/lib/marketdata";
 import { parseTransactionsCsv, transactionDedupeKey } from "@/lib/import/csv";
 import type { ImportResult } from "@/lib/import/types";
 
@@ -71,13 +71,21 @@ export async function addTransaction(formData: FormData) {
     { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true }
   );
 
-  // Fetch a fresh price for this instrument right away
-  const q = await getQuote(symbol, exchange);
+  // Fetch a fresh price + dividend estimate for this instrument right away.
+  const [q, div] = await Promise.all([getQuote(symbol, exchange), getDividendInfo(symbol, exchange)]);
   if (q.price != null) {
     await admin.from("price_cache").upsert({
       instrument_id: inst.id, price: q.price, currency: inst.currency,
       change_pct: q.changePct, as_of: new Date().toISOString(),
     });
+  }
+  if (div) {
+    await admin.from("instruments").update({
+      annual_div_per_share: div.annualDividendPerShare,
+      div_yield_ttm: div.yieldTtm,
+      ex_dividend_date: div.exDividendDate,
+      next_dividend_date: div.nextDividendDate,
+    }).eq("id", inst.id);
   }
 
   revalidatePath("/dashboard");
@@ -91,12 +99,23 @@ export async function refreshPrices() {
   if (!pos) return;
   await Promise.all(
     pos.map(async (p) => {
-      const q = await getQuote(p.symbol, p.exchange);
+      const [q, div] = await Promise.all([
+        getQuote(p.symbol, p.exchange),
+        getDividendInfo(p.symbol, p.exchange),
+      ]);
       if (q.price != null) {
         await admin.from("price_cache").upsert({
           instrument_id: p.instrument_id, price: q.price,
           change_pct: q.changePct, as_of: new Date().toISOString(),
         });
+      }
+      if (div) {
+        await admin.from("instruments").update({
+          annual_div_per_share: div.annualDividendPerShare,
+          div_yield_ttm: div.yieldTtm,
+          ex_dividend_date: div.exDividendDate,
+          next_dividend_date: div.nextDividendDate,
+        }).eq("id", p.instrument_id);
       }
     })
   );
@@ -190,12 +209,20 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
       const inst = instByKey.get(key);
       if (!inst) return;
       const [symbol, exchange] = key.split("|");
-      const q = await getQuote(symbol, exchange);
+      const [q, div] = await Promise.all([getQuote(symbol, exchange), getDividendInfo(symbol, exchange)]);
       if (q.price != null) {
         await admin.from("price_cache").upsert({
           instrument_id: inst.id, price: q.price, currency: inst.currency,
           change_pct: q.changePct, as_of: new Date().toISOString(),
         });
+      }
+      if (div) {
+        await admin.from("instruments").update({
+          annual_div_per_share: div.annualDividendPerShare,
+          div_yield_ttm: div.yieldTtm,
+          ex_dividend_date: div.exDividendDate,
+          next_dividend_date: div.nextDividendDate,
+        }).eq("id", inst.id);
       }
     })
   );

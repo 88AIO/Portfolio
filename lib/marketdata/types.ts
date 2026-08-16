@@ -14,6 +14,13 @@ export type InstrumentMeta = {
   type: string; // stock | etf | fund | bond | crypto | cash | index | custom
 };
 
+export type DividendInfo = {
+  annualDividendPerShare: number | null;
+  yieldTtm: number | null; // trailing dividend yield, as a percent
+  exDividendDate: string | null; // YYYY-MM-DD
+  nextDividendDate: string | null; // YYYY-MM-DD (next pay date)
+};
+
 // --- Options (used by the NEXT+ options-selling layer; see docs/SPEC_options-selling.md) ---
 export type OptionQuote = {
   mark: number | null;
@@ -52,6 +59,7 @@ export interface MarketDataProvider {
   getQuote(symbol: string, exchange: string): Promise<Quote>;
   getFxRate(from: string, base: string): Promise<number>;
   searchInstrument(symbol: string, exchange: string): Promise<InstrumentMeta | null>;
+  getDividendInfo?(symbol: string, exchange: string): Promise<DividendInfo | null>;
 
   // Optional — only providers with capabilities.options implement these (wired up in the O1 phase).
   getOptionQuote?(

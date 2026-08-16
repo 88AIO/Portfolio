@@ -2,7 +2,7 @@
 // Uses the `yahoo-finance2` library. Covers US equities/ETFs + FX (and options, wired up in O1).
 // US-first: US tickers pass through unchanged; a small suffix map handles common intl exchanges.
 import YahooFinance from "yahoo-finance2";
-import type { InstrumentMeta, MarketDataProvider, Quote } from "../types";
+import type { DividendInfo, InstrumentMeta, MarketDataProvider, Quote } from "../types";
 
 // v4 is class-based: instantiate once (server-only; construction is side-effect-free) and reuse.
 const yf = new YahooFinance();
@@ -97,10 +97,63 @@ async function searchInstrument(symbol: string, exchange: string): Promise<Instr
   }
 }
 
+type YahooSummaryDetailLike = {
+  dividendRate?: number;
+  dividendYield?: number;
+  trailingAnnualDividendRate?: number;
+  trailingAnnualDividendYield?: number;
+  exDividendDate?: Date;
+};
+type YahooCalendarEventsLike = { exDividendDate?: Date; dividendDate?: Date };
+type YahooQuoteSummaryLike = {
+  summaryDetail?: YahooSummaryDetailLike;
+  calendarEvents?: YahooCalendarEventsLike;
+};
+
+function isoDate(d: Date | undefined | null): string | null {
+  if (!d) return null;
+  const t = d instanceof Date ? d : new Date(d);
+  if (isNaN(t.getTime())) return null;
+  const m = String(t.getMonth() + 1).padStart(2, "0");
+  const day = String(t.getDate()).padStart(2, "0");
+  return `${t.getFullYear()}-${m}-${day}`;
+}
+
+async function getDividendInfo(symbol: string, exchange: string): Promise<DividendInfo | null> {
+  try {
+    const res = (await yf.quoteSummary(toYahoo(symbol, exchange), {
+      modules: ["summaryDetail", "calendarEvents"],
+    })) as unknown as YahooQuoteSummaryLike;
+    const sd = res?.summaryDetail;
+    const ce = res?.calendarEvents;
+    const rate =
+      typeof sd?.dividendRate === "number"
+        ? sd.dividendRate
+        : typeof sd?.trailingAnnualDividendRate === "number"
+          ? sd.trailingAnnualDividendRate
+          : null;
+    const yieldFrac =
+      typeof sd?.dividendYield === "number"
+        ? sd.dividendYield
+        : typeof sd?.trailingAnnualDividendYield === "number"
+          ? sd.trailingAnnualDividendYield
+          : null;
+    return {
+      annualDividendPerShare: rate,
+      yieldTtm: yieldFrac != null ? yieldFrac * 100 : null,
+      exDividendDate: isoDate(sd?.exDividendDate ?? ce?.exDividendDate),
+      nextDividendDate: isoDate(ce?.dividendDate),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const yahooProvider: MarketDataProvider = {
   name: "yahoo",
   capabilities: { options: true },
   getQuote,
   getFxRate,
   searchInstrument,
+  getDividendInfo,
 };

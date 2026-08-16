@@ -10,6 +10,7 @@ import { eodhdProvider } from "./providers/eodhd";
 export type {
   Quote,
   InstrumentMeta,
+  DividendInfo,
   OptionQuote,
   OptionContract,
   OptionChain,
@@ -37,6 +38,11 @@ export function getFxRate(from: string, base: string) {
 
 export function searchInstrument(symbol: string, exchange: string) {
   return getProvider().searchInstrument(symbol, exchange);
+}
+
+export function getDividendInfo(symbol: string, exchange: string) {
+  const provider = getProvider();
+  return provider.getDividendInfo ? provider.getDividendInfo(symbol, exchange) : Promise.resolve(null);
 }
 
 // Get conversion rates for a set of currencies into the base currency (rates fall back to 1).
