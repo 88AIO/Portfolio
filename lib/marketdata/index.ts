@@ -1,0 +1,56 @@
+// Market-data provider port (public entry point).
+// The app imports getQuote / getFxRate / getRates / searchInstrument from "@/lib/marketdata"
+// and never talks to a data vendor directly. Choose the vendor with the MARKET_DATA_PROVIDER
+// env var: default "yahoo" (free, US-first) or "eodhd" (paid, wider coverage).
+// See docs/MARKET_DATA_ADAPTER.md.
+import type { MarketDataProvider } from "./types";
+import { yahooProvider } from "./providers/yahoo";
+import { eodhdProvider } from "./providers/eodhd";
+
+export type {
+  Quote,
+  InstrumentMeta,
+  OptionQuote,
+  OptionContract,
+  OptionChain,
+  ProviderCapabilities,
+  MarketDataProvider,
+} from "./types";
+
+const PROVIDERS: Record<string, MarketDataProvider> = {
+  yahoo: yahooProvider,
+  eodhd: eodhdProvider,
+};
+
+export function getProvider(): MarketDataProvider {
+  const key = (process.env.MARKET_DATA_PROVIDER || "yahoo").toLowerCase();
+  return PROVIDERS[key] ?? yahooProvider;
+}
+
+export function getQuote(symbol: string, exchange: string) {
+  return getProvider().getQuote(symbol, exchange);
+}
+
+export function getFxRate(from: string, base: string) {
+  return getProvider().getFxRate(from, base);
+}
+
+export function searchInstrument(symbol: string, exchange: string) {
+  return getProvider().searchInstrument(symbol, exchange);
+}
+
+// Get conversion rates for a set of currencies into the base currency (rates fall back to 1).
+export async function getRates(
+  currencies: string[],
+  base: string
+): Promise<Record<string, number>> {
+  const provider = getProvider();
+  const uniq = [...new Set(currencies.filter(Boolean))];
+  const out: Record<string, number> = {};
+  await Promise.all(
+    uniq.map(async (c) => {
+      out[c] = await provider.getFxRate(c, base);
+    })
+  );
+  return out;
+}

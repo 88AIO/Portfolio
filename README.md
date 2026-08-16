@@ -52,7 +52,7 @@ Open http://localhost:3000 → sign up → you're in the dashboard. Add a holdin
 | Auth session handling | `proxy.ts` (Next 16's middleware) |
 | Dashboard (value, P/L, table, chart) | `app/dashboard/page.tsx` |
 | Add / refresh actions | `app/dashboard/actions.ts` |
-| Market data (EODHD) | `lib/marketdata.ts` |
+| Market data (provider port) | `lib/marketdata/` (Yahoo free default → EODHD) |
 | Supabase clients | `lib/supabase/*` |
 
 **Data model:** you record **transactions** (buy/sell/dividend); current **positions** are calculated from them automatically (a database view). Prices are cached per instrument and refreshed on demand.
