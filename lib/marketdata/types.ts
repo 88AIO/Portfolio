@@ -21,6 +21,11 @@ export type DividendInfo = {
   nextDividendDate: string | null; // YYYY-MM-DD (next pay date)
 };
 
+export type DividendHistoryPoint = {
+  exDate: string; // YYYY-MM-DD
+  amount: number; // per share, in the instrument's currency
+};
+
 // --- Options (used by the NEXT+ options-selling layer; see docs/SPEC_options-selling.md) ---
 export type OptionQuote = {
   mark: number | null;
@@ -60,6 +65,7 @@ export interface MarketDataProvider {
   getFxRate(from: string, base: string): Promise<number>;
   searchInstrument(symbol: string, exchange: string): Promise<InstrumentMeta | null>;
   getDividendInfo?(symbol: string, exchange: string): Promise<DividendInfo | null>;
+  getDividendHistory?(symbol: string, exchange: string): Promise<DividendHistoryPoint[]>;
 
   // Optional — only providers with capabilities.options implement these (wired up in the O1 phase).
   getOptionQuote?(

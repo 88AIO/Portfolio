@@ -2,7 +2,13 @@
 // Uses the `yahoo-finance2` library. Covers US equities/ETFs + FX (and options, wired up in O1).
 // US-first: US tickers pass through unchanged; a small suffix map handles common intl exchanges.
 import YahooFinance from "yahoo-finance2";
-import type { DividendInfo, InstrumentMeta, MarketDataProvider, Quote } from "../types";
+import type {
+  DividendHistoryPoint,
+  DividendInfo,
+  InstrumentMeta,
+  MarketDataProvider,
+  Quote,
+} from "../types";
 
 // v4 is class-based: instantiate once (server-only; construction is side-effect-free) and reuse.
 const yf = new YahooFinance();
@@ -149,6 +155,30 @@ async function getDividendInfo(symbol: string, exchange: string): Promise<Divide
   }
 }
 
+async function getDividendHistory(
+  symbol: string,
+  exchange: string
+): Promise<DividendHistoryPoint[]> {
+  try {
+    const period1 = new Date(Date.now() - 3 * 365 * 24 * 60 * 60 * 1000); // ~3 years back
+    const res = (await yf.chart(toYahoo(symbol, exchange), {
+      period1,
+      interval: "1mo",
+      events: "div",
+    })) as unknown as { events?: { dividends?: Array<{ date?: Date; amount?: number }> } };
+    const out: DividendHistoryPoint[] = [];
+    for (const d of res?.events?.dividends ?? []) {
+      const iso = isoDate(d?.date ?? null);
+      if (iso && typeof d?.amount === "number") out.push({ exDate: iso, amount: d.amount });
+    }
+    // Chronological (oldest → newest) so callers can take the last as most recent.
+    out.sort((a, b) => a.exDate.localeCompare(b.exDate));
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 export const yahooProvider: MarketDataProvider = {
   name: "yahoo",
   capabilities: { options: true },
@@ -156,4 +186,5 @@ export const yahooProvider: MarketDataProvider = {
   getFxRate,
   searchInstrument,
   getDividendInfo,
+  getDividendHistory,
 };

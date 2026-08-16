@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote, searchInstrument, getDividendInfo } from "@/lib/marketdata";
+import { getQuote, searchInstrument, getDividendInfo, getDividendHistory } from "@/lib/marketdata";
 import { parseTransactionsCsv, transactionDedupeKey } from "@/lib/import/csv";
 import type { ImportResult } from "@/lib/import/types";
 
@@ -14,6 +14,40 @@ function todayIso(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${m}-${day}`;
+}
+
+// Sync an instrument's dividend reference + history from the market-data provider (service role).
+async function syncInstrumentDividends(
+  admin: ReturnType<typeof createAdminClient>,
+  instrumentId: string,
+  symbol: string,
+  exchange: string,
+  currency: string
+) {
+  const [info, history] = await Promise.all([
+    getDividendInfo(symbol, exchange),
+    getDividendHistory(symbol, exchange),
+  ]);
+  const patch: Record<string, unknown> = {};
+  if (info) {
+    patch.annual_div_per_share = info.annualDividendPerShare;
+    patch.div_yield_ttm = info.yieldTtm;
+    patch.ex_dividend_date = info.exDividendDate;
+    patch.next_dividend_date = info.nextDividendDate;
+  }
+  if (history.length) {
+    await admin.from("dividends").upsert(
+      history.map((h) => ({ instrument_id: instrumentId, ex_date: h.exDate, amount: h.amount, currency })),
+      { onConflict: "instrument_id,ex_date" }
+    );
+    const now = Date.now();
+    const last12 = history.filter((h) => now - new Date(h.exDate).getTime() < 366 * 24 * 60 * 60 * 1000);
+    patch.div_frequency = last12.length || null;
+    patch.next_dividend_per_share = history[history.length - 1].amount;
+  }
+  if (Object.keys(patch).length) {
+    await admin.from("instruments").update(patch).eq("id", instrumentId);
+  }
 }
 
 // Get the user's default portfolio, creating one on first use.
@@ -71,22 +105,15 @@ export async function addTransaction(formData: FormData) {
     { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true }
   );
 
-  // Fetch a fresh price + dividend estimate for this instrument right away.
-  const [q, div] = await Promise.all([getQuote(symbol, exchange), getDividendInfo(symbol, exchange)]);
+  // Fetch a fresh price + full dividend sync for this instrument right away.
+  const q = await getQuote(symbol, exchange);
   if (q.price != null) {
     await admin.from("price_cache").upsert({
       instrument_id: inst.id, price: q.price, currency: inst.currency,
       change_pct: q.changePct, as_of: new Date().toISOString(),
     });
   }
-  if (div) {
-    await admin.from("instruments").update({
-      annual_div_per_share: div.annualDividendPerShare,
-      div_yield_ttm: div.yieldTtm,
-      ex_dividend_date: div.exDividendDate,
-      next_dividend_date: div.nextDividendDate,
-    }).eq("id", inst.id);
-  }
+  await syncInstrumentDividends(admin, inst.id, symbol, exchange, inst.currency);
 
   revalidatePath("/dashboard");
 }
@@ -95,28 +122,18 @@ export async function addTransaction(formData: FormData) {
 export async function refreshPrices() {
   const supabase = await createClient();
   const admin = createAdminClient();
-  const { data: pos } = await supabase.from("positions").select("instrument_id, symbol, exchange");
+  const { data: pos } = await supabase.from("positions").select("instrument_id, symbol, exchange, currency");
   if (!pos) return;
   await Promise.all(
     pos.map(async (p) => {
-      const [q, div] = await Promise.all([
-        getQuote(p.symbol, p.exchange),
-        getDividendInfo(p.symbol, p.exchange),
-      ]);
+      const q = await getQuote(p.symbol, p.exchange);
       if (q.price != null) {
         await admin.from("price_cache").upsert({
           instrument_id: p.instrument_id, price: q.price,
           change_pct: q.changePct, as_of: new Date().toISOString(),
         });
       }
-      if (div) {
-        await admin.from("instruments").update({
-          annual_div_per_share: div.annualDividendPerShare,
-          div_yield_ttm: div.yieldTtm,
-          ex_dividend_date: div.exDividendDate,
-          next_dividend_date: div.nextDividendDate,
-        }).eq("id", p.instrument_id);
-      }
+      await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
     })
   );
   revalidatePath("/dashboard");
@@ -209,21 +226,14 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
       const inst = instByKey.get(key);
       if (!inst) return;
       const [symbol, exchange] = key.split("|");
-      const [q, div] = await Promise.all([getQuote(symbol, exchange), getDividendInfo(symbol, exchange)]);
+      const q = await getQuote(symbol, exchange);
       if (q.price != null) {
         await admin.from("price_cache").upsert({
           instrument_id: inst.id, price: q.price, currency: inst.currency,
           change_pct: q.changePct, as_of: new Date().toISOString(),
         });
       }
-      if (div) {
-        await admin.from("instruments").update({
-          annual_div_per_share: div.annualDividendPerShare,
-          div_yield_ttm: div.yieldTtm,
-          ex_dividend_date: div.exDividendDate,
-          next_dividend_date: div.nextDividendDate,
-        }).eq("id", inst.id);
-      }
+      await syncInstrumentDividends(admin, inst.id, symbol, exchange, inst.currency);
     })
   );
 

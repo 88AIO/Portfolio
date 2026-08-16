@@ -11,6 +11,7 @@ export type {
   Quote,
   InstrumentMeta,
   DividendInfo,
+  DividendHistoryPoint,
   OptionQuote,
   OptionContract,
   OptionChain,
@@ -43,6 +44,11 @@ export function searchInstrument(symbol: string, exchange: string) {
 export function getDividendInfo(symbol: string, exchange: string) {
   const provider = getProvider();
   return provider.getDividendInfo ? provider.getDividendInfo(symbol, exchange) : Promise.resolve(null);
+}
+
+export function getDividendHistory(symbol: string, exchange: string) {
+  const provider = getProvider();
+  return provider.getDividendHistory ? provider.getDividendHistory(symbol, exchange) : Promise.resolve([]);
 }
 
 // Get conversion rates for a set of currencies into the base currency (rates fall back to 1).

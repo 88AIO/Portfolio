@@ -193,7 +193,13 @@ select
   (pc.price * a.shares) - (case when a.buy_shares>0 then a.buy_value/a.buy_shares else 0 end * a.shares) as gain_value,
   -- forward dividend income & current yield from instrument reference
   (coalesce(i.annual_div_per_share,0) * a.shares)                                  as year_total_divs,
-  case when pc.price > 0 then coalesce(i.annual_div_per_share,0)/pc.price*100 else null end as div_yield_current
+  case when pc.price > 0 then coalesce(i.annual_div_per_share,0)/pc.price*100 else null end as div_yield_current,
+  i.annual_div_per_share,
+  i.div_yield_ttm,
+  i.div_frequency,
+  i.ex_dividend_date,
+  i.next_dividend_date,
+  i.next_dividend_per_share
 from agg a
 join public.instruments i on i.id = a.instrument_id
 left join public.price_cache pc on pc.instrument_id = i.id

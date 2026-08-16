@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio, refreshPrices, signOut } from "./actions";
 import { getRates } from "@/lib/marketdata";
@@ -85,6 +86,9 @@ export default async function Dashboard() {
             <span className="text-lg font-semibold">Snowfolio</span>
           </div>
           <div className="flex items-center gap-4 text-sm">
+            <Link href="/dashboard/dividends" className="font-medium text-indigo-600 hover:underline">
+              Dividends
+            </Link>
             <span className="text-slate-500">{user?.email}</span>
             <form action={signOut}>
               <button className="rounded-lg border border-slate-300 px-3 py-1.5 hover:bg-slate-50">
