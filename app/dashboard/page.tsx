@@ -23,6 +23,7 @@ type Position = {
   year_total_divs: number | null;
   div_yield_current: number | null;
   price_as_of: string | null;
+  div_paid: number | null;
 };
 
 export default async function Dashboard() {
@@ -44,12 +45,13 @@ export default async function Dashboard() {
   const rates = await getRates(rows.map((p) => p.currency), base);
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
-  let marketValue = 0, costBasis = 0, dayPL = 0, annualDivs = 0;
+  let marketValue = 0, costBasis = 0, dayPL = 0, annualDivs = 0, dividendsReceived = 0;
   for (const p of rows) {
     const r = fx(p.currency);
     marketValue += (p.last_price ?? 0) * p.shares * r;
     costBasis += p.avg_cost * p.shares * r;
     annualDivs += (p.year_total_divs ?? 0) * r;
+    dividendsReceived += (p.div_paid ?? 0) * r;
     if (p.day_change_pct != null && p.last_price != null) {
       const prev = p.last_price / (1 + p.day_change_pct / 100);
       dayPL += (p.last_price - prev) * p.shares * r;
@@ -58,6 +60,9 @@ export default async function Dashboard() {
   const yieldOnValue = marketValue > 0 ? (annualDivs / marketValue) * 100 : 0;
   const totalPL = marketValue - costBasis;
   const totalPLpct = costBasis > 0 ? (totalPL / costBasis) * 100 : 0;
+  // Total return = capital gains + dividends actually received (the honest "how am I doing" number).
+  const totalReturn = totalPL + dividendsReceived;
+  const totalReturnPct = costBasis > 0 ? (totalReturn / costBasis) * 100 : 0;
 
   const alloc = rows
     .map((p) => ({ name: p.symbol, value: (p.last_price ?? 0) * p.shares * fx(p.currency) }))
@@ -92,7 +97,7 @@ export default async function Dashboard() {
 
       <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Summary cards */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           <Card label={`Market value (${base})`} value={money(marketValue, base)} />
           <Card label="Total cost" value={money(costBasis, base)} />
           <Card
@@ -100,6 +105,12 @@ export default async function Dashboard() {
             value={money(totalPL, base)}
             sub={pct(totalPLpct)}
             positive={totalPL >= 0}
+          />
+          <Card
+            label="Total return"
+            value={money(totalReturn, base)}
+            sub={`${pct(totalReturnPct)} incl. dividends`}
+            positive={totalReturn >= 0}
           />
           <Card label="Day P/L" value={money(dayPL, base)} positive={dayPL >= 0} />
           <Card
