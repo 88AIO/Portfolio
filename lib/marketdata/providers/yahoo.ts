@@ -1,8 +1,11 @@
 // Yahoo Finance provider — the free, US-first default (MARKET_DATA_PROVIDER unset or "yahoo").
 // Uses the `yahoo-finance2` library. Covers US equities/ETFs + FX (and options, wired up in O1).
 // US-first: US tickers pass through unchanged; a small suffix map handles common intl exchanges.
-import yahooFinance from "yahoo-finance2";
+import YahooFinance from "yahoo-finance2";
 import type { InstrumentMeta, MarketDataProvider, Quote } from "../types";
+
+// v4 is class-based: instantiate once (server-only; construction is side-effect-free) and reuse.
+const yf = new YahooFinance();
 
 // The subset of yahoo-finance2's quote response we read. Cast defensively (external, dynamic).
 type YahooQuoteLike = {
@@ -50,7 +53,7 @@ function mapType(quoteType?: string): string {
 
 async function getQuote(symbol: string, exchange: string): Promise<Quote> {
   try {
-    const q = (await yahooFinance.quote(toYahoo(symbol, exchange))) as unknown as
+    const q = (await yf.quote(toYahoo(symbol, exchange))) as unknown as
       | YahooQuoteLike
       | undefined;
     return {
@@ -67,7 +70,7 @@ async function getQuote(symbol: string, exchange: string): Promise<Quote> {
 async function getFxRate(from: string, base: string): Promise<number> {
   if (!from || !base || from === base) return 1;
   try {
-    const q = (await yahooFinance.quote(
+    const q = (await yf.quote(
       `${from.toUpperCase()}${base.toUpperCase()}=X`
     )) as unknown as YahooQuoteLike | undefined;
     const r = typeof q?.regularMarketPrice === "number" ? q.regularMarketPrice : NaN;
@@ -79,7 +82,7 @@ async function getFxRate(from: string, base: string): Promise<number> {
 
 async function searchInstrument(symbol: string, exchange: string): Promise<InstrumentMeta | null> {
   try {
-    const q = (await yahooFinance.quote(toYahoo(symbol, exchange))) as unknown as
+    const q = (await yf.quote(toYahoo(symbol, exchange))) as unknown as
       | YahooQuoteLike
       | undefined;
     if (!q) return null;
