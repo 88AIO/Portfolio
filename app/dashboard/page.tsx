@@ -4,6 +4,7 @@ import { getRates } from "@/lib/marketdata";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import AddHoldingForm from "@/components/AddHoldingForm";
 import AllocationChart from "@/components/AllocationChart";
+import ImportTransactionsForm from "@/components/ImportTransactionsForm";
 
 export const dynamic = "force-dynamic";
 
@@ -202,6 +203,10 @@ export default async function Dashboard() {
               <p className="mt-3 text-xs text-slate-400">
                 Symbol + exchange, e.g. AAPL / US, 0700 / HK, 7203 / TSE.
               </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <h2 className="mb-3 font-semibold">Import CSV</h2>
+              <ImportTransactionsForm />
             </div>
           </section>
         </div>

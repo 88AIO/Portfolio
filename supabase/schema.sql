@@ -118,9 +118,16 @@ create table if not exists public.transactions (
   currency text not null default 'USD',
   executed_at date not null default current_date,
   note text,
+  dedupe_key text,                    -- stable idempotency key (set by imports + manual adds)
   created_at timestamptz not null default now()
 );
+-- Backfill-safe for databases created before dedupe_key existed:
+alter table public.transactions add column if not exists dedupe_key text;
 create index if not exists tx_portfolio_idx on public.transactions(portfolio_id);
+-- Idempotent imports: the same transaction never inserts twice within a portfolio.
+-- (NULL keys are distinct in Postgres, so legacy rows without a key are unaffected.)
+create unique index if not exists transactions_dedupe_uidx
+  on public.transactions(portfolio_id, dedupe_key);
 
 -- 6. PRICE CACHE ---------------------------------------------
 create table if not exists public.price_cache (
