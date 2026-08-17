@@ -258,3 +258,37 @@ drop policy if exists "read prices" on public.price_cache;
 create policy "read prices" on public.price_cache for select using (auth.role() = 'authenticated');
 drop policy if exists "read dividends" on public.dividends;
 create policy "read dividends" on public.dividends for select using (auth.role() = 'authenticated');
+
+-- ============================================================
+-- 8. BROKER SYNC (SnapTrade) — see docs/SPEC_broker-sync.md
+-- ============================================================
+create table if not exists public.broker_connections (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  provider text not null default 'snaptrade',
+  provider_user_id text not null,
+  provider_user_secret text not null,      -- SECRET: service-role only (RLS on, no client policies)
+  created_at timestamptz not null default now(),
+  unique (user_id, provider)
+);
+
+create table if not exists public.broker_accounts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  provider text not null default 'snaptrade',
+  provider_account_id text not null,
+  brokerage_name text,
+  account_number text,
+  portfolio_id uuid references public.portfolios(id) on delete set null,
+  last_synced_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique (user_id, provider, provider_account_id)
+);
+
+alter table public.broker_connections enable row level security;
+alter table public.broker_accounts    enable row level security;
+
+-- broker_connections holds a secret: RLS on with NO policies -> only the service role can touch it.
+-- broker_accounts has no secrets: the owner may read (list) their connected accounts; writes via service role.
+drop policy if exists "own broker_accounts read" on public.broker_accounts;
+create policy "own broker_accounts read" on public.broker_accounts for select using (auth.uid() = user_id);

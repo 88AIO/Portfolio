@@ -89,6 +89,9 @@ export default async function Dashboard() {
             <Link href="/dashboard/dividends" className="font-medium text-indigo-600 hover:underline">
               Dividends
             </Link>
+            <Link href="/dashboard/broker" className="font-medium text-indigo-600 hover:underline">
+              Brokers
+            </Link>
             <span className="text-slate-500">{user?.email}</span>
             <form action={signOut}>
               <button className="rounded-lg border border-slate-300 px-3 py-1.5 hover:bg-slate-50">
