@@ -16,6 +16,8 @@ Manual entry + CSV import get holdings in, but the calm, no-duplicates promise i
 - **Non-US brokers** — US-first (matches the app's stance).
 - **Historical backfill beyond what SnapTrade returns** — we take what the API gives.
 
+> **Implemented in PERSONAL-API-KEY mode (B1):** the owner's SnapTrade key is a *Personal* key, so there is **no `registerUser`, no `userSecret`, and no connection portal**. The owner connects brokerages in the SnapTrade dashboard; Snowfolio uses `SnaptradeAuth.personalApiKey` and simply lists accounts + pulls activities. The multi-user commercial flow below is the future path if Snowfolio serves other users' brokerage connections.
+
 ## How it works (flow)
 1. Owner creates a **free SnapTrade developer account** → `clientId` + `consumerKey` (server-only secrets → Vercel env: `SNAPTRADE_CLIENT_ID`, `SNAPTRADE_CONSUMER_KEY`).
 2. Per Snowfolio user: **register** with SnapTrade → store the returned `userSecret` (server-side, service-role only).

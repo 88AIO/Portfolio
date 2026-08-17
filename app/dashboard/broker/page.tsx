@@ -41,13 +41,27 @@ export default async function BrokerPage() {
 
       <div className="mx-auto max-w-3xl px-6 py-8">
         <section className="rounded-2xl border border-slate-200 bg-white p-6">
-          <h2 className="font-semibold">Connect a brokerage</h2>
+          <h2 className="font-semibold">Brokerage sync</h2>
           <p className="mt-1 mb-4 text-sm text-slate-500">
-            Read-only sync via SnapTrade. You log in at your broker — your credentials never touch Snowfolio.
+            Read-only sync via SnapTrade — your brokerage credentials never touch Snowfolio.
           </p>
 
           {configured ? (
-            <BrokerConnect />
+            <div className="space-y-4">
+              <p className="text-sm text-slate-500">
+                Connect or manage brokerages in your{" "}
+                <a
+                  href="https://dashboard.snaptrade.com/home"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-indigo-600 hover:underline"
+                >
+                  SnapTrade dashboard ↗
+                </a>
+                , then pull them in here.
+              </p>
+              <BrokerConnect />
+            </div>
           ) : (
             <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
               Broker sync isn’t set up yet. Add your SnapTrade API keys

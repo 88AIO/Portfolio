@@ -1,14 +1,15 @@
 // SnapTrade provider — read-only brokerage sync via the official snaptrade-typescript-sdk.
-// Credentials (clientId/consumerKey) are server-only env vars; the user's brokerage login
-// happens inside SnapTrade's portal and never reaches Snowfolio. See docs/SPEC_broker-sync.md.
+// Uses a PERSONAL API key: the key represents one account, so there's no registerUser / userSecret
+// and no connection portal. The user connects brokerages in the SnapTrade dashboard; we read them.
+// See docs/SPEC_broker-sync.md.
 import { Snaptrade, SnaptradeAuth } from "snaptrade-typescript-sdk";
-import type { BrokerActivity, BrokerSyncProvider } from "../types";
+import type { BrokerAccount, BrokerActivity, BrokerSyncProvider } from "../types";
 
 function buildClient() {
   const clientId = process.env.SNAPTRADE_CLIENT_ID;
   const consumerKey = process.env.SNAPTRADE_CONSUMER_KEY;
   if (!clientId || !consumerKey) return null;
-  return new Snaptrade({ auth: SnaptradeAuth.commercialApiKey({ clientId, consumerKey }) });
+  return new Snaptrade({ auth: SnaptradeAuth.personalApiKey({ clientId, consumerKey }) });
 }
 
 let cached: ReturnType<typeof buildClient> | undefined;
@@ -31,29 +32,14 @@ export const snaptradeProvider: BrokerSyncProvider = {
     return getClient() != null;
   },
 
-  async registerUser(userId) {
-    const snap = getClient();
-    if (!snap) throw new Error("SnapTrade is not configured.");
-    const res = await snap.authentication.registerSnapTradeUser({ userId });
-    return { userId: res.data.userId ?? userId, userSecret: res.data.userSecret ?? "" };
+  dashboardUrl() {
+    return "https://dashboard.snaptrade.com/home";
   },
 
-  async getConnectPortalUrl(userId, userSecret, redirectUri) {
-    const snap = getClient();
-    if (!snap) return null;
-    const res = await snap.authentication.loginSnapTradeUser({
-      userId,
-      userSecret,
-      ...(redirectUri ? { customRedirect: redirectUri } : {}),
-    });
-    const data = res.data as unknown as { redirectURI?: string };
-    return data.redirectURI ?? null;
-  },
-
-  async listAccounts(userId, userSecret) {
+  async listAccounts(): Promise<BrokerAccount[]> {
     const snap = getClient();
     if (!snap) return [];
-    const res = await snap.accountInformation.listUserAccounts({ userId, userSecret });
+    const res = await snap.accountInformation.listUserAccounts();
     return (res.data ?? []).map((a) => ({
       id: a.id,
       brokerageName: a.institution_name ?? "Brokerage",
@@ -61,13 +47,11 @@ export const snaptradeProvider: BrokerSyncProvider = {
     }));
   },
 
-  async getActivities(userId, userSecret, accountId, since) {
+  async getActivities(accountId, since): Promise<BrokerActivity[]> {
     const snap = getClient();
     if (!snap) return [];
     const res = await snap.accountInformation.getAccountActivities({
       accountId,
-      userId,
-      userSecret,
       ...(since ? { startDate: since } : {}),
     });
     const rows = res.data?.data ?? [];

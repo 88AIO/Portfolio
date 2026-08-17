@@ -19,11 +19,12 @@ export type BrokerActivity = {
   tradeDate: string | null; // YYYY-MM-DD
 };
 
+// Personal-API-key model: the key IS the account, so there's no per-user registration or
+// connection portal — the user manages connections in the SnapTrade dashboard and we just read them.
 export interface BrokerSyncProvider {
   readonly name: string;
   isConfigured(): boolean;
-  registerUser(userId: string): Promise<{ userId: string; userSecret: string }>;
-  getConnectPortalUrl(userId: string, userSecret: string, redirectUri?: string): Promise<string | null>;
-  listAccounts(userId: string, userSecret: string): Promise<BrokerAccount[]>;
-  getActivities(userId: string, userSecret: string, accountId: string, since?: string): Promise<BrokerActivity[]>;
+  dashboardUrl(): string;
+  listAccounts(): Promise<BrokerAccount[]>;
+  getActivities(accountId: string, since?: string): Promise<BrokerActivity[]>;
 }

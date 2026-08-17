@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { searchInstrument } from "@/lib/marketdata";
@@ -83,39 +82,6 @@ async function ensureBrokerPortfolio(
   return portfolioId;
 }
 
-// Start (or reconnect) a SnapTrade connection — returns the portal URL for the client to open.
-export async function startBrokerConnection(): Promise<{ url: string | null; error?: string }> {
-  const provider = getBrokerProvider();
-  if (!provider.isConfigured()) return { url: null, error: "Broker sync isn't configured on the server yet." };
-
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { url: null, error: "Not signed in." };
-
-  const admin = createAdminClient();
-  let { data: conn } = await admin
-    .from("broker_connections").select("provider_user_id, provider_user_secret")
-    .eq("user_id", user.id).eq("provider", "snaptrade").maybeSingle();
-
-  if (!conn) {
-    const reg = await provider.registerUser(user.id);
-    const { data: created } = await admin.from("broker_connections").insert({
-      user_id: user.id, provider: "snaptrade",
-      provider_user_id: reg.userId, provider_user_secret: reg.userSecret,
-    }).select("provider_user_id, provider_user_secret").single();
-    conn = created;
-  }
-  if (!conn) return { url: null, error: "Couldn't register with SnapTrade." };
-
-  const h = await headers();
-  const host = h.get("host");
-  const proto = h.get("x-forwarded-proto") ?? "https";
-  const redirectUri = host ? `${proto}://${host}/dashboard/broker` : undefined;
-
-  const url = await provider.getConnectPortalUrl(conn.provider_user_id, conn.provider_user_secret, redirectUri);
-  return { url };
-}
-
 // Pull activity from every connected brokerage account into transactions (idempotent via activity id).
 export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   const provider = getBrokerProvider();
@@ -126,12 +92,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   if (!user) return { ok: false, message: "Not signed in." };
 
   const admin = createAdminClient();
-  const { data: conn } = await admin
-    .from("broker_connections").select("provider_user_id, provider_user_secret")
-    .eq("user_id", user.id).eq("provider", "snaptrade").maybeSingle();
-  if (!conn) return { ok: false, message: "No brokerage connected yet." };
-
-  const accounts = await provider.listAccounts(conn.provider_user_id, conn.provider_user_secret);
+  const accounts = await provider.listAccounts();
   const today = todayIso();
   const instBySymbol = new Map<string, { id: string; currency: string }>();
   let imported = 0;
@@ -141,7 +102,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     const portfolioId = await ensureBrokerPortfolio(supabase, admin, user.id, account);
     if (!portfolioId) continue;
 
-    const activities = await provider.getActivities(conn.provider_user_id, conn.provider_user_secret, account.id);
+    const activities = await provider.getActivities(account.id);
     const rows: {
       portfolio_id: string; instrument_id: string; type: string;
       quantity: number; price: number; fees: number; currency: string;
