@@ -126,13 +126,26 @@ export async function refreshPrices() {
     .from("positions").select("instrument_id, symbol, exchange, currency, sector");
   if (!pos) return;
 
-  let profiled = 0;
-  let enriched = 0;
-  // Limit concurrency so the data provider isn't rate-limited and the function finishes in time.
-  const batch = 5;
-  for (let i = 0; i < pos.length; i += batch) {
+  // Pass 1 — lightweight sector/country enrichment first (one call each, only when missing),
+  // so it commits even if the heavier price/dividend pass runs long.
+  const toEnrich = pos.filter((p) => !p.sector);
+  for (let i = 0; i < toEnrich.length; i += 8) {
     await Promise.all(
-      pos.slice(i, i + batch).map(async (p) => {
+      toEnrich.slice(i, i + 8).map(async (p) => {
+        const profile = await getProfile(p.symbol, p.exchange);
+        if (profile && (profile.sector || profile.country)) {
+          await admin.from("instruments")
+            .update({ sector: profile.sector, country_iso: profile.country })
+            .eq("id", p.instrument_id);
+        }
+      })
+    );
+  }
+
+  // Pass 2 — prices + dividends (heavier), batched to bound concurrency.
+  for (let i = 0; i < pos.length; i += 5) {
+    await Promise.all(
+      pos.slice(i, i + 5).map(async (p) => {
         const q = await getQuote(p.symbol, p.exchange);
         if (q.price != null) {
           await admin.from("price_cache").upsert({
@@ -141,21 +154,10 @@ export async function refreshPrices() {
           });
         }
         await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
-        // Enrich sector/country once (only when missing).
-        if (!p.sector) {
-          const profile = await getProfile(p.symbol, p.exchange);
-          if (profile) profiled++;
-          if (profile && (profile.sector || profile.country)) {
-            await admin.from("instruments")
-              .update({ sector: profile.sector, country_iso: profile.country })
-              .eq("id", p.instrument_id);
-            enriched++;
-          }
-        }
       })
     );
   }
-  console.log(`[refresh] ${pos.length} holdings · profiles ${profiled} · sector/country set ${enriched}`);
+  console.log(`[refresh] holdings ${pos.length} · enriched ${toEnrich.length}`);
   revalidatePath("/dashboard");
 }
 
