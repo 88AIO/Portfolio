@@ -82,6 +82,11 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
 
   const admin = createAdminClient();
   const accounts = await provider.listAccounts();
+  // Temporary diagnostic: which accounts came back (remove after debugging coverage).
+  console.log(
+    `[broker-sync] ${accounts.length} account(s):`,
+    accounts.map((a) => `${a.brokerageName}/${a.number}`).join(" | ")
+  );
   const today = todayIso();
   const now = new Date().toISOString();
   const instBySymbol = new Map<string, { id: string; currency: string }>();
@@ -92,6 +97,11 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     if (!portfolioId) continue;
 
     const positions = await provider.getPositions(account.id);
+    // Temporary diagnostic: what positions came back per account (symbols + units only).
+    console.log(
+      `[broker-sync] ${account.brokerageName}/${account.number}: ${positions.length} position(s):`,
+      positions.map((p) => `${p.symbol ?? "NULL"}=${p.units ?? "?"}`).join(", ")
+    );
 
     // Clear ALL prior SnapTrade-sourced rows in this account's portfolio (old activity-based
     // rows + the previous position snapshot) so nothing stale or double-counted lingers.
