@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBrokerProvider } from "@/lib/brokersync";
 import type { BrokerAccount } from "@/lib/brokersync";
+import { getProfile } from "@/lib/marketdata";
 import { transactionDedupeKey } from "@/lib/import/csv";
 
 type BrokerSyncResult = {
@@ -150,6 +151,30 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     await admin.from("broker_accounts")
       .update({ last_synced_at: now })
       .eq("user_id", user.id).eq("provider", "snaptrade").eq("provider_account_id", account.id);
+  }
+
+  // Enrich sector/country for the synced instruments (only those still missing it), in a small
+  // dedicated batched pass so the calls aren't rate-limited like they are inside the price refresh.
+  const instIds = [...instBySymbol.values()].map((i) => i.id);
+  if (instIds.length) {
+    const { data: need } = await admin
+      .from("instruments").select("id, symbol, exchange").in("id", instIds).is("sector", null);
+    const list = (need ?? []) as { id: string; symbol: string; exchange: string }[];
+    let enriched = 0;
+    for (let i = 0; i < list.length; i += 6) {
+      await Promise.all(
+        list.slice(i, i + 6).map(async (inst) => {
+          const profile = await getProfile(inst.symbol, inst.exchange);
+          if (profile && (profile.sector || profile.country)) {
+            await admin.from("instruments")
+              .update({ sector: profile.sector, country_iso: profile.country })
+              .eq("id", inst.id);
+            enriched++;
+          }
+        })
+      );
+    }
+    console.log(`[broker-sync] enriched sector/country for ${enriched}/${list.length}`);
   }
 
   revalidatePath("/dashboard");
