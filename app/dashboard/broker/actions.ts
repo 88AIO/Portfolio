@@ -93,12 +93,13 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
 
     const positions = await provider.getPositions(account.id);
 
-    // Replace this account's prior snapshot so removed/changed positions don't linger.
+    // Clear ALL prior SnapTrade-sourced rows in this account's portfolio (old activity-based
+    // rows + the previous position snapshot) so nothing stale or double-counted lingers.
     await supabase
       .from("transactions")
       .delete()
       .eq("portfolio_id", portfolioId)
-      .like("dedupe_key", `ref:snaptrade-pos:${account.id}:%`);
+      .like("dedupe_key", "ref:snaptrade%");
 
     const rows: {
       portfolio_id: string; instrument_id: string; type: string;
