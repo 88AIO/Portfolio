@@ -45,13 +45,18 @@ async function ensureBrokerPortfolio(
   userId: string,
   account: BrokerAccount
 ): Promise<string | null> {
+  const last4 = account.number ? account.number.slice(-4) : "";
+  const suffix = account.label || (last4 ? `••••${last4}` : "");
+  const name = suffix ? `${account.brokerageName} ${suffix}` : account.brokerageName || "Brokerage";
+
   const { data: existing } = await admin
     .from("broker_accounts").select("portfolio_id")
     .eq("user_id", userId).eq("provider", "snaptrade").eq("provider_account_id", account.id).maybeSingle();
-  if (existing?.portfolio_id) return existing.portfolio_id as string;
-
-  const last4 = account.number ? account.number.slice(-4) : "";
-  const name = last4 ? `${account.brokerageName} ••••${last4}` : account.brokerageName || "Brokerage";
+  if (existing?.portfolio_id) {
+    // Keep the portfolio name current (e.g. once we learn the account type).
+    await supabase.from("portfolios").update({ name }).eq("id", existing.portfolio_id as string);
+    return existing.portfolio_id as string;
+  }
 
   const { data: pf } = await supabase.from("portfolios").insert({
     user_id: userId, name,

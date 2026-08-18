@@ -4,6 +4,7 @@ export type BrokerAccount = {
   id: string;
   brokerageName: string;
   number: string;
+  label: string; // account name/type from the broker, e.g. "Individual", "Roth IRA" ("" if unknown)
 };
 
 export type BrokerPosition = {

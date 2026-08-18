@@ -47,10 +47,19 @@ export const snaptradeProvider: BrokerSyncProvider = {
     const snap = getClient();
     if (!snap) return [];
     const res = await snap.accountInformation.listUserAccounts();
-    return (res.data ?? []).map((a) => ({
+    const accounts = res.data ?? [];
+    // Temporary diagnostic: what account-type fields the broker returns (to pick the best label).
+    console.log(
+      "[broker-accounts]",
+      accounts
+        .map((a) => `${a.number}: name=${a.name ?? "-"} raw_type=${a.raw_type ?? "-"} cat=${a.account_category ?? "-"}`)
+        .join(" | ")
+    );
+    return accounts.map((a) => ({
       id: a.id,
       brokerageName: a.institution_name ?? "Brokerage",
       number: a.number ?? "",
+      label: (a.name || a.raw_type || a.account_category || "").toString().trim(),
     }));
   },
 
