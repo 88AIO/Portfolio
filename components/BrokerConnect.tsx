@@ -10,13 +10,18 @@ export default function BrokerConnect() {
   async function sync() {
     setBusy(true);
     setMsg(null);
-    const res = await syncBrokerAccounts();
-    setMsg(
-      res.ok
-        ? `Synced ${res.accounts ?? 0} account(s): ${res.holdings ?? 0} holding(s).`
-        : res.message ?? "Sync failed."
-    );
-    setBusy(false);
+    try {
+      const res = await syncBrokerAccounts();
+      setMsg(
+        res.ok
+          ? `Synced ${res.accounts ?? 0} account(s): ${res.holdings ?? 0} holding(s).`
+          : res.message ?? "Sync failed."
+      );
+    } catch {
+      setMsg("Sync failed — please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
