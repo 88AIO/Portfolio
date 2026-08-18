@@ -1,8 +1,7 @@
 // SnapTrade provider — read-only brokerage sync via the official snaptrade-typescript-sdk.
 // Uses a PERSONAL API key: the key represents one account, so there's no registerUser / userSecret
-// and no connection portal. The user connects brokerages in the SnapTrade dashboard; we read their
-// current positions (authoritative "what I hold") rather than reconstructing from trade history.
-// See docs/SPEC_broker-sync.md.
+// and no connection portal. Reads current positions (the /positions endpoint — the deprecated
+// /holdings endpoint returns 410 Gone for accounts created after May 2026). See docs/SPEC_broker-sync.md.
 import { Snaptrade, SnaptradeAuth } from "snaptrade-typescript-sdk";
 import type { BrokerAccount, BrokerPosition, BrokerSyncProvider } from "../types";
 
@@ -20,7 +19,7 @@ function getClient() {
   return cached;
 }
 
-// Ticker lives at position.symbol.symbol.(raw_symbol|symbol); handle flat/nested defensively.
+// Ticker lives on the instrument object as raw_symbol/symbol; handle flat/nested defensively.
 function extractTicker(s: unknown): string | null {
   if (!s || typeof s !== "object") return null;
   const o = s as { symbol?: unknown; raw_symbol?: string };
@@ -58,18 +57,28 @@ export const snaptradeProvider: BrokerSyncProvider = {
   async getPositions(accountId): Promise<BrokerPosition[]> {
     const snap = getClient();
     if (!snap) return [];
-    const res = await snap.accountInformation.getUserHoldings({ accountId });
-    const positions = res.data?.positions ?? [];
-    return positions.map((p): BrokerPosition => {
-      const cur = p.currency as unknown as { code?: string } | null;
-      return {
-        symbol: extractTicker(p.symbol),
-        units: typeof p.units === "number" ? p.units : null,
-        price: typeof p.price === "number" ? p.price : null,
-        avgCost: typeof p.average_purchase_price === "number" ? p.average_purchase_price : null,
-        openPnl: typeof p.open_pnl === "number" ? p.open_pnl : null,
-        currency: cur?.code ?? null,
-      };
-    });
+    try {
+      const res = await snap.accountInformation.getAllAccountPositions({ accountId });
+      const results = res.data?.results ?? [];
+      return results
+        .filter((p) => !p.cash_equivalent)
+        .map((p): BrokerPosition => {
+          const units = p.units != null ? Number(p.units) : NaN;
+          const priceNum = p.price != null ? Number(p.price) : NaN;
+          const costBasis = p.cost_basis != null ? Number(p.cost_basis) : NaN;
+          // cost_basis is the position total; divide by units for the per-share average cost.
+          const avgCost = isFinite(costBasis) && isFinite(units) && units > 0 ? costBasis / units : null;
+          return {
+            symbol: extractTicker(p.instrument),
+            units: isFinite(units) ? units : null,
+            price: isFinite(priceNum) ? priceNum : null,
+            avgCost,
+            currency: typeof p.currency === "string" ? p.currency : null,
+          };
+        });
+    } catch {
+      // One account failing (e.g. a disabled connection) shouldn't abort syncing the others.
+      return [];
+    }
   },
 };

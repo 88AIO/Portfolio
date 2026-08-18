@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { searchInstrument } from "@/lib/marketdata";
 import { getBrokerProvider } from "@/lib/brokersync";
 import type { BrokerAccount } from "@/lib/brokersync";
 import { transactionDedupeKey } from "@/lib/import/csv";
@@ -25,15 +24,16 @@ function todayIso(): string {
 async function resolveInstrument(
   admin: ReturnType<typeof createAdminClient>,
   symbol: string,
-  exchange: string
+  exchange: string,
+  currency: string
 ): Promise<{ id: string; currency: string } | null> {
   const { data: existing } = await admin
     .from("instruments").select("id, currency").eq("symbol", symbol).eq("exchange", exchange).maybeSingle();
   if (existing) return existing as { id: string; currency: string };
-  const meta = await searchInstrument(symbol, exchange);
+  // Create cheaply (name = symbol, no provider lookup) to keep sync fast; the dashboard's
+  // "Refresh prices" enriches names/dividends later.
   const { data: created } = await admin.from("instruments").insert({
-    symbol, exchange, name: meta?.name ?? symbol,
-    currency: meta?.currency ?? "USD", type: meta?.type ?? "stock",
+    symbol, exchange, name: symbol, currency: currency || "USD", type: "stock",
   }).select("id, currency").single();
   return (created as { id: string; currency: string } | null) ?? null;
 }
@@ -100,7 +100,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     // Temporary diagnostic: what positions came back per account (symbols + units only).
     console.log(
       `[broker-sync] ${account.brokerageName}/${account.number}: ${positions.length} position(s):`,
-      positions.map((p) => `${p.symbol ?? "NULL"}=${p.units ?? "?"}`).join(", ")
+      positions.map((p) => `${p.symbol ?? "NULL"}=${p.units ?? "?"}@${p.avgCost ?? "?"}`).join(", ")
     );
 
     // Clear ALL prior SnapTrade-sourced rows in this account's portfolio (old activity-based
@@ -123,21 +123,15 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
 
       let inst = instBySymbol.get(symbol);
       if (!inst) {
-        const resolved = await resolveInstrument(admin, symbol, "US");
+        const resolved = await resolveInstrument(admin, symbol, "US", pos.currency ?? "USD");
         if (!resolved) continue;
         inst = resolved;
         instBySymbol.set(symbol, inst);
       }
 
       const currency = pos.currency || inst.currency || "USD";
-      // Cost basis per share: prefer the broker's average purchase price; if it's missing,
-      // derive it from unrealized P/L (cost = price − openPnl/units); else fall back to price.
-      let costPerShare = pos.avgCost;
-      if ((costPerShare == null || costPerShare <= 0) && pos.price != null && pos.openPnl != null && pos.units) {
-        const derived = pos.price - pos.openPnl / pos.units;
-        if (derived > 0) costPerShare = derived;
-      }
-      const price = costPerShare ?? pos.price ?? 0;
+      // Synthetic opening buy at the per-share cost basis (falls back to price if cost is missing).
+      const price = pos.avgCost ?? pos.price ?? 0;
       rows.push({
         portfolio_id: portfolioId, instrument_id: inst.id, type: "buy",
         quantity: pos.units, price, fees: 0, currency, executed_at: today,
