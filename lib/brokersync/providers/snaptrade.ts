@@ -66,8 +66,8 @@ export const snaptradeProvider: BrokerSyncProvider = {
           const units = p.units != null ? Number(p.units) : NaN;
           const priceNum = p.price != null ? Number(p.price) : NaN;
           const costBasis = p.cost_basis != null ? Number(p.cost_basis) : NaN;
-          // cost_basis is the position total; divide by units for the per-share average cost.
-          const avgCost = isFinite(costBasis) && isFinite(units) && units > 0 ? costBasis / units : null;
+          // SnapTrade's cost_basis is already the per-share average cost (not the position total).
+          const avgCost = isFinite(costBasis) ? costBasis : null;
           return {
             symbol: extractTicker(p.instrument),
             units: isFinite(units) ? units : null,
