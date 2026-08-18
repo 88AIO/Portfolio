@@ -125,27 +125,37 @@ export async function refreshPrices() {
   const { data: pos } = await supabase
     .from("positions").select("instrument_id, symbol, exchange, currency, sector");
   if (!pos) return;
-  await Promise.all(
-    pos.map(async (p) => {
-      const q = await getQuote(p.symbol, p.exchange);
-      if (q.price != null) {
-        await admin.from("price_cache").upsert({
-          instrument_id: p.instrument_id, price: q.price,
-          change_pct: q.changePct, as_of: new Date().toISOString(),
-        });
-      }
-      await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
-      // Enrich sector/country once (only when missing) so refreshes stay light.
-      if (!p.sector) {
-        const profile = await getProfile(p.symbol, p.exchange);
-        if (profile && (profile.sector || profile.country)) {
-          await admin.from("instruments")
-            .update({ sector: profile.sector, country_iso: profile.country })
-            .eq("id", p.instrument_id);
+
+  let profiled = 0;
+  let enriched = 0;
+  // Limit concurrency so the data provider isn't rate-limited and the function finishes in time.
+  const batch = 5;
+  for (let i = 0; i < pos.length; i += batch) {
+    await Promise.all(
+      pos.slice(i, i + batch).map(async (p) => {
+        const q = await getQuote(p.symbol, p.exchange);
+        if (q.price != null) {
+          await admin.from("price_cache").upsert({
+            instrument_id: p.instrument_id, price: q.price,
+            change_pct: q.changePct, as_of: new Date().toISOString(),
+          });
         }
-      }
-    })
-  );
+        await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
+        // Enrich sector/country once (only when missing).
+        if (!p.sector) {
+          const profile = await getProfile(p.symbol, p.exchange);
+          if (profile) profiled++;
+          if (profile && (profile.sector || profile.country)) {
+            await admin.from("instruments")
+              .update({ sector: profile.sector, country_iso: profile.country })
+              .eq("id", p.instrument_id);
+            enriched++;
+          }
+        }
+      })
+    );
+  }
+  console.log(`[refresh] ${pos.length} holdings · profiles ${profiled} · sector/country set ${enriched}`);
   revalidatePath("/dashboard");
 }
 

@@ -6,6 +6,7 @@ import { timeAgo } from "@/lib/format";
 import BrokerConnect from "@/components/BrokerConnect";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 type BrokerAccountRow = {
   id: string;

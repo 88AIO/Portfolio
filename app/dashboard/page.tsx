@@ -9,6 +9,7 @@ import AllocationChart from "@/components/AllocationChart";
 import ImportTransactionsForm from "@/components/ImportTransactionsForm";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // "Refresh prices" enriches many holdings; give it room.
 
 type Position = {
   portfolio_id: string;
@@ -100,7 +101,7 @@ export default async function Dashboard() {
   for (const p of rows) {
     const v = (p.last_price ?? 0) * p.shares * fx(p.currency);
     if (v <= 0) continue;
-    const sectorKey = p.sector || (p.type === "etf" || p.type === "fund" ? "Funds & ETFs" : "Unclassified");
+    const sectorKey = p.sector || "Funds & ETFs";
     bySector.set(sectorKey, (bySector.get(sectorKey) ?? 0) + v);
     const c = (p.country_iso || "").toLowerCase();
     const regionKey = !c
