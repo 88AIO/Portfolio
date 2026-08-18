@@ -30,10 +30,10 @@ export default async function DividendsPage() {
   const supabase = await createClient();
   const portfolio = await ensurePortfolio();
 
+  // Consolidate across all of the user's portfolios (RLS scopes to the signed-in user).
   const { data: positions } = await supabase
     .from("positions")
     .select("*")
-    .eq("portfolio_id", portfolio.id)
     .order("symbol");
 
   const rows = (positions ?? []) as Position[];

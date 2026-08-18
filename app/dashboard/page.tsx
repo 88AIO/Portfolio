@@ -32,10 +32,11 @@ export default async function Dashboard() {
   const { data: { user } } = await supabase.auth.getUser();
   const portfolio = await ensurePortfolio();
 
+  // Consolidate across ALL of the user's portfolios (default + broker-synced).
+  // RLS on the positions view scopes this to the signed-in user automatically.
   const { data: positions } = await supabase
     .from("positions")
     .select("*")
-    .eq("portfolio_id", portfolio.id)
     .order("symbol");
 
   const rows = (positions ?? []) as Position[];
