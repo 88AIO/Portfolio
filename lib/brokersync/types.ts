@@ -10,7 +10,8 @@ export type BrokerPosition = {
   symbol: string | null;
   units: number | null;
   price: number | null; // last market price from the broker
-  avgCost: number | null; // average purchase price (cost basis)
+  avgCost: number | null; // average purchase price (cost basis) — may be null for some brokers
+  openPnl: number | null; // unrealized gain/loss — used to derive cost basis when avgCost is missing
   currency: string | null;
 };
 

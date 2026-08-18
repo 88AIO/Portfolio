@@ -67,6 +67,7 @@ export const snaptradeProvider: BrokerSyncProvider = {
         units: typeof p.units === "number" ? p.units : null,
         price: typeof p.price === "number" ? p.price : null,
         avgCost: typeof p.average_purchase_price === "number" ? p.average_purchase_price : null,
+        openPnl: typeof p.open_pnl === "number" ? p.open_pnl : null,
         currency: cur?.code ?? null,
       };
     });

@@ -120,8 +120,14 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
       }
 
       const currency = pos.currency || inst.currency || "USD";
-      // Synthetic opening buy at cost basis, so shares + avg cost + P/L match the broker.
-      const price = pos.avgCost ?? pos.price ?? 0;
+      // Cost basis per share: prefer the broker's average purchase price; if it's missing,
+      // derive it from unrealized P/L (cost = price − openPnl/units); else fall back to price.
+      let costPerShare = pos.avgCost;
+      if ((costPerShare == null || costPerShare <= 0) && pos.price != null && pos.openPnl != null && pos.units) {
+        const derived = pos.price - pos.openPnl / pos.units;
+        if (derived > 0) costPerShare = derived;
+      }
+      const price = costPerShare ?? pos.price ?? 0;
       rows.push({
         portfolio_id: portfolioId, instrument_id: inst.id, type: "buy",
         quantity: pos.units, price, fees: 0, currency, executed_at: today,
