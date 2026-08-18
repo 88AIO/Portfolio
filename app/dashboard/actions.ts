@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote, searchInstrument, getDividendInfo, getDividendHistory } from "@/lib/marketdata";
+import { getQuote, searchInstrument, getDividendInfo, getDividendHistory, getProfile } from "@/lib/marketdata";
 import { parseTransactionsCsv, transactionDedupeKey } from "@/lib/import/csv";
 import type { ImportResult } from "@/lib/import/types";
 
@@ -122,7 +122,8 @@ export async function addTransaction(formData: FormData) {
 export async function refreshPrices() {
   const supabase = await createClient();
   const admin = createAdminClient();
-  const { data: pos } = await supabase.from("positions").select("instrument_id, symbol, exchange, currency");
+  const { data: pos } = await supabase
+    .from("positions").select("instrument_id, symbol, exchange, currency, sector");
   if (!pos) return;
   await Promise.all(
     pos.map(async (p) => {
@@ -134,6 +135,15 @@ export async function refreshPrices() {
         });
       }
       await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
+      // Enrich sector/country once (only when missing) so refreshes stay light.
+      if (!p.sector) {
+        const profile = await getProfile(p.symbol, p.exchange);
+        if (profile && (profile.sector || profile.country)) {
+          await admin.from("instruments")
+            .update({ sector: profile.sector, country_iso: profile.country })
+            .eq("id", p.instrument_id);
+        }
+      }
     })
   );
   revalidatePath("/dashboard");

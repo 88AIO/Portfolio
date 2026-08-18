@@ -25,6 +25,7 @@ type Position = {
   div_yield_current: number | null;
   price_as_of: string | null;
   div_paid: number | null;
+  country_iso: string | null;
 };
 
 export default async function Dashboard() {
@@ -69,6 +70,31 @@ export default async function Dashboard() {
   const alloc = rows
     .map((p) => ({ name: p.symbol, value: (p.last_price ?? 0) * p.shares * fx(p.currency) }))
     .filter((a) => a.value > 0);
+
+  // Diversification: group market value (base currency) by sector and by region.
+  const bySector = new Map<string, number>();
+  const byRegion = new Map<string, number>();
+  for (const p of rows) {
+    const v = (p.last_price ?? 0) * p.shares * fx(p.currency);
+    if (v <= 0) continue;
+    const sectorKey =
+      p.sector || (p.type === "etf" || p.type === "fund" ? "Funds & ETFs" : "Unclassified");
+    bySector.set(sectorKey, (bySector.get(sectorKey) ?? 0) + v);
+    const c = (p.country_iso || "").toLowerCase();
+    const regionKey = !c
+      ? "Unclassified"
+      : c.includes("united states") || c === "us" || c === "usa"
+        ? "United States"
+        : "International";
+    byRegion.set(regionKey, (byRegion.get(regionKey) ?? 0) + v);
+  }
+  const toAlloc = (m: Map<string, number>) =>
+    [...m.entries()]
+      .map(([name, value]) => ({ name, value, pct: marketValue > 0 ? (value / marketValue) * 100 : 0 }))
+      .sort((a, b) => b.value - a.value);
+  const sectorAlloc = toAlloc(bySector);
+  const regionAlloc = toAlloc(byRegion);
+  const intlPct = marketValue > 0 ? ((byRegion.get("International") ?? 0) / marketValue) * 100 : 0;
 
   // "Prices as of…" — honest freshness = the OLDEST price timestamp among priced holdings,
   // so the label guarantees every price shown is at least that current.
@@ -229,8 +255,60 @@ export default async function Dashboard() {
             </div>
           </section>
         </div>
+
+        {rows.length > 0 && (
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5">
+              <h2 className="mb-4 font-semibold">By sector</h2>
+              <AllocBars items={sectorAlloc} base={base} />
+            </section>
+            <section className="rounded-2xl border border-slate-200 bg-white p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-semibold">By region</h2>
+                <span className="text-xs text-slate-400">International {intlPct.toFixed(1)}%</span>
+              </div>
+              <AllocBars items={regionAlloc} base={base} />
+            </section>
+          </div>
+        )}
       </div>
     </main>
+  );
+}
+
+function AllocBars({
+  items,
+  base,
+}: {
+  items: { name: string; value: number; pct: number }[];
+  base: string;
+}) {
+  const colors = [
+    "bg-indigo-500", "bg-sky-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500",
+    "bg-violet-500", "bg-teal-500", "bg-fuchsia-500", "bg-cyan-500", "bg-lime-500",
+  ];
+  if (items.length === 0) {
+    return <p className="py-6 text-center text-sm text-slate-400">No data yet.</p>;
+  }
+  return (
+    <ul className="space-y-2.5 text-sm">
+      {items.slice(0, 10).map((it, i) => (
+        <li key={it.name}>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="truncate font-medium text-slate-700">{it.name}</span>
+            <span className="shrink-0 text-slate-500">
+              {it.pct.toFixed(1)}% · {money(it.value, base)}
+            </span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+            <div
+              className={`h-full rounded-full ${colors[i % colors.length]}`}
+              style={{ width: `${Math.max(it.pct, 0.5)}%` }}
+            />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 

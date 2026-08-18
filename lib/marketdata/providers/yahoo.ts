@@ -6,6 +6,7 @@ import type {
   DividendHistoryPoint,
   DividendInfo,
   InstrumentMeta,
+  InstrumentProfile,
   MarketDataProvider,
   Quote,
 } from "../types";
@@ -179,6 +180,22 @@ async function getDividendHistory(
   }
 }
 
+async function getProfile(symbol: string, exchange: string): Promise<InstrumentProfile | null> {
+  try {
+    const res = (await yf.quoteSummary(toYahoo(symbol, exchange), {
+      modules: ["assetProfile"],
+    })) as unknown as { assetProfile?: { sector?: string; country?: string } };
+    const ap = res?.assetProfile;
+    if (!ap) return null;
+    return {
+      sector: typeof ap.sector === "string" ? ap.sector : null,
+      country: typeof ap.country === "string" ? ap.country : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const yahooProvider: MarketDataProvider = {
   name: "yahoo",
   capabilities: { options: true },
@@ -187,4 +204,5 @@ export const yahooProvider: MarketDataProvider = {
   searchInstrument,
   getDividendInfo,
   getDividendHistory,
+  getProfile,
 };

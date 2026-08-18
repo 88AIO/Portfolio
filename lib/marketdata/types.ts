@@ -26,6 +26,11 @@ export type DividendHistoryPoint = {
   amount: number; // per share, in the instrument's currency
 };
 
+export type InstrumentProfile = {
+  sector: string | null;
+  country: string | null; // e.g. "United States"
+};
+
 // --- Options (used by the NEXT+ options-selling layer; see docs/SPEC_options-selling.md) ---
 export type OptionQuote = {
   mark: number | null;
@@ -66,6 +71,7 @@ export interface MarketDataProvider {
   searchInstrument(symbol: string, exchange: string): Promise<InstrumentMeta | null>;
   getDividendInfo?(symbol: string, exchange: string): Promise<DividendInfo | null>;
   getDividendHistory?(symbol: string, exchange: string): Promise<DividendHistoryPoint[]>;
+  getProfile?(symbol: string, exchange: string): Promise<InstrumentProfile | null>;
 
   // Optional — only providers with capabilities.options implement these (wired up in the O1 phase).
   getOptionQuote?(
