@@ -1,9 +1,10 @@
 // SnapTrade provider — read-only brokerage sync via the official snaptrade-typescript-sdk.
 // Uses a PERSONAL API key: the key represents one account, so there's no registerUser / userSecret
-// and no connection portal. The user connects brokerages in the SnapTrade dashboard; we read them.
+// and no connection portal. The user connects brokerages in the SnapTrade dashboard; we read their
+// current positions (authoritative "what I hold") rather than reconstructing from trade history.
 // See docs/SPEC_broker-sync.md.
 import { Snaptrade, SnaptradeAuth } from "snaptrade-typescript-sdk";
-import type { BrokerAccount, BrokerActivity, BrokerSyncProvider } from "../types";
+import type { BrokerAccount, BrokerPosition, BrokerSyncProvider } from "../types";
 
 function buildClient() {
   const clientId = process.env.SNAPTRADE_CLIENT_ID;
@@ -19,10 +20,17 @@ function getClient() {
   return cached;
 }
 
-function isoDate(d: string | null | undefined): string | null {
-  if (!d) return null;
-  const s = String(d);
-  return s.length >= 10 ? s.slice(0, 10) : s;
+// Ticker lives at position.symbol.symbol.(raw_symbol|symbol); handle flat/nested defensively.
+function extractTicker(s: unknown): string | null {
+  if (!s || typeof s !== "object") return null;
+  const o = s as { symbol?: unknown; raw_symbol?: string };
+  if (typeof o.raw_symbol === "string") return o.raw_symbol;
+  if (typeof o.symbol === "string") return o.symbol;
+  if (o.symbol && typeof o.symbol === "object") {
+    const inner = o.symbol as { symbol?: string; raw_symbol?: string };
+    return inner.raw_symbol ?? inner.symbol ?? null;
+  }
+  return null;
 }
 
 export const snaptradeProvider: BrokerSyncProvider = {
@@ -47,26 +55,19 @@ export const snaptradeProvider: BrokerSyncProvider = {
     }));
   },
 
-  async getActivities(accountId, since): Promise<BrokerActivity[]> {
+  async getPositions(accountId): Promise<BrokerPosition[]> {
     const snap = getClient();
     if (!snap) return [];
-    const res = await snap.accountInformation.getAccountActivities({
-      accountId,
-      ...(since ? { startDate: since } : {}),
-    });
-    const rows = res.data?.data ?? [];
-    return rows.map((a): BrokerActivity => {
-      const sym = a.symbol as unknown as { symbol?: string; raw_symbol?: string } | null;
-      const cur = a.currency as unknown as { code?: string } | null;
+    const res = await snap.accountInformation.getUserHoldings({ accountId });
+    const positions = res.data?.positions ?? [];
+    return positions.map((p): BrokerPosition => {
+      const cur = p.currency as unknown as { code?: string } | null;
       return {
-        id: a.id ?? "",
-        type: (a.type ?? "").toUpperCase(),
-        symbol: sym?.symbol ?? sym?.raw_symbol ?? null,
-        units: typeof a.units === "number" ? a.units : null,
-        price: typeof a.price === "number" ? a.price : null,
-        amount: typeof a.amount === "number" ? a.amount : null,
+        symbol: extractTicker(p.symbol),
+        units: typeof p.units === "number" ? p.units : null,
+        price: typeof p.price === "number" ? p.price : null,
+        avgCost: typeof p.average_purchase_price === "number" ? p.average_purchase_price : null,
         currency: cur?.code ?? null,
-        tradeDate: isoDate(a.trade_date),
       };
     });
   },

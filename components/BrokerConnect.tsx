@@ -13,7 +13,7 @@ export default function BrokerConnect() {
     const res = await syncBrokerAccounts();
     setMsg(
       res.ok
-        ? `Synced ${res.accounts ?? 0} account(s): imported ${res.imported ?? 0}, skipped ${res.duplicates ?? 0} duplicate(s).`
+        ? `Synced ${res.accounts ?? 0} account(s): ${res.holdings ?? 0} holding(s).`
         : res.message ?? "Sync failed."
     );
     setBusy(false);

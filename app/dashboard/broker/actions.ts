@@ -12,8 +12,7 @@ type BrokerSyncResult = {
   ok: boolean;
   message?: string;
   accounts?: number;
-  imported?: number;
-  duplicates?: number;
+  holdings?: number;
 };
 
 function todayIso(): string {
@@ -21,20 +20,6 @@ function todayIso(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${m}-${day}`;
-}
-
-// SnapTrade activity types we import; cash movements (no instrument) are skipped in v1.
-function mapActivityType(t: string): "buy" | "sell" | "dividend" | null {
-  switch (t) {
-    case "BUY":
-      return "buy";
-    case "SELL":
-      return "sell";
-    case "DIVIDEND":
-      return "dividend";
-    default:
-      return null;
-  }
 }
 
 async function resolveInstrument(
@@ -53,7 +38,7 @@ async function resolveInstrument(
   return (created as { id: string; currency: string } | null) ?? null;
 }
 
-// Each brokerage account maps to its own Snowfolio portfolio.
+// Each brokerage account maps to its own Snowfolio portfolio (named with the masked account #).
 async function ensureBrokerPortfolio(
   supabase: Awaited<ReturnType<typeof createClient>>,
   admin: ReturnType<typeof createAdminClient>,
@@ -65,8 +50,11 @@ async function ensureBrokerPortfolio(
     .eq("user_id", userId).eq("provider", "snaptrade").eq("provider_account_id", account.id).maybeSingle();
   if (existing?.portfolio_id) return existing.portfolio_id as string;
 
+  const last4 = account.number ? account.number.slice(-4) : "";
+  const name = last4 ? `${account.brokerageName} ••••${last4}` : account.brokerageName || "Brokerage";
+
   const { data: pf } = await supabase.from("portfolios").insert({
-    user_id: userId, name: account.brokerageName || "Brokerage",
+    user_id: userId, name,
     broker: account.brokerageName, sync_provider: "snaptrade", is_auto_sync_enabled: true,
   }).select("id").single();
   const portfolioId = (pf as { id: string } | null)?.id ?? null;
@@ -82,7 +70,8 @@ async function ensureBrokerPortfolio(
   return portfolioId;
 }
 
-// Pull activity from every connected brokerage account into transactions (idempotent via activity id).
+// Pull the CURRENT positions from every connected brokerage account and mirror them into Snowfolio.
+// Each sync replaces this account's synced snapshot, so holdings always match the broker exactly.
 export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   const provider = getBrokerProvider();
   if (!provider.isConfigured()) return { ok: false, message: "Broker sync isn't configured." };
@@ -94,26 +83,33 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   const admin = createAdminClient();
   const accounts = await provider.listAccounts();
   const today = todayIso();
+  const now = new Date().toISOString();
   const instBySymbol = new Map<string, { id: string; currency: string }>();
-  let imported = 0;
-  let duplicates = 0;
+  let holdings = 0;
 
   for (const account of accounts) {
     const portfolioId = await ensureBrokerPortfolio(supabase, admin, user.id, account);
     if (!portfolioId) continue;
 
-    const activities = await provider.getActivities(account.id);
+    const positions = await provider.getPositions(account.id);
+
+    // Replace this account's prior snapshot so removed/changed positions don't linger.
+    await supabase
+      .from("transactions")
+      .delete()
+      .eq("portfolio_id", portfolioId)
+      .like("dedupe_key", `ref:snaptrade-pos:${account.id}:%`);
+
     const rows: {
       portfolio_id: string; instrument_id: string; type: string;
       quantity: number; price: number; fees: number; currency: string;
       executed_at: string; dedupe_key: string;
     }[] = [];
 
-    for (const act of activities) {
-      const type = mapActivityType(act.type);
-      if (!type || !act.symbol || !act.id) continue;
+    for (const pos of positions) {
+      if (!pos.symbol || !pos.units || pos.units <= 0) continue;
+      const symbol = pos.symbol.toUpperCase();
 
-      const symbol = act.symbol.toUpperCase();
       let inst = instBySymbol.get(symbol);
       if (!inst) {
         const resolved = await resolveInstrument(admin, symbol, "US");
@@ -122,43 +118,35 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
         instBySymbol.set(symbol, inst);
       }
 
-      let quantity = act.units ?? 0;
-      let price = act.price ?? 0;
-      // Dividends often arrive as a total amount rather than units × price.
-      if (type === "dividend" && (quantity <= 0 || price <= 0)) {
-        quantity = 1;
-        price = act.amount ?? 0;
-      }
-      if (quantity <= 0) continue;
-
-      const executed_at = act.tradeDate || today;
+      const currency = pos.currency || inst.currency || "USD";
+      // Synthetic opening buy at cost basis, so shares + avg cost + P/L match the broker.
+      const price = pos.avgCost ?? pos.price ?? 0;
       rows.push({
-        portfolio_id: portfolioId, instrument_id: inst.id, type,
-        quantity, price, fees: 0,
-        currency: act.currency || inst.currency || "USD",
-        executed_at,
+        portfolio_id: portfolioId, instrument_id: inst.id, type: "buy",
+        quantity: pos.units, price, fees: 0, currency, executed_at: today,
         dedupe_key: transactionDedupeKey({
-          ref: `snaptrade:${act.id}`, type, instrument_id: inst.id, executed_at, quantity, price, fees: 0,
+          ref: `snaptrade-pos:${account.id}:${symbol}`, type: "buy",
+          instrument_id: inst.id, executed_at: today, quantity: pos.units, price, fees: 0,
         }),
       });
+
+      // Cache the broker's last price so market value shows immediately (before any price refresh).
+      if (pos.price != null) {
+        await admin.from("price_cache").upsert({
+          instrument_id: inst.id, price: pos.price, currency, as_of: now,
+        });
+      }
     }
 
-    if (rows.length) {
-      const { data: inserted } = await supabase
-        .from("transactions")
-        .upsert(rows, { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true })
-        .select("id");
-      const n = inserted?.length ?? 0;
-      imported += n;
-      duplicates += rows.length - n;
-    }
+    if (rows.length) await supabase.from("transactions").insert(rows);
+    holdings += rows.length;
 
     await admin.from("broker_accounts")
-      .update({ last_synced_at: new Date().toISOString() })
+      .update({ last_synced_at: now })
       .eq("user_id", user.id).eq("provider", "snaptrade").eq("provider_account_id", account.id);
   }
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/broker");
-  return { ok: true, accounts: accounts.length, imported, duplicates };
+  return { ok: true, accounts: accounts.length, holdings };
 }
