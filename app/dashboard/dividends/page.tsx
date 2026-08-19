@@ -4,7 +4,9 @@ import { ensurePortfolio } from "../actions";
 import { getRates } from "@/lib/marketdata";
 import { money, pct } from "@/lib/format";
 import { dividendSafety, type DividendSafety } from "@/lib/dividends/safety";
+import { buildDividendCalendar } from "@/lib/dividends/calendar";
 import SafetyBadge from "@/components/SafetyBadge";
+import DividendCalendarChart from "@/components/DividendCalendarChart";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +71,19 @@ export default async function DividendsPage() {
       return { p, perShare, amount: perShare != null ? perShare * p.shares : null, date: p.next_dividend_date as string };
     })
     .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Forward 12-month dividend calendar — projected income rolled up by month (base currency).
+  const calendar = buildDividendCalendar(rows, fx, today);
+  const calendarChart = calendar.months.map((m) => ({
+    label: m.label,
+    short: m.label.slice(0, 3),
+    total: m.total,
+    count: m.events.length,
+  }));
+  const peakMonth = calendar.months.reduce(
+    (best, m) => (m.total > best.total ? m : best),
+    calendar.months[0]
+  );
 
   // Full synced dividend history for the held instruments — powers both the recent list
   // and the per-holding dividend-safety score (computed from cuts / track record / growth).
@@ -135,6 +150,63 @@ export default async function DividendsPage() {
           <Card label="Yield on value" value={pct(yieldOnValue)} />
           <Card label="Est. monthly avg" value={money(annualIncome / 12, base)} />
         </div>
+
+        {/* Forward calendar — next 12 months of projected income by month */}
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-semibold">Dividend calendar</h2>
+            <span className="text-xs text-slate-400">
+              Next 12 months · {money(calendar.total, base)} projected
+            </span>
+          </div>
+          <p className="mb-4 text-xs text-slate-400">
+            Estimated payouts by month, projected from each holding&apos;s next ex-date and payout
+            frequency.
+            {calendar.untimedCount > 0 &&
+              ` ${calendar.untimedCount} payer${calendar.untimedCount === 1 ? "" : "s"} with no known next date ${calendar.untimedCount === 1 ? "is" : "are"} not shown.`}
+          </p>
+
+          {calendar.total <= 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">
+              No projected payouts yet. Add dividend-paying holdings and hit “Refresh prices”.
+            </p>
+          ) : (
+            <>
+              <DividendCalendarChart data={calendarChart} currency={base} />
+              {peakMonth.total > 0 && (
+                <p className="mt-2 text-center text-xs text-slate-400">
+                  Biggest month: <span className="font-medium text-slate-500">{peakMonth.label}</span>{" "}
+                  ({money(peakMonth.total, base)})
+                </p>
+              )}
+
+              {/* Month-by-month breakdown, depth on demand */}
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {calendar.months
+                  .filter((m) => m.events.length > 0)
+                  .map((m) => (
+                    <div key={m.key} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                      <div className="mb-2 flex items-baseline justify-between">
+                        <span className="text-sm font-medium">{m.label}</span>
+                        <span className="text-sm font-semibold text-indigo-600">{money(m.total, base)}</span>
+                      </div>
+                      <ul className="space-y-1 text-xs text-slate-500">
+                        {m.events.map((e, i) => (
+                          <li key={`${e.instrument_id}-${i}`} className="flex justify-between gap-2">
+                            <span>
+                              <span className="font-medium text-slate-600">{e.symbol}</span>
+                              <span className="text-slate-400"> · {e.date.slice(5)}</span>
+                            </span>
+                            <span className="tabular-nums">{money(e.amount, e.currency)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+              </div>
+            </>
+          )}
+        </section>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
           {/* Upcoming */}
