@@ -41,8 +41,11 @@ const YAHOO_SUFFIX: Record<string, string> = {
 
 function toYahoo(symbol: string, exchange: string): string {
   const ex = (exchange || "US").toUpperCase();
+  const sym = symbol.toUpperCase();
+  // Crypto quotes on Yahoo are SYMBOL-USD (e.g. BTC-USD), not the equity suffix scheme.
+  if (ex === "CRYPTO" || ex === "CC") return `${sym.replace(/-USD$/, "")}-USD`;
   const suffix = ex in YAHOO_SUFFIX ? YAHOO_SUFFIX[ex] : "";
-  return `${symbol.toUpperCase()}${suffix}`;
+  return `${sym}${suffix}`;
 }
 
 function mapType(quoteType?: string): string {

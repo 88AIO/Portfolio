@@ -26,7 +26,8 @@ async function resolveInstrument(
   admin: ReturnType<typeof createAdminClient>,
   symbol: string,
   exchange: string,
-  currency: string
+  currency: string,
+  type: string = "stock"
 ): Promise<{ id: string; currency: string } | null> {
   const { data: existing } = await admin
     .from("instruments").select("id, currency").eq("symbol", symbol).eq("exchange", exchange).maybeSingle();
@@ -34,7 +35,7 @@ async function resolveInstrument(
   // Create cheaply (name = symbol, no provider lookup) to keep sync fast; the dashboard's
   // "Refresh prices" enriches names/dividends later.
   const { data: created } = await admin.from("instruments").insert({
-    symbol, exchange, name: symbol, currency: currency || "USD", type: "stock",
+    symbol, exchange, name: symbol, currency: currency || "USD", type,
   }).select("id, currency").single();
   return (created as { id: string; currency: string } | null) ?? null;
 }
@@ -71,6 +72,8 @@ async function ensureBrokerPortfolio(
     {
       user_id: userId, provider: "snaptrade", provider_account_id: account.id,
       brokerage_name: account.brokerageName, account_number: account.number, portfolio_id: portfolioId,
+      account_category: account.category || null, account_type: account.accountType || null,
+      currency: account.currency || null, is_cash: account.isCash,
     },
     { onConflict: "user_id,provider,provider_account_id" }
   );
@@ -98,6 +101,23 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     const portfolioId = await ensureBrokerPortfolio(supabase, admin, user.id, account);
     if (!portfolioId) continue;
 
+    // Record the account's balance/category snapshot (and raw shape) on every sync.
+    await admin.from("broker_accounts")
+      .update({
+        last_synced_at: now,
+        cash_balance: account.cashBalance,
+        account_category: account.category || null,
+        account_type: account.accountType || null,
+        currency: account.currency || null,
+        is_cash: account.isCash,
+        raw: account.raw ?? null,
+      })
+      .eq("user_id", user.id).eq("provider", "snaptrade").eq("provider_account_id", account.id);
+
+    // Cash / deposit accounts (e.g. Chase) carry no tradable positions — they're tracked on the
+    // Cash & ledger page from the balance above, not as stock holdings. Skip the positions pass.
+    if (account.isCash) continue;
+
     const positions = await provider.getPositions(account.id);
 
     // Clear ALL prior SnapTrade-sourced rows in this account's portfolio (old activity-based
@@ -108,6 +128,9 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
       .eq("portfolio_id", portfolioId)
       .like("dedupe_key", "ref:snaptrade%");
 
+    // Coinbase (and any crypto-typed position) is priced as SYMBOL-USD, not as a US equity.
+    const brokerIsCrypto = /coinbase/i.test(account.brokerageName);
+
     const rows: {
       portfolio_id: string; instrument_id: string; type: string;
       quantity: number; price: number; fees: number; currency: string;
@@ -116,14 +139,23 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
 
     for (const pos of positions) {
       if (!pos.symbol || !pos.units || pos.units <= 0) continue;
-      const symbol = pos.symbol.toUpperCase();
+      const isCrypto = pos.isCrypto || brokerIsCrypto;
+      let symbol = pos.symbol.toUpperCase();
+      let exchange = "US";
+      let instType = "stock";
+      if (isCrypto) {
+        symbol = symbol.replace(/[-/]?(USD|USDC|USDT)$/i, "") || symbol; // BTC-USD -> BTC
+        exchange = "CRYPTO";
+        instType = "crypto";
+      }
 
-      let inst = instBySymbol.get(symbol);
+      const key = `${symbol}|${exchange}`;
+      let inst = instBySymbol.get(key);
       if (!inst) {
-        const resolved = await resolveInstrument(admin, symbol, "US", pos.currency ?? "USD");
+        const resolved = await resolveInstrument(admin, symbol, exchange, pos.currency ?? "USD", instType);
         if (!resolved) continue;
         inst = resolved;
-        instBySymbol.set(symbol, inst);
+        instBySymbol.set(key, inst);
       }
 
       const currency = pos.currency || inst.currency || "USD";
@@ -148,10 +180,6 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
 
     if (rows.length) await supabase.from("transactions").insert(rows);
     holdings += rows.length;
-
-    await admin.from("broker_accounts")
-      .update({ last_synced_at: now })
-      .eq("user_id", user.id).eq("provider", "snaptrade").eq("provider_account_id", account.id);
   }
 
   // Enrich sector/country for the synced instruments (only those still missing it), in a small

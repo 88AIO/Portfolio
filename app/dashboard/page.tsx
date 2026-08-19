@@ -102,7 +102,7 @@ export default async function Dashboard({
   // Price/currency/sector are identical per instrument; only shares & avg cost differ by account.
   type Consolidated = {
     instrument_id: string; symbol: string; exchange: string; name: string | null;
-    sector: string | null; sector_weights: Position["sector_weights"]; currency: string;
+    type: string | null; sector: string | null; sector_weights: Position["sector_weights"]; currency: string;
     shares: number; costSum: number; last_price: number | null; day_change_pct: number | null;
     div_yield_current: number | null; price_as_of: string | null; accounts: Set<string>;
   };
@@ -112,7 +112,7 @@ export default async function Dashboard({
     if (!e) {
       e = {
         instrument_id: p.instrument_id, symbol: p.symbol, exchange: p.exchange, name: p.name,
-        sector: p.sector, sector_weights: p.sector_weights, currency: p.currency,
+        type: p.type, sector: p.sector, sector_weights: p.sector_weights, currency: p.currency,
         shares: 0, costSum: 0, last_price: p.last_price, day_change_pct: p.day_change_pct,
         div_yield_current: p.div_yield_current, price_as_of: p.price_as_of, accounts: new Set(),
       };
@@ -136,9 +136,11 @@ export default async function Dashboard({
   for (const p of rows) {
     const v = (p.last_price ?? 0) * p.shares * fx(p.currency);
     if (v <= 0) continue;
-    // ETFs/funds distribute their value across their look-through sector weights; individual
-    // stocks land in their single sector; anything still unclassified → "Funds & ETFs".
-    if (p.sector_weights && p.sector_weights.length) {
+    // Crypto is its own bucket; ETFs/funds distribute across their look-through sector weights;
+    // individual stocks land in their single sector; anything still unclassified → "Funds & ETFs".
+    if (p.type === "crypto") {
+      bySector.set("Crypto", (bySector.get("Crypto") ?? 0) + v);
+    } else if (p.sector_weights && p.sector_weights.length) {
       let assigned = 0;
       for (const w of p.sector_weights) {
         bySector.set(w.sector, (bySector.get(w.sector) ?? 0) + v * w.weight);
@@ -188,6 +190,9 @@ export default async function Dashboard({
             </Link>
             <Link href="/dashboard/options" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
               Options
+            </Link>
+            <Link href="/dashboard/cash" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
+              Cash
             </Link>
             <Link href="/dashboard/broker" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
               Brokers
@@ -292,7 +297,7 @@ export default async function Dashboard({
                                 <div className="font-medium text-slate-900">{p.symbol}</div>
                                 <div className="text-xs text-slate-400">
                                   {p.exchange}
-                                  {p.sector ? ` · ${p.sector}` : p.sector_weights ? " · ETF" : p.name ? ` · ${p.name}` : ""}
+                                  {p.type === "crypto" ? " · Crypto" : p.sector ? ` · ${p.sector}` : p.sector_weights ? " · ETF" : p.name ? ` · ${p.name}` : ""}
                                 </div>
                               </td>
                               <td className="py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>
@@ -332,7 +337,7 @@ export default async function Dashboard({
                             <div className="font-medium text-slate-900">{p.symbol}</div>
                             <div className="text-xs text-slate-400">
                               {p.exchange}
-                              {p.sector ? ` · ${p.sector}` : p.sector_weights ? " · ETF" : p.name ? ` · ${p.name}` : ""}
+                              {p.type === "crypto" ? " · Crypto" : p.sector ? ` · ${p.sector}` : p.sector_weights ? " · ETF" : p.name ? ` · ${p.name}` : ""}
                               {p.accounts.size > 1 ? ` · ${p.accounts.size} accounts` : ""}
                             </div>
                           </td>

@@ -5,6 +5,12 @@ export type BrokerAccount = {
   brokerageName: string;
   number: string;
   label: string; // account name/type from the broker, e.g. "Individual", "Roth IRA" ("" if unknown)
+  category: string; // normalized: INVESTMENT | DEPOSIT | LOC ("" if unknown)
+  accountType: string; // raw brokerage type string
+  cashBalance: number | null; // total/cash balance the broker reports (used for cash accounts)
+  currency: string; // balance currency
+  isCash: boolean; // true for bank/deposit accounts (route to the cash ledger, not holdings)
+  raw?: unknown; // temporary: the raw account object, for shape inspection
 };
 
 export type BrokerPosition = {
@@ -13,6 +19,8 @@ export type BrokerPosition = {
   price: number | null; // last market price from the broker
   avgCost: number | null; // average purchase price per share (may be null for some brokers)
   currency: string | null;
+  assetType: string | null; // e.g. "crypto", "cs" (common stock), "et" (ETF)
+  isCrypto: boolean;
 };
 
 // Personal-API-key model: the key IS the account, so there's no per-user registration or

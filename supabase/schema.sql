@@ -371,3 +371,37 @@ alter table public.broker_accounts    enable row level security;
 -- broker_accounts has no secrets: the owner may read (list) their connected accounts; writes via service role.
 drop policy if exists "own broker_accounts read" on public.broker_accounts;
 create policy "own broker_accounts read" on public.broker_accounts for select using (auth.uid() = user_id);
+
+-- Balance/category capture (so cash/deposit accounts like Chase route to the cash ledger).
+alter table public.broker_accounts add column if not exists account_category text;
+alter table public.broker_accounts add column if not exists account_type text;
+alter table public.broker_accounts add column if not exists cash_balance numeric;
+alter table public.broker_accounts add column if not exists currency text;
+alter table public.broker_accounts add column if not exists is_cash boolean not null default false;
+alter table public.broker_accounts add column if not exists raw jsonb;
+
+-- ============================================================
+-- 9. CASH LEDGER — manual cash movements (deposits/withdrawals/interest/fees).
+-- Synced balances live on broker_accounts.cash_balance; this is the manual overlay.
+-- ============================================================
+create table if not exists public.cash_ledger (
+  id uuid primary key default gen_random_uuid(),
+  portfolio_id uuid not null references public.portfolios(id) on delete cascade,
+  entry_date date not null default current_date,
+  description text,
+  amount numeric not null default 0,       -- signed: + in, - out
+  currency text not null default 'USD',
+  source text not null default 'manual',   -- manual | synced
+  dedupe_key text,
+  created_at timestamptz not null default now()
+);
+create index if not exists cash_ledger_portfolio_idx on public.cash_ledger(portfolio_id);
+create unique index if not exists cash_ledger_dedupe_uidx on public.cash_ledger(portfolio_id, dedupe_key);
+
+alter table public.cash_ledger enable row level security;
+drop policy if exists "own cash_ledger" on public.cash_ledger;
+create policy "own cash_ledger" on public.cash_ledger for all using (
+  exists (select 1 from public.portfolios p where p.id = cash_ledger.portfolio_id and p.user_id = auth.uid())
+) with check (
+  exists (select 1 from public.portfolios p where p.id = cash_ledger.portfolio_id and p.user_id = auth.uid())
+);
