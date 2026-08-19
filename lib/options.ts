@@ -157,6 +157,50 @@ export function computeOptionTotals(
   };
 }
 
+// --- O2: alerts + wheel/income-by-underlying ---
+
+export type AttentionItem = {
+  kind: "assignment" | "expiry" | "ex_dividend";
+  symbol: string;
+  detail: string;
+  date: string; // YYYY-MM-DD the event happens
+  severity: "warn" | "info";
+};
+
+// A single-name "wheel" story: all option premium + dividends earned on one underlying,
+// plus its current state (shares held, open short puts/calls). Amounts already in base ccy.
+export type UnderlyingIncome = {
+  symbol: string;
+  premium: number;
+  dividends: number;
+  total: number;
+  shares: number;
+  openPuts: number; // open short put contracts
+  openCalls: number; // open short call contracts
+};
+
+// --- O3: cash-secured put finder ---
+export type FinderRow = {
+  symbol: string;
+  price: number;
+  strike: number;
+  expiration: string;
+  dte: number;
+  premium: number; // per share (option mark)
+  annualizedRoC: number; // percent
+  iv: number | null; // current implied volatility, percent (NOT IV rank yet)
+  divYield: number | null; // trailing dividend yield, percent
+  held: boolean; // already in the user's holdings
+};
+
+export type FinderResult = {
+  rows: FinderRow[];
+  scanned: number;
+  truncated: boolean;
+  targetDte: number;
+  otmPct: number;
+};
+
 export function statusLabel(s: OptionStatus): string {
   switch (s) {
     case "may_be_assigned":

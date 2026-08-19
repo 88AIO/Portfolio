@@ -2,13 +2,15 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
 import { getRates } from "@/lib/marketdata";
-import { money, pct } from "@/lib/format";
+import { money, pct, num } from "@/lib/format";
 import {
   computeOption,
   computeOptionTotals,
   statusLabel,
   type OptionPositionRow,
   type ComputedOption,
+  type AttentionItem,
+  type UnderlyingIncome,
 } from "@/lib/options";
 import AddOptionForm from "@/components/AddOptionForm";
 
@@ -16,9 +18,15 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 type PositionLite = {
+  symbol: string;
   currency: string;
+  shares: number;
   div_paid: number | null;
   option_premium: number | null;
+  next_dividend_date: string | null;
+  next_dividend_per_share: number | null;
+  annual_div_per_share: number | null;
+  div_frequency: number | null;
 };
 
 export default async function OptionsPage() {
@@ -28,7 +36,9 @@ export default async function OptionsPage() {
 
   const [{ data: optRows }, { data: posRows }, { data: pfList }] = await Promise.all([
     supabase.from("option_positions").select("*").order("expiration"),
-    supabase.from("positions").select("currency, div_paid, option_premium"),
+    supabase.from("positions").select(
+      "symbol, currency, shares, div_paid, option_premium, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
+    ),
     supabase.from("portfolios").select("id, name").order("created_at"),
   ]);
 
@@ -57,6 +67,65 @@ export default async function OptionsPage() {
   const open = computed
     .filter((o) => o.isOpen)
     .sort((a, b) => a.dte - b.dte);
+
+  // O2 — needs attention: likely assignments, near expiries, upcoming ex-dividends.
+  const today = new Date().toISOString().slice(0, 10);
+  const in14 = new Date(new Date(`${today}T00:00:00Z`).getTime() + 14 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const attention: AttentionItem[] = [];
+  for (const o of open) {
+    if (o.status === "may_be_assigned") {
+      attention.push({
+        kind: "assignment", symbol: o.symbol, severity: "warn", date: o.expiration,
+        detail: `${o.symbol} ${money(o.strike, o.currency)} ${o.option_type} is in-the-money with ${o.dte}d left — may be assigned`,
+      });
+    } else if (o.dte >= 0 && o.dte <= 7) {
+      attention.push({
+        kind: "expiry", symbol: o.symbol, severity: "info", date: o.expiration,
+        detail: `${o.symbol} ${money(o.strike, o.currency)} ${o.option_type} expires in ${o.dte}d`,
+      });
+    }
+  }
+  for (const p of positions) {
+    if (p.shares > 0 && p.next_dividend_date && p.next_dividend_date >= today && p.next_dividend_date <= in14) {
+      const est =
+        p.next_dividend_per_share ??
+        (p.annual_div_per_share && p.div_frequency ? p.annual_div_per_share / p.div_frequency : null);
+      attention.push({
+        kind: "ex_dividend", symbol: p.symbol, severity: "info", date: p.next_dividend_date,
+        detail: `${p.symbol} goes ex-dividend${est != null ? ` (~${money(est * p.shares, p.currency)})` : ""}`,
+      });
+    }
+  }
+  attention.sort((a, b) => a.date.localeCompare(b.date));
+
+  // O2 — income by underlying (single-name wheel story): option premium + dividends per ticker,
+  // limited to names with option activity so it stays an options view, not a dividend dump.
+  const incomeMap = new Map<string, UnderlyingIncome>();
+  const initInc = (symbol: string): UnderlyingIncome => {
+    let e = incomeMap.get(symbol);
+    if (!e) {
+      e = { symbol, premium: 0, dividends: 0, total: 0, shares: 0, openPuts: 0, openCalls: 0 };
+      incomeMap.set(symbol, e);
+    }
+    return e;
+  };
+  for (const o of computed) {
+    const e = initInc(o.symbol);
+    e.premium += o.premiumCollected * fx(o.currency);
+    if (o.isOpen && o.option_type === "put") e.openPuts += o.contracts;
+    if (o.isOpen && o.option_type === "call") e.openCalls += o.contracts;
+  }
+  for (const p of positions) {
+    if (!p.symbol || !incomeMap.has(p.symbol)) continue; // only annotate option-active names
+    const e = initInc(p.symbol);
+    e.dividends += (p.div_paid ?? 0) * fx(p.currency);
+    e.shares += p.shares;
+  }
+  const incomeByUnderlying = [...incomeMap.values()]
+    .map((e) => ({ ...e, total: e.premium + e.dividends }))
+    .sort((a, b) => b.total - a.total);
   const closed = computed
     .filter((o) => !o.isOpen)
     .sort((a, b) => b.last_action_at.localeCompare(a.last_action_at));
@@ -73,6 +142,7 @@ export default async function OptionsPage() {
             <Link href="/dashboard" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Overview</Link>
             <Link href="/dashboard/dividends" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Dividends</Link>
             <span className="rounded-lg bg-white/10 px-3 py-1.5 font-medium">Options</span>
+            <Link href="/dashboard/options/finder" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Put finder</Link>
             <Link href="/dashboard/broker" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Brokers</Link>
           </nav>
         </div>
@@ -104,6 +174,24 @@ export default async function OptionsPage() {
           Informational only — Snowfolio tracks what you’ve done; it never recommends a trade.
           Premium lowers your effective cost basis by {money(costBasisReduction, base)} on shares you currently hold.
         </p>
+
+        {attention.length > 0 && (
+          <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/40 p-5">
+            <h2 className="mb-3 text-base font-semibold text-slate-800">Needs attention</h2>
+            <ul className="space-y-2 text-sm">
+              {attention.map((a, i) => (
+                <li key={i} className="flex items-center gap-2">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${a.severity === "warn" ? "bg-amber-500" : "bg-sky-400"}`} />
+                  <span className="text-slate-700">{a.detail}</span>
+                  <span className="ml-auto shrink-0 text-xs text-slate-400">{a.date}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-xs text-slate-400">
+              Email &amp; push alerts are on the roadmap; for now these surface whenever you open this page.
+            </p>
+          </section>
+        )}
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           {/* Open positions */}
@@ -197,6 +285,43 @@ export default async function OptionsPage() {
             </div>
           </section>
         </div>
+
+        {incomeByUnderlying.length > 0 && (
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-semibold">Income by underlying</h2>
+            <p className="mb-4 text-xs text-slate-400">
+              Each wheel’s full income on one name — option premium plus dividends earned while you held it.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <tr>
+                    <th className="pb-2">Underlying</th>
+                    <th className="pb-2 text-right">Premium</th>
+                    <th className="pb-2 text-right">Dividends</th>
+                    <th className="pb-2 text-right">Total income</th>
+                    <th className="pb-2 text-right">State</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {incomeByUnderlying.map((e) => (
+                    <tr key={e.symbol} className="border-t border-slate-100">
+                      <td className="py-2.5 font-medium text-slate-900">{e.symbol}</td>
+                      <td className="py-2.5 text-right tabular-nums text-emerald-600">{money(e.premium, base)}</td>
+                      <td className="py-2.5 text-right tabular-nums text-slate-500">{money(e.dividends, base)}</td>
+                      <td className="py-2.5 text-right tabular-nums font-semibold">{money(e.total, base)}</td>
+                      <td className="py-2.5 text-right text-xs text-slate-500">
+                        {e.shares > 0 ? `${num(e.shares, 0)} sh` : "no shares"}
+                        {e.openPuts > 0 ? ` · ${e.openPuts}P` : ""}
+                        {e.openCalls > 0 ? ` · ${e.openCalls}C` : ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
       </div>
     </main>
   );
