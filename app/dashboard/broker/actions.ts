@@ -174,7 +174,6 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
         })
       );
     }
-    console.log(`[broker-sync] enriched sector/country for ${enriched}/${list.length}`);
   }
 
   revalidatePath("/dashboard");

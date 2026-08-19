@@ -157,7 +157,6 @@ export async function refreshPrices() {
       })
     );
   }
-  console.log(`[refresh] holdings ${pos.length} · enriched ${toEnrich.length}`);
   revalidatePath("/dashboard");
 }
 

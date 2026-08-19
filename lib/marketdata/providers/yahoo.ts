@@ -12,7 +12,7 @@ import type {
 } from "../types";
 
 // v4 is class-based: instantiate once (server-only; construction is side-effect-free) and reuse.
-const yf = new YahooFinance();
+const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 
 // The subset of yahoo-finance2's quote response we read. Cast defensively (external, dynamic).
 type YahooQuoteLike = {
