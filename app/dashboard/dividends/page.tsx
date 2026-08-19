@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
 import { getRates } from "@/lib/marketdata";
 import { money, pct } from "@/lib/format";
+import { dividendSafety, type DividendSafety } from "@/lib/dividends/safety";
+import SafetyBadge from "@/components/SafetyBadge";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +16,7 @@ type Position = {
   shares: number;
   last_price: number | null;
   annual_div_per_share: number | null;
+  div_yield_current: number | null;
   div_frequency: number | null;
   next_dividend_date: string | null;
   next_dividend_per_share: number | null;
@@ -67,18 +70,26 @@ export default async function DividendsPage() {
     })
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  // Recent payouts, from the synced dividend history for the instruments held.
+  // Full synced dividend history for the held instruments — powers both the recent list
+  // and the per-holding dividend-safety score (computed from cuts / track record / growth).
   const ids = rows.map((r) => r.instrument_id);
   const byId = new Map(rows.map((r) => [r.instrument_id, r]));
   let recent: { date: string; symbol: string; perShare: number; total: number; currency: string }[] = [];
+  const historyById = new Map<string, { exDate: string; amount: number }[]>();
   if (ids.length) {
     const { data: divs } = await supabase
       .from("dividends")
       .select("instrument_id, ex_date, amount, currency")
       .in("instrument_id", ids)
-      .order("ex_date", { ascending: false })
-      .limit(15);
-    recent = (divs ?? []).map((d: DivRow) => {
+      .order("ex_date", { ascending: false });
+    const all = (divs ?? []) as DivRow[];
+    for (const d of all) {
+      if (!d.ex_date || d.amount == null) continue;
+      const arr = historyById.get(d.instrument_id) ?? [];
+      arr.push({ exDate: d.ex_date, amount: d.amount });
+      historyById.set(d.instrument_id, arr);
+    }
+    recent = all.slice(0, 15).map((d: DivRow) => {
       const p = byId.get(d.instrument_id);
       const perShare = d.amount ?? 0;
       return {
@@ -90,6 +101,18 @@ export default async function DividendsPage() {
       };
     });
   }
+
+  // Dividend safety per dividend-paying holding, sorted by score (unrated last).
+  const safetyRows = rows
+    .filter((p) => (p.annual_div_per_share ?? 0) > 0)
+    .map((p) => ({
+      p,
+      safety: dividendSafety(historyById.get(p.instrument_id) ?? [], p.div_yield_current),
+    }))
+    .sort((a, b) => (b.safety.score ?? -1) - (a.safety.score ?? -1));
+  const safetyById = new Map<string, DividendSafety>(
+    safetyRows.map(({ p, safety }) => [p.instrument_id, safety])
+  );
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-800">
@@ -145,21 +168,61 @@ export default async function DividendsPage() {
               <p className="py-8 text-center text-sm text-slate-400">No dividend-paying holdings yet.</p>
             ) : (
               <ul className="divide-y divide-slate-100 text-sm">
-                {forecast.map(({ p, annual }) => (
-                  <li key={p.instrument_id} className="flex items-center justify-between py-2.5">
-                    <div>
-                      <div className="font-medium">{p.symbol}</div>
-                      <div className="text-xs text-slate-400">
-                        {money(p.annual_div_per_share ?? 0, p.currency)}/sh
+                {forecast.map(({ p, annual }) => {
+                  const safety = safetyById.get(p.instrument_id);
+                  return (
+                    <li key={p.instrument_id} className="flex items-center justify-between py-2.5">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{p.symbol}</span>
+                          {safety && <SafetyBadge safety={safety} />}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          {money(p.annual_div_per_share ?? 0, p.currency)}/sh
+                        </div>
                       </div>
-                    </div>
-                    <div className="text-right font-medium">{money(annual, p.currency)}</div>
-                  </li>
-                ))}
+                      <div className="text-right font-medium">{money(annual, p.currency)}</div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
         </div>
+
+        {/* Dividend safety */}
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <h2 className="font-semibold">Dividend safety</h2>
+            <span className="text-xs text-slate-400">0–100 · higher is steadier</span>
+          </div>
+          <p className="mb-4 max-w-2xl text-xs text-slate-400">
+            A calm read on how dependable each payout looks, from its own history — past cuts,
+            years paid, growth, and yield sanity. It informs, it doesn&apos;t advise. Holdings with
+            little history stay unrated rather than guess.
+          </p>
+          {safetyRows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">
+              No dividend-paying holdings yet.
+            </p>
+          ) : (
+            <ul className="divide-y divide-slate-100 text-sm">
+              {safetyRows.map(({ p, safety }) => (
+                <li key={p.instrument_id} className="flex flex-wrap items-center justify-between gap-y-1 py-3">
+                  <div className="flex min-w-[9rem] items-center gap-2">
+                    <span className="font-medium">{p.symbol}</span>
+                    <SafetyBadge safety={safety} />
+                  </div>
+                  <div className="flex-1 text-right text-xs text-slate-500 sm:text-left sm:pl-6">
+                    {safety.score != null
+                      ? safety.factors.map((f) => f.detail).join(" · ")
+                      : safety.summary}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         {/* Recent history */}
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
