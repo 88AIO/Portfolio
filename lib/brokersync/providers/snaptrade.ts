@@ -48,18 +48,13 @@ export const snaptradeProvider: BrokerSyncProvider = {
     if (!snap) return [];
     const res = await snap.accountInformation.listUserAccounts();
     const accounts = res.data ?? [];
-    // Temporary diagnostic: what account-type fields the broker returns (to pick the best label).
-    console.log(
-      "[broker-accounts]",
-      accounts
-        .map((a) => `${a.number}: name=${a.name ?? "-"} raw_type=${a.raw_type ?? "-"} cat=${a.account_category ?? "-"}`)
-        .join(" | ")
-    );
     return accounts.map((a) => ({
       id: a.id,
       brokerageName: a.institution_name ?? "Brokerage",
       number: a.number ?? "",
-      label: (a.name || a.raw_type || a.account_category || "").toString().trim(),
+      // Prefer the brokerage's own account type ("INDIVIDUAL", "ROTH", …); fall back to the
+      // display name. Empty for brokers (like E*Trade via SnapTrade) that don't expose either.
+      label: (a.raw_type || a.name || "").toString().trim(),
     }));
   },
 

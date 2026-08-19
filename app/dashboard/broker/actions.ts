@@ -54,8 +54,9 @@ async function ensureBrokerPortfolio(
     .from("broker_accounts").select("portfolio_id")
     .eq("user_id", userId).eq("provider", "snaptrade").eq("provider_account_id", account.id).maybeSingle();
   if (existing?.portfolio_id) {
-    // Keep the portfolio name current (e.g. once we learn the account type).
-    await supabase.from("portfolios").update({ name }).eq("id", existing.portfolio_id as string);
+    // Name is set once, at creation, then left alone — so a manual "Individual"/"Roth"
+    // label (or any name the user picks) survives every future sync instead of being
+    // overwritten back to a bare brokerage name.
     return existing.portfolio_id as string;
   }
 
