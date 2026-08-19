@@ -8,6 +8,9 @@ import type {
   InstrumentMeta,
   InstrumentProfile,
   MarketDataProvider,
+  OptionChain,
+  OptionContract,
+  OptionQuote,
   Quote,
 } from "../types";
 
@@ -196,6 +199,88 @@ async function getProfile(symbol: string, exchange: string): Promise<InstrumentP
   }
 }
 
+// --- Options (free US chains via yahoo-finance2's `options` endpoint) ---
+type YahooOptionLeg = {
+  strike?: number;
+  lastPrice?: number;
+  bid?: number;
+  ask?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+};
+type YahooOptionsResult = {
+  expirationDates?: Date[];
+  options?: Array<{ expirationDate?: Date; calls?: YahooOptionLeg[]; puts?: YahooOptionLeg[] }>;
+};
+
+function numOrNull(v: unknown): number | null {
+  return typeof v === "number" && !isNaN(v) ? v : null;
+}
+// Mark = mid of bid/ask when both are live, else the last traded price.
+function markOf(o: YahooOptionLeg): number | null {
+  const bid = numOrNull(o.bid);
+  const ask = numOrNull(o.ask);
+  if (bid != null && ask != null && (bid > 0 || ask > 0)) return (bid + ask) / 2;
+  return numOrNull(o.lastPrice);
+}
+
+async function getOptionChain(
+  underlying: string,
+  exchange: string,
+  expiration?: string
+): Promise<OptionChain> {
+  const ticker = toYahoo(underlying, exchange);
+  const empty: OptionChain = {
+    underlying: underlying.toUpperCase(),
+    expiration: null,
+    expirations: [],
+    contracts: [],
+  };
+  try {
+    const query = expiration ? { date: new Date(`${expiration}T00:00:00Z`) } : undefined;
+    const res = (await yf.options(ticker, query)) as unknown as YahooOptionsResult;
+    const expirations = (res?.expirationDates ?? [])
+      .map((d) => isoDate(d))
+      .filter((x): x is string => !!x);
+    const board = res?.options?.[0];
+    const expIso = isoDate(board?.expirationDate ?? null) ?? expiration ?? null;
+    const map = (type: "put" | "call", arr?: YahooOptionLeg[]): OptionContract[] =>
+      (arr ?? [])
+        .filter((o) => typeof o.strike === "number")
+        .map((o) => ({
+          type,
+          strike: o.strike as number,
+          expiration: expIso ?? "",
+          mark: markOf(o),
+          bid: numOrNull(o.bid),
+          ask: numOrNull(o.ask),
+          iv: numOrNull(o.impliedVolatility),
+          openInterest: numOrNull(o.openInterest),
+        }));
+    return {
+      underlying: underlying.toUpperCase(),
+      expiration: expIso,
+      expirations,
+      contracts: [...map("call", board?.calls), ...map("put", board?.puts)],
+    };
+  } catch {
+    return empty;
+  }
+}
+
+async function getOptionQuote(
+  underlying: string,
+  exchange: string,
+  type: "put" | "call",
+  strike: number,
+  expiration: string
+): Promise<OptionQuote> {
+  const chain = await getOptionChain(underlying, exchange, expiration);
+  const hit = chain.contracts.find((c) => c.type === type && Math.abs(c.strike - strike) < 1e-6);
+  if (!hit) return { mark: null, bid: null, ask: null, iv: null, openInterest: null };
+  return { mark: hit.mark, bid: hit.bid, ask: hit.ask, iv: hit.iv, openInterest: hit.openInterest };
+}
+
 export const yahooProvider: MarketDataProvider = {
   name: "yahoo",
   capabilities: { options: true },
@@ -205,4 +290,6 @@ export const yahooProvider: MarketDataProvider = {
   getDividendInfo,
   getDividendHistory,
   getProfile,
+  getOptionChain,
+  getOptionQuote,
 };

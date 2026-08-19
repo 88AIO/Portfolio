@@ -161,7 +161,6 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     const { data: need } = await admin
       .from("instruments").select("id, symbol, exchange").in("id", instIds).is("sector", null);
     const list = (need ?? []) as { id: string; symbol: string; exchange: string }[];
-    let enriched = 0;
     for (let i = 0; i < list.length; i += 6) {
       await Promise.all(
         list.slice(i, i + 6).map(async (inst) => {
@@ -170,7 +169,6 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
             await admin.from("instruments")
               .update({ sector: profile.sector, country_iso: profile.country })
               .eq("id", inst.id);
-            enriched++;
           }
         })
       );

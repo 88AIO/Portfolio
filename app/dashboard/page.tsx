@@ -139,6 +139,9 @@ export default async function Dashboard() {
             <Link href="/dashboard/dividends" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
               Dividends
             </Link>
+            <Link href="/dashboard/options" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
+              Options
+            </Link>
             <Link href="/dashboard/broker" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
               Brokers
             </Link>

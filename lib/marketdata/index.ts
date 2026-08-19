@@ -57,6 +57,30 @@ export function getProfile(symbol: string, exchange: string) {
   return provider.getProfile ? provider.getProfile(symbol, exchange) : Promise.resolve(null);
 }
 
+export function providerSupportsOptions(): boolean {
+  return getProvider().capabilities.options === true;
+}
+
+export function getOptionChain(underlying: string, exchange: string, expiration?: string) {
+  const provider = getProvider();
+  return provider.getOptionChain
+    ? provider.getOptionChain(underlying, exchange, expiration)
+    : Promise.resolve(null);
+}
+
+export function getOptionQuote(
+  underlying: string,
+  exchange: string,
+  type: "put" | "call",
+  strike: number,
+  expiration: string
+) {
+  const provider = getProvider();
+  return provider.getOptionQuote
+    ? provider.getOptionQuote(underlying, exchange, type, strike, expiration)
+    : Promise.resolve(null);
+}
+
 // Get conversion rates for a set of currencies into the base currency (rates fall back to 1).
 export async function getRates(
   currencies: string[],

@@ -149,14 +149,48 @@ create table if not exists public.dividends (
   unique (instrument_id, ex_date)
 );
 
+-- 7b. OPTION TRANSACTIONS (options-selling layer O1) ----------
+-- Sold puts/calls, the wheel, rolls. Underlying = instrument_id.
+-- Declared BEFORE the positions view because that view folds net
+-- premium into equity cost basis. See docs/SPEC_options-selling.md.
+create table if not exists public.option_transactions (
+  id uuid primary key default gen_random_uuid(),
+  portfolio_id uuid not null references public.portfolios(id) on delete cascade,
+  instrument_id uuid not null references public.instruments(id),   -- the UNDERLYING
+  action text not null,          -- sell_to_open | buy_to_close | expired | assigned | rolled
+  option_type text not null,     -- put | call
+  strike numeric not null,
+  expiration date not null,
+  contracts int not null default 1,     -- 1 contract = 100 shares
+  premium numeric not null default 0,   -- per share, signed (+ received, - paid to close)
+  fee numeric not null default 0,
+  trade_date date not null default current_date,
+  currency text not null default 'USD',
+  roll_group_id uuid,                    -- links rolled / wheel legs (O2)
+  linked_txn_id uuid references public.transactions(id) on delete set null,  -- assignment -> equity leg
+  note text,
+  dedupe_key text,
+  created_at timestamptz not null default now()
+);
+create index if not exists opt_tx_portfolio_idx on public.option_transactions(portfolio_id);
+create unique index if not exists option_transactions_dedupe_uidx
+  on public.option_transactions(portfolio_id, dedupe_key);
+
 -- ============================================================
 -- POSITIONS view — computes Snowball-style holding fields
 -- from transactions. Column names kept backward-compatible
 -- (shares, avg_cost, last_price, day_change_pct) and extended.
+-- Net option premium collected on an underlying REDUCES its
+-- effective cost basis (the options-seller's real P/L).
 -- ============================================================
-drop view if exists public.positions;
+drop view if exists public.positions cascade;
 create view public.positions with (security_invoker = on) as
-with agg as (
+with opt as (
+  select portfolio_id, instrument_id, sum(premium*contracts*100 - fee) as option_premium
+  from public.option_transactions
+  group by portfolio_id, instrument_id
+),
+agg as (
   select
     t.portfolio_id,
     t.instrument_id,
@@ -181,7 +215,8 @@ select
   i.logo_url,
   i.div_rating,
   a.shares,
-  case when a.buy_shares > 0 then a.buy_value / a.buy_shares else 0 end            as avg_cost,
+  coalesce(o.option_premium,0) as option_premium,
+  case when a.buy_shares > 0 then (a.buy_value - coalesce(o.option_premium,0)) / a.buy_shares else 0 end as avg_cost,
   a.buy_value,
   a.commission_paid,
   a.div_paid,
@@ -189,8 +224,8 @@ select
   pc.change_pct       as day_change_pct,
   pc.as_of            as price_as_of,
   (pc.price * a.shares)                                                            as current_total_price,
-  (case when a.buy_shares > 0 then a.buy_value/a.buy_shares else 0 end * a.shares) as cost_basis,
-  (pc.price * a.shares) - (case when a.buy_shares>0 then a.buy_value/a.buy_shares else 0 end * a.shares) as gain_value,
+  (case when a.buy_shares > 0 then (a.buy_value - coalesce(o.option_premium,0)) / a.buy_shares else 0 end * a.shares) as cost_basis,
+  (pc.price * a.shares) - (case when a.buy_shares > 0 then (a.buy_value - coalesce(o.option_premium,0)) / a.buy_shares else 0 end * a.shares) as gain_value,
   -- forward dividend income & current yield from instrument reference
   (coalesce(i.annual_div_per_share,0) * a.shares)                                  as year_total_divs,
   case when pc.price > 0 then coalesce(i.annual_div_per_share,0)/pc.price*100 else null end as div_yield_current,
@@ -203,6 +238,7 @@ select
 from agg a
 join public.instruments i on i.id = a.instrument_id
 left join public.price_cache pc on pc.instrument_id = i.id
+left join opt o on o.portfolio_id = a.portfolio_id and o.instrument_id = a.instrument_id
 where a.shares <> 0;
 
 -- PORTFOLIO TOTALS view --------------------------------------
@@ -221,12 +257,46 @@ from public.positions
 group by portfolio_id;
 
 -- ============================================================
+-- OPTION POSITIONS view — nets option_transactions into open
+-- positions per (underlying, type, strike, expiration).
+-- Derived display fields (collateral, RoC, status, covered) are
+-- computed in lib/options.ts from these rows. See SPEC_options-selling.md.
+-- ============================================================
+drop view if exists public.option_positions;
+create view public.option_positions with (security_invoker = on) as
+with legs as (
+  select
+    ot.portfolio_id, ot.instrument_id, ot.option_type, ot.strike, ot.expiration, ot.currency,
+    sum(case when ot.action='sell_to_open' then ot.contracts
+             when ot.action in ('buy_to_close','expired','assigned','rolled') then -ot.contracts
+             else 0 end)                                            as net_contracts,
+    sum(case when ot.action='sell_to_open' then ot.contracts else 0 end) as sold_contracts,
+    sum(ot.premium*ot.contracts*100 - ot.fee)                       as premium_net,
+    min(ot.trade_date)                                              as opened_at,
+    max(ot.trade_date)                                              as last_action_at
+  from public.option_transactions ot
+  group by ot.portfolio_id, ot.instrument_id, ot.option_type, ot.strike, ot.expiration, ot.currency
+)
+select
+  l.portfolio_id, l.instrument_id, i.symbol, i.exchange, i.name,
+  l.option_type, l.strike, l.expiration, l.currency,
+  l.net_contracts, l.sold_contracts, l.premium_net, l.opened_at, l.last_action_at,
+  pc.price                    as underlying_price,
+  coalesce(pos.shares, 0)     as underlying_shares,
+  (l.expiration - current_date) as dte
+from legs l
+join public.instruments i on i.id = l.instrument_id
+left join public.price_cache pc on pc.instrument_id = l.instrument_id
+left join public.positions pos on pos.portfolio_id = l.portfolio_id and pos.instrument_id = l.instrument_id;
+
+-- ============================================================
 -- ROW LEVEL SECURITY
 -- ============================================================
 alter table public.profiles     enable row level security;
 alter table public.portfolios   enable row level security;
 alter table public.categories   enable row level security;
 alter table public.transactions enable row level security;
+alter table public.option_transactions enable row level security;
 alter table public.instruments  enable row level security;
 alter table public.price_cache  enable row level security;
 alter table public.dividends    enable row level security;
@@ -249,6 +319,13 @@ create policy "own transactions" on public.transactions for all using (
   exists (select 1 from public.portfolios p where p.id = transactions.portfolio_id and p.user_id = auth.uid())
 ) with check (
   exists (select 1 from public.portfolios p where p.id = transactions.portfolio_id and p.user_id = auth.uid())
+);
+
+drop policy if exists "own option_transactions" on public.option_transactions;
+create policy "own option_transactions" on public.option_transactions for all using (
+  exists (select 1 from public.portfolios p where p.id = option_transactions.portfolio_id and p.user_id = auth.uid())
+) with check (
+  exists (select 1 from public.portfolios p where p.id = option_transactions.portfolio_id and p.user_id = auth.uid())
 );
 
 -- Shared reference data: read-only to clients; writes via service role.
