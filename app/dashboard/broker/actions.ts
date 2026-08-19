@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBrokerProvider } from "@/lib/brokersync";
 import type { BrokerAccount } from "@/lib/brokersync";
-import { getProfile } from "@/lib/marketdata";
+import { enrichInstrumentProfile } from "@/lib/enrich";
 import { transactionDedupeKey } from "@/lib/import/csv";
 
 type BrokerSyncResult = {
@@ -159,19 +159,11 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   const instIds = [...instBySymbol.values()].map((i) => i.id);
   if (instIds.length) {
     const { data: need } = await admin
-      .from("instruments").select("id, symbol, exchange").in("id", instIds).is("sector", null);
-    const list = (need ?? []) as { id: string; symbol: string; exchange: string }[];
+      .from("instruments").select("id, symbol, exchange, type")
+      .in("id", instIds).is("sector", null).is("sector_weights", null);
+    const list = (need ?? []) as { id: string; symbol: string; exchange: string; type: string | null }[];
     for (let i = 0; i < list.length; i += 6) {
-      await Promise.all(
-        list.slice(i, i + 6).map(async (inst) => {
-          const profile = await getProfile(inst.symbol, inst.exchange);
-          if (profile && (profile.sector || profile.country)) {
-            await admin.from("instruments")
-              .update({ sector: profile.sector, country_iso: profile.country })
-              .eq("id", inst.id);
-          }
-        })
-      );
+      await Promise.all(list.slice(i, i + 6).map((inst) => enrichInstrumentProfile(admin, inst)));
     }
   }
 

@@ -85,6 +85,7 @@ create table if not exists public.instruments (
   type text default 'stock',      -- stock | etf | fund | bond | crypto | cash | custom
   currency text default 'USD',
   sector text,
+  sector_weights jsonb,            -- ETF/fund look-through: [{sector, weight}] (weights sum ~1)
   industry text,
   country_iso text,
   logo_url text,
@@ -211,6 +212,7 @@ select
   i.type,
   i.currency,
   i.sector,
+  i.sector_weights,
   i.country_iso,
   i.logo_url,
   i.div_rating,

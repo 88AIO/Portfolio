@@ -5,6 +5,7 @@ import YahooFinance from "yahoo-finance2";
 import type {
   DividendHistoryPoint,
   DividendInfo,
+  FundBreakdown,
   InstrumentMeta,
   InstrumentProfile,
   MarketDataProvider,
@@ -199,6 +200,46 @@ async function getProfile(symbol: string, exchange: string): Promise<InstrumentP
   }
 }
 
+// Yahoo's fund sectorWeightings use snake_case keys; map them to the same human labels
+// Yahoo's assetProfile uses for individual stocks, so ETF look-through and stock sectors
+// land in the SAME buckets on the allocation chart.
+const FUND_SECTOR_LABEL: Record<string, string> = {
+  realestate: "Real Estate",
+  consumer_cyclical: "Consumer Cyclical",
+  basic_materials: "Basic Materials",
+  consumer_defensive: "Consumer Defensive",
+  technology: "Technology",
+  communication_services: "Communication Services",
+  financial_services: "Financial Services",
+  utilities: "Utilities",
+  industrials: "Industrials",
+  energy: "Energy",
+  healthcare: "Healthcare",
+};
+
+async function getFundBreakdown(symbol: string, exchange: string): Promise<FundBreakdown | null> {
+  try {
+    const res = (await yf.quoteSummary(toYahoo(symbol, exchange), {
+      modules: ["topHoldings"],
+    })) as unknown as {
+      topHoldings?: { sectorWeightings?: Array<Record<string, number>> };
+    };
+    const weightings = res?.topHoldings?.sectorWeightings;
+    if (!weightings || !weightings.length) return null;
+    const sectorWeights: { sector: string; weight: number }[] = [];
+    for (const entry of weightings) {
+      // Each entry is a single-key object, e.g. { technology: 0.31 }.
+      const key = Object.keys(entry)[0];
+      const weight = entry[key];
+      if (!key || typeof weight !== "number" || weight <= 0) continue;
+      sectorWeights.push({ sector: FUND_SECTOR_LABEL[key] ?? key, weight });
+    }
+    return sectorWeights.length ? { sectorWeights } : null;
+  } catch {
+    return null;
+  }
+}
+
 // --- Options (free US chains via yahoo-finance2's `options` endpoint) ---
 type YahooOptionLeg = {
   strike?: number;
@@ -290,6 +331,7 @@ export const yahooProvider: MarketDataProvider = {
   getDividendInfo,
   getDividendHistory,
   getProfile,
+  getFundBreakdown,
   getOptionChain,
   getOptionQuote,
 };

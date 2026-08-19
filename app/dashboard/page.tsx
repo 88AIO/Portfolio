@@ -20,6 +20,7 @@ type Position = {
   type: string | null;
   currency: string;
   sector: string | null;
+  sector_weights: { sector: string; weight: number }[] | null;
   shares: number;
   avg_cost: number;
   last_price: number | null;
@@ -101,8 +102,20 @@ export default async function Dashboard() {
   for (const p of rows) {
     const v = (p.last_price ?? 0) * p.shares * fx(p.currency);
     if (v <= 0) continue;
-    const sectorKey = p.sector || "Funds & ETFs";
-    bySector.set(sectorKey, (bySector.get(sectorKey) ?? 0) + v);
+    // ETFs/funds distribute their value across their look-through sector weights; individual
+    // stocks land in their single sector; anything still unclassified → "Funds & ETFs".
+    if (p.sector_weights && p.sector_weights.length) {
+      let assigned = 0;
+      for (const w of p.sector_weights) {
+        bySector.set(w.sector, (bySector.get(w.sector) ?? 0) + v * w.weight);
+        assigned += v * w.weight;
+      }
+      const leftover = v - assigned;
+      if (leftover > 0.01) bySector.set("Other", (bySector.get("Other") ?? 0) + leftover);
+    } else {
+      const sectorKey = p.sector || "Funds & ETFs";
+      bySector.set(sectorKey, (bySector.get(sectorKey) ?? 0) + v);
+    }
     const c = (p.country_iso || "").toLowerCase();
     const regionKey = !c
       ? "Unclassified"
@@ -233,7 +246,7 @@ export default async function Dashboard() {
                                 <div className="font-medium text-slate-900">{p.symbol}</div>
                                 <div className="text-xs text-slate-400">
                                   {p.exchange}
-                                  {p.sector ? ` · ${p.sector}` : p.name ? ` · ${p.name}` : ""}
+                                  {p.sector ? ` · ${p.sector}` : p.sector_weights ? " · ETF" : p.name ? ` · ${p.name}` : ""}
                                 </div>
                               </td>
                               <td className="py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>

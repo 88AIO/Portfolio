@@ -13,6 +13,7 @@ export type {
   DividendInfo,
   DividendHistoryPoint,
   InstrumentProfile,
+  FundBreakdown,
   OptionQuote,
   OptionContract,
   OptionChain,
@@ -55,6 +56,11 @@ export function getDividendHistory(symbol: string, exchange: string) {
 export function getProfile(symbol: string, exchange: string) {
   const provider = getProvider();
   return provider.getProfile ? provider.getProfile(symbol, exchange) : Promise.resolve(null);
+}
+
+export function getFundBreakdown(symbol: string, exchange: string) {
+  const provider = getProvider();
+  return provider.getFundBreakdown ? provider.getFundBreakdown(symbol, exchange) : Promise.resolve(null);
 }
 
 export function providerSupportsOptions(): boolean {

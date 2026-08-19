@@ -31,6 +31,12 @@ export type InstrumentProfile = {
   country: string | null; // e.g. "United States"
 };
 
+// ETF/fund look-through: the fund's exposure across sectors (weights sum to ~1).
+// Sector labels match the single-sector strings used for individual stocks.
+export type FundBreakdown = {
+  sectorWeights: { sector: string; weight: number }[];
+};
+
 // --- Options (used by the NEXT+ options-selling layer; see docs/SPEC_options-selling.md) ---
 export type OptionQuote = {
   mark: number | null;
@@ -72,6 +78,7 @@ export interface MarketDataProvider {
   getDividendInfo?(symbol: string, exchange: string): Promise<DividendInfo | null>;
   getDividendHistory?(symbol: string, exchange: string): Promise<DividendHistoryPoint[]>;
   getProfile?(symbol: string, exchange: string): Promise<InstrumentProfile | null>;
+  getFundBreakdown?(symbol: string, exchange: string): Promise<FundBreakdown | null>;
 
   // Optional — only providers with capabilities.options implement these (wired up in the O1 phase).
   getOptionQuote?(

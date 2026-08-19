@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote, searchInstrument, getDividendInfo, getDividendHistory, getProfile } from "@/lib/marketdata";
+import { getQuote, searchInstrument, getDividendInfo, getDividendHistory } from "@/lib/marketdata";
+import { enrichInstrumentProfile } from "@/lib/enrich";
 import { parseTransactionsCsv, transactionDedupeKey } from "@/lib/import/csv";
 import type { ImportResult } from "@/lib/import/types";
 
@@ -123,22 +124,20 @@ export async function refreshPrices() {
   const supabase = await createClient();
   const admin = createAdminClient();
   const { data: pos } = await supabase
-    .from("positions").select("instrument_id, symbol, exchange, currency, sector");
+    .from("positions").select("instrument_id, symbol, exchange, currency, sector, sector_weights, type");
   if (!pos) return;
 
-  // Pass 1 — lightweight sector/country enrichment first (one call each, only when missing),
-  // so it commits even if the heavier price/dividend pass runs long.
-  const toEnrich = pos.filter((p) => !p.sector);
-  for (let i = 0; i < toEnrich.length; i += 8) {
+  // Pass 1 — sector enrichment first (stocks get a single sector; ETFs get a look-through
+  // breakdown), only for holdings still missing both, so it commits even if the heavier
+  // price/dividend pass runs long.
+  const toEnrich = pos.filter((p) => !p.sector && !p.sector_weights);
+  for (let i = 0; i < toEnrich.length; i += 6) {
     await Promise.all(
-      toEnrich.slice(i, i + 8).map(async (p) => {
-        const profile = await getProfile(p.symbol, p.exchange);
-        if (profile && (profile.sector || profile.country)) {
-          await admin.from("instruments")
-            .update({ sector: profile.sector, country_iso: profile.country })
-            .eq("id", p.instrument_id);
-        }
-      })
+      toEnrich.slice(i, i + 6).map((p) =>
+        enrichInstrumentProfile(admin, {
+          id: p.instrument_id, symbol: p.symbol, exchange: p.exchange, type: p.type,
+        })
+      )
     );
   }
 
