@@ -31,11 +31,12 @@ async function syncInstrumentDividends(
   ]);
   const patch: Record<string, unknown> = {};
   if (info) {
-    patch.annual_div_per_share = info.annualDividendPerShare;
     patch.div_yield_ttm = info.yieldTtm;
     patch.ex_dividend_date = info.exDividendDate;
     patch.next_dividend_date = info.nextDividendDate;
   }
+
+  let ttmSum = 0;
   if (history.length) {
     await admin.from("dividends").upsert(
       history.map((h) => ({ instrument_id: instrumentId, ex_date: h.exDate, amount: h.amount, currency })),
@@ -43,9 +44,18 @@ async function syncInstrumentDividends(
     );
     const now = Date.now();
     const last12 = history.filter((h) => now - new Date(h.exDate).getTime() < 366 * 24 * 60 * 60 * 1000);
+    ttmSum = last12.reduce((s, h) => s + (h.amount || 0), 0);
     patch.div_frequency = last12.length || null;
     patch.next_dividend_per_share = history[history.length - 1].amount;
   }
+
+  // Annual dividend per share: the trailing-12-month actual distributions are the honest income
+  // figure, and (unlike Yahoo's forward "dividendRate") they're always populated for distribution
+  // ETFs like SCHD/JEPQ/QYLD. Take the larger of forward-rate and TTM so we never undercount.
+  const forward = info?.annualDividendPerShare ?? null;
+  const annual = forward && forward > 0 ? Math.max(forward, ttmSum) : ttmSum > 0 ? ttmSum : forward;
+  if (annual != null) patch.annual_div_per_share = annual;
+
   if (Object.keys(patch).length) {
     await admin.from("instruments").update(patch).eq("id", instrumentId);
   }

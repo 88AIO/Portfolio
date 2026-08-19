@@ -169,9 +169,11 @@ async function getDividendHistory(
 ): Promise<DividendHistoryPoint[]> {
   try {
     const period1 = new Date(Date.now() - 3 * 365 * 24 * 60 * 60 * 1000); // ~3 years back
+    // Daily interval so high-frequency (weekly) distribution funds — XDTE/YMAX/QDTE etc. —
+    // return every payout; a monthly interval collapses weekly dividends and undercounts income.
     const res = (await yf.chart(toYahoo(symbol, exchange), {
       period1,
-      interval: "1mo",
+      interval: "1d",
       events: "div",
     })) as unknown as { events?: { dividends?: Array<{ date?: Date; amount?: number }> } };
     const out: DividendHistoryPoint[] = [];
