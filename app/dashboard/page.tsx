@@ -32,7 +32,13 @@ type Position = {
   country_iso: string | null;
 };
 
-export default async function Dashboard() {
+export default async function Dashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const sp = await searchParams;
+  const view = sp.holdings === "accounts" ? "accounts" : "consolidated";
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const portfolio = await ensurePortfolio();
@@ -91,6 +97,34 @@ export default async function Dashboard() {
     })
     .sort((a, b) => b.mv - a.mv);
   const showGroups = groups.length > 1;
+
+  // Roll the same instrument up across accounts into one line (the "no duplicates" view).
+  // Price/currency/sector are identical per instrument; only shares & avg cost differ by account.
+  type Consolidated = {
+    instrument_id: string; symbol: string; exchange: string; name: string | null;
+    sector: string | null; sector_weights: Position["sector_weights"]; currency: string;
+    shares: number; costSum: number; last_price: number | null; day_change_pct: number | null;
+    div_yield_current: number | null; price_as_of: string | null; accounts: Set<string>;
+  };
+  const consMap = new Map<string, Consolidated>();
+  for (const p of rows) {
+    let e = consMap.get(p.instrument_id);
+    if (!e) {
+      e = {
+        instrument_id: p.instrument_id, symbol: p.symbol, exchange: p.exchange, name: p.name,
+        sector: p.sector, sector_weights: p.sector_weights, currency: p.currency,
+        shares: 0, costSum: 0, last_price: p.last_price, day_change_pct: p.day_change_pct,
+        div_yield_current: p.div_yield_current, price_as_of: p.price_as_of, accounts: new Set(),
+      };
+      consMap.set(p.instrument_id, e);
+    }
+    e.shares += p.shares;
+    e.costSum += p.avg_cost * p.shares;
+    e.accounts.add(pfName.get(p.portfolio_id) ?? "Portfolio");
+  }
+  const consolidated = [...consMap.values()]
+    .map((e) => ({ ...e, avg_cost: e.shares !== 0 ? e.costSum / e.shares : 0 }))
+    .sort((a, b) => (b.last_price ?? 0) * b.shares - (a.last_price ?? 0) * a.shares);
 
   const alloc = rows
     .map((p) => ({ name: p.symbol, value: (p.last_price ?? 0) * p.shares * fx(p.currency) }))
@@ -187,11 +221,23 @@ export default async function Dashboard() {
                 <h2 className="text-base font-semibold">Holdings</h2>
                 {pricesAsOf && <p className="text-xs text-slate-400">Prices as of {timeAgo(pricesAsOf)}</p>}
               </div>
-              <form action={refreshPrices}>
-                <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50">
-                  Refresh prices
-                </button>
-              </form>
+              <div className="flex items-center gap-2">
+                {showGroups && (
+                  <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 p-0.5 text-xs">
+                    <Link href="/dashboard" className={`rounded-md px-2 py-1 ${view === "consolidated" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"}`}>
+                      Consolidated
+                    </Link>
+                    <Link href="/dashboard?holdings=accounts" className={`rounded-md px-2 py-1 ${view === "accounts" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"}`}>
+                      By account
+                    </Link>
+                  </div>
+                )}
+                <form action={refreshPrices}>
+                  <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50">
+                    Refresh prices
+                  </button>
+                </form>
+              </div>
             </div>
 
             {rows.length === 0 ? (
@@ -214,7 +260,7 @@ export default async function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {groups.map((g) => (
+                    {view === "accounts" && showGroups ? groups.map((g) => (
                       <Fragment key={g.pid}>
                         {showGroups && (
                           <tr className="border-t border-slate-200 bg-slate-50">
@@ -277,7 +323,46 @@ export default async function Dashboard() {
                           );
                         })}
                       </Fragment>
-                    ))}
+                    )) : consolidated.map((p) => {
+                      const mv = (p.last_price ?? 0) * p.shares;
+                      const pl = mv - p.avg_cost * p.shares;
+                      return (
+                        <tr key={p.instrument_id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                          <td className="py-2.5">
+                            <div className="font-medium text-slate-900">{p.symbol}</div>
+                            <div className="text-xs text-slate-400">
+                              {p.exchange}
+                              {p.sector ? ` · ${p.sector}` : p.sector_weights ? " · ETF" : p.name ? ` · ${p.name}` : ""}
+                              {p.accounts.size > 1 ? ` · ${p.accounts.size} accounts` : ""}
+                            </div>
+                          </td>
+                          <td className="py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>
+                          <td className="py-2.5 text-right tabular-nums">{money(p.avg_cost, p.currency)}</td>
+                          <td
+                            className="py-2.5 text-right tabular-nums"
+                            title={p.price_as_of ? `as of ${timeAgo(p.price_as_of)}` : undefined}
+                          >
+                            {p.last_price == null ? <span className="text-slate-300">—</span> : money(p.last_price, p.currency)}
+                          </td>
+                          <td className="py-2.5 text-right tabular-nums">
+                            {p.day_change_pct == null ? (
+                              <span className="text-slate-300">—</span>
+                            ) : (
+                              <span className={p.day_change_pct >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                                {pct(p.day_change_pct)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 text-right tabular-nums font-medium">{money(mv, p.currency)}</td>
+                          <td className="py-2.5 text-right tabular-nums text-slate-500">
+                            {p.div_yield_current != null ? pct(p.div_yield_current) : "—"}
+                          </td>
+                          <td className={`py-2.5 text-right tabular-nums font-medium ${pl >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                            {money(pl, p.currency)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
