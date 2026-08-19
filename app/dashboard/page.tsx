@@ -393,6 +393,28 @@ export default async function Dashboard({
               <h2 className="mb-3 text-base font-semibold">Import CSV</h2>
               <ImportTransactionsForm />
             </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="mb-1 text-base font-semibold">Export</h2>
+              <p className="mb-3 text-xs text-slate-400">
+                Your data, no lock-in. Transactions round-trip straight back into Import.
+              </p>
+              <div className="flex flex-col gap-2">
+                <a
+                  href="/api/export/transactions"
+                  download
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  ↓ Transactions (.csv)
+                </a>
+                <a
+                  href="/api/export/holdings"
+                  download
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  ↓ Holdings snapshot (.csv)
+                </a>
+              </div>
+            </div>
           </section>
         </div>
 
