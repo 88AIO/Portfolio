@@ -185,6 +185,9 @@ export default async function Dashboard({
           </div>
           <nav className="flex items-center gap-1 text-sm">
             <span className="rounded-lg bg-white/10 px-3 py-1.5 font-medium">Overview</span>
+            <Link href="/dashboard/performance" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
+              Performance
+            </Link>
             <Link href="/dashboard/dividends" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
               Dividends
             </Link>

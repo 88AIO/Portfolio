@@ -12,6 +12,7 @@ import type {
   OptionChain,
   OptionContract,
   OptionQuote,
+  PriceHistoryPoint,
   Quote,
 } from "../types";
 
@@ -189,6 +190,31 @@ async function getDividendHistory(
   }
 }
 
+async function getPriceHistory(
+  symbol: string,
+  exchange: string,
+  fromDays: number
+): Promise<PriceHistoryPoint[]> {
+  try {
+    const period1 = new Date(Date.now() - fromDays * 24 * 60 * 60 * 1000);
+    // Weekly bars keep ~1 year to ~52 points per instrument — light to store and to draw.
+    const res = (await yf.chart(toYahoo(symbol, exchange), {
+      period1,
+      interval: "1wk",
+    })) as unknown as { quotes?: Array<{ date?: Date; close?: number | null; adjclose?: number | null }> };
+    const out: PriceHistoryPoint[] = [];
+    for (const q of res?.quotes ?? []) {
+      const iso = isoDate(q?.date ?? null);
+      const close = q?.adjclose ?? q?.close;
+      if (iso && typeof close === "number" && Number.isFinite(close)) out.push({ date: iso, close });
+    }
+    out.sort((a, b) => a.date.localeCompare(b.date));
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 async function getProfile(symbol: string, exchange: string): Promise<InstrumentProfile | null> {
   try {
     const res = (await yf.quoteSummary(toYahoo(symbol, exchange), {
@@ -335,6 +361,7 @@ export const yahooProvider: MarketDataProvider = {
   searchInstrument,
   getDividendInfo,
   getDividendHistory,
+  getPriceHistory,
   getProfile,
   getFundBreakdown,
   getOptionChain,

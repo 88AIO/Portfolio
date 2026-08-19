@@ -26,6 +26,12 @@ export type DividendHistoryPoint = {
   amount: number; // per share, in the instrument's currency
 };
 
+// A historical closing price used to draw portfolio value over time.
+export type PriceHistoryPoint = {
+  date: string; // YYYY-MM-DD
+  close: number; // in the instrument's currency
+};
+
 export type InstrumentProfile = {
   sector: string | null;
   country: string | null; // e.g. "United States"
@@ -77,6 +83,7 @@ export interface MarketDataProvider {
   searchInstrument(symbol: string, exchange: string): Promise<InstrumentMeta | null>;
   getDividendInfo?(symbol: string, exchange: string): Promise<DividendInfo | null>;
   getDividendHistory?(symbol: string, exchange: string): Promise<DividendHistoryPoint[]>;
+  getPriceHistory?(symbol: string, exchange: string, fromDays: number): Promise<PriceHistoryPoint[]>;
   getProfile?(symbol: string, exchange: string): Promise<InstrumentProfile | null>;
   getFundBreakdown?(symbol: string, exchange: string): Promise<FundBreakdown | null>;
 

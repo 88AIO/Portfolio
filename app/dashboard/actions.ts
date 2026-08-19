@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote, searchInstrument, getDividendInfo, getDividendHistory } from "@/lib/marketdata";
+import { getQuote, searchInstrument, getDividendInfo, getDividendHistory, getPriceHistory } from "@/lib/marketdata";
 import { enrichInstrumentProfile } from "@/lib/enrich";
 import { parseTransactionsCsv, transactionDedupeKey } from "@/lib/import/csv";
 import type { ImportResult } from "@/lib/import/types";
@@ -15,6 +15,22 @@ function todayIso(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${m}-${day}`;
+}
+
+// Backfill ~13 months of weekly closes for an instrument, so the performance chart can draw
+// value-over-time from cached data (service role; shared reference table).
+async function syncInstrumentPriceHistory(
+  admin: ReturnType<typeof createAdminClient>,
+  instrumentId: string,
+  symbol: string,
+  exchange: string
+) {
+  const history = await getPriceHistory(symbol, exchange, 400);
+  if (!history.length) return;
+  await admin.from("price_history").upsert(
+    history.map((h) => ({ instrument_id: instrumentId, d: h.date, close: h.close })),
+    { onConflict: "instrument_id,d" }
+  );
 }
 
 // Sync an instrument's dividend reference + history from the market-data provider (service role).
@@ -125,8 +141,10 @@ export async function addTransaction(formData: FormData) {
     });
   }
   await syncInstrumentDividends(admin, inst.id, symbol, exchange, inst.currency);
+  await syncInstrumentPriceHistory(admin, inst.id, symbol, exchange);
 
   revalidatePath("/dashboard");
+  revalidatePath("/dashboard/performance");
 }
 
 // Refresh live prices for every instrument the user holds.
@@ -163,10 +181,12 @@ export async function refreshPrices() {
           });
         }
         await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
+        await syncInstrumentPriceHistory(admin, p.instrument_id, p.symbol, p.exchange);
       })
     );
   }
   revalidatePath("/dashboard");
+  revalidatePath("/dashboard/performance");
 }
 
 // Import buy/sell/dividend transactions from a CSV file. Idempotent: re-importing the
@@ -264,10 +284,12 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
         });
       }
       await syncInstrumentDividends(admin, inst.id, symbol, exchange, inst.currency);
+      await syncInstrumentPriceHistory(admin, inst.id, symbol, exchange);
     })
   );
 
   revalidatePath("/dashboard");
+  revalidatePath("/dashboard/performance");
   return {
     imported,
     duplicates: toInsert.length - imported,

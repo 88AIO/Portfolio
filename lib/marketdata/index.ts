@@ -12,6 +12,7 @@ export type {
   InstrumentMeta,
   DividendInfo,
   DividendHistoryPoint,
+  PriceHistoryPoint,
   InstrumentProfile,
   FundBreakdown,
   OptionQuote,
@@ -51,6 +52,13 @@ export function getDividendInfo(symbol: string, exchange: string) {
 export function getDividendHistory(symbol: string, exchange: string) {
   const provider = getProvider();
   return provider.getDividendHistory ? provider.getDividendHistory(symbol, exchange) : Promise.resolve([]);
+}
+
+export function getPriceHistory(symbol: string, exchange: string, fromDays: number) {
+  const provider = getProvider();
+  return provider.getPriceHistory
+    ? provider.getPriceHistory(symbol, exchange, fromDays)
+    : Promise.resolve([]);
 }
 
 export function getProfile(symbol: string, exchange: string) {

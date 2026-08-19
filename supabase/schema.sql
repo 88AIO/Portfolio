@@ -139,6 +139,16 @@ create table if not exists public.price_cache (
   as_of timestamptz not null default now()
 );
 
+-- 6b. PRICE HISTORY (weekly closes, for performance charts) ---
+-- Shared reference data like price_cache: service-role writes, authenticated read.
+create table if not exists public.price_history (
+  instrument_id uuid not null references public.instruments(id) on delete cascade,
+  d date not null,
+  close numeric not null,   -- in the instrument's own currency
+  primary key (instrument_id, d)
+);
+create index if not exists price_history_inst_idx on public.price_history(instrument_id, d);
+
 -- 7. DIVIDENDS (history + upcoming) --------------------------
 create table if not exists public.dividends (
   id uuid primary key default gen_random_uuid(),
@@ -301,6 +311,7 @@ alter table public.transactions enable row level security;
 alter table public.option_transactions enable row level security;
 alter table public.instruments  enable row level security;
 alter table public.price_cache  enable row level security;
+alter table public.price_history enable row level security;
 alter table public.dividends    enable row level security;
 
 drop policy if exists "own profile" on public.profiles;
@@ -335,6 +346,8 @@ drop policy if exists "read instruments" on public.instruments;
 create policy "read instruments" on public.instruments for select using (auth.role() = 'authenticated');
 drop policy if exists "read prices" on public.price_cache;
 create policy "read prices" on public.price_cache for select using (auth.role() = 'authenticated');
+drop policy if exists "read price_history" on public.price_history;
+create policy "read price_history" on public.price_history for select using (auth.role() = 'authenticated');
 drop policy if exists "read dividends" on public.dividends;
 create policy "read dividends" on public.dividends for select using (auth.role() = 'authenticated');
 
