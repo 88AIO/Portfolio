@@ -13,6 +13,7 @@ import {
   type UnderlyingIncome,
 } from "@/lib/options";
 import AddOptionForm from "@/components/AddOptionForm";
+import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -21,6 +22,8 @@ type PositionLite = {
   symbol: string;
   currency: string;
   shares: number;
+  last_price: number | null;
+  price_as_of: string | null;
   div_paid: number | null;
   option_premium: number | null;
   next_dividend_date: string | null;
@@ -37,7 +40,7 @@ export default async function OptionsPage() {
   const [{ data: optRows }, { data: posRows }, { data: pfList }] = await Promise.all([
     supabase.from("option_positions").select("*").order("expiration"),
     supabase.from("positions").select(
-      "symbol, currency, shares, div_paid, option_premium, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
+      "symbol, currency, shares, last_price, price_as_of, div_paid, option_premium, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
     ),
     supabase.from("portfolios").select("id, name").order("created_at"),
   ]);
@@ -149,6 +152,9 @@ export default async function OptionsPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-6 py-8">
+        <div className="mb-2 flex justify-end">
+          <PricesAsOf asOf={oldestPriceAsOf(positions)} />
+        </div>
         {/* Cockpit tiles */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Tile

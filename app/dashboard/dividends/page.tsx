@@ -7,6 +7,7 @@ import { dividendSafety, type DividendSafety } from "@/lib/dividends/safety";
 import { buildDividendCalendar } from "@/lib/dividends/calendar";
 import SafetyBadge from "@/components/SafetyBadge";
 import DividendCalendarChart from "@/components/DividendCalendarChart";
+import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ type Position = {
   currency: string;
   shares: number;
   last_price: number | null;
+  price_as_of: string | null;
   annual_div_per_share: number | null;
   div_yield_current: number | null;
   div_frequency: number | null;
@@ -145,6 +147,9 @@ export default async function DividendsPage() {
 
       <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Forecast summary */}
+        <div className="mb-2 flex justify-end">
+          <PricesAsOf asOf={oldestPriceAsOf(rows)} />
+        </div>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
           <Card label={`Est. annual income (${base})`} value={money(annualIncome, base)} />
           <Card label="Yield on value" value={pct(yieldOnValue)} />

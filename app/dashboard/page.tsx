@@ -7,6 +7,7 @@ import { money, pct, num, timeAgo } from "@/lib/format";
 import AddHoldingForm from "@/components/AddHoldingForm";
 import AllocationChart from "@/components/AllocationChart";
 import ImportTransactionsForm from "@/components/ImportTransactionsForm";
+import SubmitButton from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // "Refresh prices" enriches many holdings; give it room.
@@ -241,9 +242,12 @@ export default async function Dashboard({
                   </div>
                 )}
                 <form action={refreshPrices}>
-                  <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50">
+                  <SubmitButton
+                    pendingText="Refreshing…"
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50"
+                  >
                     Refresh prices
-                  </button>
+                  </SubmitButton>
                 </form>
               </div>
             </div>

@@ -9,6 +9,7 @@ import {
   type PerfClose,
 } from "@/lib/performance/series";
 import PerformanceChart from "@/components/PerformanceChart";
+import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,7 @@ type Pos = {
   currency: string;
   shares: number;
   last_price: number | null;
+  price_as_of: string | null;
 };
 
 type Hist = { instrument_id: string; d: string; close: number };
@@ -45,7 +47,7 @@ export default async function PerformancePage() {
       .from("transactions")
       .select("instrument_id, type, quantity, price, fees, currency, executed_at")
       .order("executed_at", { ascending: true }),
-    supabase.from("positions").select("instrument_id, currency, shares, last_price"),
+    supabase.from("positions").select("instrument_id, currency, shares, last_price, price_as_of"),
   ]);
 
   const txs = (txData ?? []) as Tx[];
@@ -121,6 +123,9 @@ export default async function PerformancePage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-6 py-8">
+        <div className="mb-2 flex justify-end">
+          <PricesAsOf asOf={oldestPriceAsOf(positions)} />
+        </div>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Card label={`Value (${base})`} value={money(series.endValue, base)} />
           <Card label="Net invested" value={money(series.endInvested, base)} />

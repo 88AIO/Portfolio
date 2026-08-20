@@ -9,6 +9,7 @@ export default function AddOptionForm({ portfolios }: { portfolios: PortfolioOpt
   const ref = useRef<HTMLFormElement>(null);
   const [pending, setPending] = useState(false);
   const [action, setAction] = useState("sell_to_open");
+  const [error, setError] = useState<string | null>(null);
 
   const input =
     "w-full rounded-lg border border-slate-300 px-2 py-1.5 outline-none focus:border-indigo-400";
@@ -18,10 +19,16 @@ export default function AddOptionForm({ portfolios }: { portfolios: PortfolioOpt
       ref={ref}
       action={async (fd) => {
         setPending(true);
-        await addOptionTransaction(fd);
-        ref.current?.reset();
-        setAction("sell_to_open");
-        setPending(false);
+        setError(null);
+        try {
+          await addOptionTransaction(fd);
+          ref.current?.reset();
+          setAction("sell_to_open");
+        } catch {
+          setError("Couldn't log that option — check the fields and try again.");
+        } finally {
+          setPending(false);
+        }
       }}
       className="space-y-2 text-sm"
     >
@@ -70,6 +77,7 @@ export default function AddOptionForm({ portfolios }: { portfolios: PortfolioOpt
       <button disabled={pending} className="w-full rounded-lg bg-indigo-600 py-2 font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
         {pending ? "Saving…" : "Log option"}
       </button>
+      {error && <p className="text-xs text-rose-600">{error}</p>}
       <p className="text-xs text-slate-400">
         Premium is <strong>per share</strong> — one contract at $1.56 = $156.
       </p>
