@@ -26,6 +26,11 @@ export async function scanPutFinder(input?: {
   const otmPct = clamp(input?.otmPct ?? 6, 0, 30);
 
   const supabase = await createClient();
+  // Require a signed-in user: this action fans out to the option-chain provider, so an anon
+  // caller shouldn't be able to drive that external cost.
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { rows: [], scanned: 0, truncated: false, targetDte, otmPct };
+
   const { data: pos } = await supabase
     .from("positions").select("symbol, exchange, div_yield_ttm").limit(300);
 

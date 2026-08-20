@@ -6,7 +6,15 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getQuote, searchInstrument, getDividendInfo, getDividendHistory, getPriceHistory } from "@/lib/marketdata";
 import { enrichInstrumentProfile } from "@/lib/enrich";
-import { parseTransactionsCsv, transactionDedupeKey } from "@/lib/import/csv";
+import {
+  parseTransactionsCsv,
+  transactionDedupeKey,
+  isValidSymbol,
+  isValidExchange,
+  IMPORT_MAX_BYTES,
+  IMPORT_MAX_ROWS,
+  IMPORT_MAX_SYMBOLS,
+} from "@/lib/import/csv";
 import type { ImportResult } from "@/lib/import/types";
 
 // Local date as YYYY-MM-DD — used for explicit executed_at and stable dedupe keys.
@@ -136,6 +144,8 @@ export async function addTransaction(formData: FormData) {
   const price = Number(formData.get("price") || 0);
   const executed_at = String(formData.get("executed_at") || "") || undefined;
   if (!symbol || quantity <= 0) return;
+  // Reject malformed tickers before they create junk reference rows / provider calls.
+  if (!isValidSymbol(symbol) || !isValidExchange(exchange)) return;
 
   const portfolio = await ensurePortfolio();
 
@@ -182,6 +192,9 @@ export async function addTransaction(formData: FormData) {
 // Refresh live prices for every instrument the user holds.
 export async function refreshPrices() {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login"); // don't let anon calls drive provider fan-out
+
   const admin = createAdminClient();
   const { data: pos } = await supabase
     .from("positions").select("instrument_id, symbol, exchange, currency, sector, sector_weights, type");
@@ -228,21 +241,39 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
   if (!(file instanceof File) || file.size === 0) {
     return { imported: 0, duplicates: 0, failed: 0, total: 0, errors: [{ line: 0, message: "No file provided." }] };
   }
+  // Bound memory + the post-import provider fan-out before reading the file into memory.
+  if (file.size > IMPORT_MAX_BYTES) {
+    return { imported: 0, duplicates: 0, failed: 0, total: 0, errors: [{ line: 0, message: `File too large (max ${Math.round(IMPORT_MAX_BYTES / 1e6)} MB).` }] };
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
 
   const { rows, errors } = parseTransactionsCsv(await file.text());
   if (rows.length === 0) {
     return { imported: 0, duplicates: 0, failed: errors.length, total: 0, errors };
   }
+  if (rows.length > IMPORT_MAX_ROWS) {
+    return { imported: 0, duplicates: 0, failed: rows.length, total: rows.length, errors: [{ line: 0, message: `Too many rows (${rows.length}); max ${IMPORT_MAX_ROWS} per import.` }] };
+  }
 
-  const supabase = await createClient();
   const admin = createAdminClient();
   const portfolio = await ensurePortfolio();
 
   // Resolve each unique (symbol, exchange) to an instrument once (creating new ones).
   const instByKey = new Map<string, { id: string; currency: string }>();
   const uniqueKeys = [...new Set(rows.map((r) => `${r.symbol}|${r.exchange}`))];
+  if (uniqueKeys.length > IMPORT_MAX_SYMBOLS) {
+    return { imported: 0, duplicates: 0, failed: rows.length, total: rows.length, errors: [{ line: 0, message: `Too many distinct symbols (${uniqueKeys.length}); max ${IMPORT_MAX_SYMBOLS} per import.` }] };
+  }
   for (const key of uniqueKeys) {
     const [symbol, exchange] = key.split("|");
+    // Reject malformed tickers before they create junk reference rows / provider calls.
+    if (!isValidSymbol(symbol) || !isValidExchange(exchange)) {
+      errors.push({ line: 0, message: `Invalid symbol/exchange "${symbol}/${exchange}"` });
+      continue;
+    }
     let { data: inst } = await admin
       .from("instruments").select("id, currency").eq("symbol", symbol).eq("exchange", exchange).maybeSingle();
     if (!inst) {

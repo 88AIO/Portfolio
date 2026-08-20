@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getBrokerProvider } from "@/lib/brokersync";
+import { getBrokerProvider, isBrokerSyncOwner } from "@/lib/brokersync";
 import type { BrokerAccount } from "@/lib/brokersync";
 import { enrichInstrumentProfile } from "@/lib/enrich";
 import { transactionDedupeKey } from "@/lib/import/csv";
@@ -71,7 +71,9 @@ async function ensureBrokerPortfolio(
   await admin.from("broker_accounts").upsert(
     {
       user_id: userId, provider: "snaptrade", provider_account_id: account.id,
-      brokerage_name: account.brokerageName, account_number: account.number, portfolio_id: portfolioId,
+      // Store only the last 4 digits — the UI only ever shows "••••1234", so full numbers at rest
+      // are needless PII. provider_account_id (the SnapTrade id) is the stable key, not this.
+      brokerage_name: account.brokerageName, account_number: account.number ? account.number.slice(-4) : null, portfolio_id: portfolioId,
       account_category: account.category || null, account_type: account.accountType || null,
       currency: account.currency || null, is_cash: account.isCash,
     },
@@ -89,6 +91,13 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, message: "Not signed in." };
+
+  // SECURITY GATE: the personal-key SnapTrade integration can only read the key owner's real
+  // accounts, so it must never run for a non-owner (it would import the owner's holdings into
+  // their dashboard). Restrict to BROKER_SYNC_OWNER_EMAILS until a per-user connection flow exists.
+  if (!isBrokerSyncOwner(user.email)) {
+    return { ok: false, message: "Broker sync is limited to the account owner on this instance." };
+  }
 
   const admin = createAdminClient();
   const accounts = await provider.listAccounts();

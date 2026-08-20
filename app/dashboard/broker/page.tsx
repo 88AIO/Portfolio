@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
-import { isBrokerSyncConfigured } from "@/lib/brokersync";
+import { isBrokerSyncConfigured, isBrokerSyncOwner } from "@/lib/brokersync";
 import { timeAgo } from "@/lib/format";
 import BrokerConnect from "@/components/BrokerConnect";
 
@@ -18,7 +18,9 @@ type BrokerAccountRow = {
 export default async function BrokerPage() {
   const supabase = await createClient();
   await ensurePortfolio(); // ensures signed-in (redirects to /login otherwise)
+  const { data: { user } } = await supabase.auth.getUser();
   const configured = isBrokerSyncConfigured();
+  const isOwner = isBrokerSyncOwner(user?.email);
 
   const { data: accounts } = await supabase
     .from("broker_accounts")
@@ -47,7 +49,13 @@ export default async function BrokerPage() {
             Read-only sync via SnapTrade — your brokerage credentials never touch Snowfolio.
           </p>
 
-          {configured ? (
+          {configured && !isOwner ? (
+            <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
+              Brokerage auto-sync isn’t available on your account yet. It currently connects a
+              single owner’s brokerage; per-user connections are on the roadmap. You can still add
+              holdings manually or import a CSV from the dashboard.
+            </p>
+          ) : configured && isOwner ? (
             <div className="space-y-4">
               <p className="text-sm text-slate-500">
                 Connect or manage brokerages in your{" "}

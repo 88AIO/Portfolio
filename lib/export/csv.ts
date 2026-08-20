@@ -6,7 +6,13 @@ export type CsvValue = string | number | null | undefined;
 
 function cell(v: CsvValue): string {
   if (v == null) return "";
-  const s = typeof v === "number" ? (Number.isFinite(v) ? String(v) : "") : String(v);
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : "";
+  let s = String(v);
+  // CSV-injection defense (string cells only, so real negative numbers are untouched): a
+  // spreadsheet treats a cell starting with = + - @ (or a leading tab/CR) as a formula, so a
+  // user-controlled note/symbol like "=HYPERLINK(...)" would execute on open. Prefix a single
+  // quote so it's shown as text, not evaluated.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

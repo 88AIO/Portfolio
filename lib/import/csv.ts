@@ -54,6 +54,21 @@ const TYPE_ALIASES: Record<string, string> = {
   withdraw: "withdrawal",
 };
 
+// Guardrails so a user-supplied ticker can't create junk instrument rows or drive unbounded
+// provider calls via the service-role client. Tickers are short and use a limited charset
+// (letters, digits, dot, hyphen — covers BRK.B, class shares, crypto pairs, most intl symbols).
+export function isValidSymbol(s: string): boolean {
+  return /^[A-Z0-9.\-]{1,15}$/.test(s);
+}
+export function isValidExchange(s: string): boolean {
+  return /^[A-Z0-9.\-]{1,10}$/.test(s);
+}
+
+// Import limits — bound memory, DB round-trips, and the post-import provider fan-out.
+export const IMPORT_MAX_BYTES = 2_000_000; // 2 MB
+export const IMPORT_MAX_ROWS = 5_000;
+export const IMPORT_MAX_SYMBOLS = 500;
+
 function normalizeHeader(h: string): string {
   const k = h.trim().toLowerCase().replace(/\s+/g, "");
   return HEADER_ALIASES[k] ?? k;
