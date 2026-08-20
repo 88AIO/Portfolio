@@ -66,7 +66,7 @@ export default async function Dashboard({
     costBasis += p.avg_cost * p.shares * r;
     annualDivs += (p.year_total_divs ?? 0) * r;
     dividendsReceived += (p.div_paid ?? 0) * r;
-    if (p.day_change_pct != null && p.last_price != null) {
+    if (p.day_change_pct != null && p.last_price != null && 1 + p.day_change_pct / 100 > 0) {
       const prev = p.last_price / (1 + p.day_change_pct / 100);
       dayPL += (p.last_price - prev) * p.shares * r;
     }

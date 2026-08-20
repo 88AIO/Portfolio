@@ -39,6 +39,14 @@ export type DividendCalendar = {
   untimedCount: number; // dividend payers we couldn't place (no known next date)
 };
 
+/** Add whole days to a YYYY-MM-DD date. */
+function addDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const base = new Date(Date.UTC(y, m - 1, d));
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().slice(0, 10);
+}
+
 /** Add whole months to a YYYY-MM-DD date, clamping the day to the target month's length. */
 function addMonths(iso: string, months: number): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -93,7 +101,13 @@ export function buildDividendCalendar(
     const perShare = p.next_dividend_per_share ?? annual / freq;
     if (perShare <= 0) continue;
 
-    const stepMonths = Math.max(1, Math.round(12 / freq));
+    // Step by the real payout interval. Monthly-or-slower payers step in whole months
+    // (preserves day-of-month for quarterly/semi/annual); higher-frequency payers (weekly,
+    // biweekly) step in days so a ~52×/yr distribution isn't collapsed to 12 monthly events.
+    const advance =
+      freq <= 12
+        ? (d: string) => addMonths(d, Math.max(1, Math.round(12 / freq)))
+        : (d: string) => addDays(d, Math.max(1, Math.round(365 / freq)));
     const rate = fx(p.currency);
 
     // Walk forward from the known next date, one interval at a time, until we leave the window.
@@ -101,10 +115,10 @@ export function buildDividendCalendar(
     if (date < today) {
       // Catch a stale next-date up to the current month before projecting forward.
       let catchUp = 0;
-      while (date < today && catchUp++ < 600) date = addMonths(date, stepMonths);
+      while (date < today && catchUp++ < 700) date = advance(date);
     }
     let guard = 0;
-    while (date < windowEnd && guard++ < 60) {
+    while (date < windowEnd && guard++ < 400) {
       const key = date.slice(0, 7);
       const idx = indexByKey.get(key);
       if (idx != null && date >= today) {
@@ -122,7 +136,7 @@ export function buildDividendCalendar(
         months[idx].total += amountBase;
         total += amountBase;
       }
-      date = addMonths(date, stepMonths);
+      date = advance(date);
     }
   }
 

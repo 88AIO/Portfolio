@@ -33,6 +33,25 @@ async function syncInstrumentPriceHistory(
   );
 }
 
+// Infer payout frequency from the spacing between recent ex-dates, snapped to a standard
+// cadence — more stable than counting payments in a rolling 366-day window (which flickers
+// between e.g. 3/4/5 for a quarterly payer as the boundary crosses a payment).
+function inferDivFrequency(history: { exDate: string; amount: number }[]): number | null {
+  if (history.length < 2) return history.length || null;
+  const recent = history.slice(-9); // up to 8 gaps
+  const gaps: number[] = [];
+  for (let i = 1; i < recent.length; i++) {
+    const days = (Date.parse(recent[i].exDate) - Date.parse(recent[i - 1].exDate)) / 86_400_000;
+    if (days > 0) gaps.push(days);
+  }
+  if (!gaps.length) return null;
+  gaps.sort((a, b) => a - b);
+  const medianGap = gaps[Math.floor(gaps.length / 2)];
+  const perYear = 365 / medianGap;
+  const cadences = [1, 2, 4, 6, 12, 26, 52];
+  return cadences.reduce((best, c) => (Math.abs(c - perYear) < Math.abs(best - perYear) ? c : best), cadences[0]);
+}
+
 // Sync an instrument's dividend reference + history from the market-data provider (service role).
 async function syncInstrumentDividends(
   admin: ReturnType<typeof createAdminClient>,
@@ -61,15 +80,28 @@ async function syncInstrumentDividends(
     const now = Date.now();
     const last12 = history.filter((h) => now - new Date(h.exDate).getTime() < 366 * 24 * 60 * 60 * 1000);
     ttmSum = last12.reduce((s, h) => s + (h.amount || 0), 0);
-    patch.div_frequency = last12.length || null;
+    patch.div_frequency = inferDivFrequency(history);
     patch.next_dividend_per_share = history[history.length - 1].amount;
   }
 
-  // Annual dividend per share: the trailing-12-month actual distributions are the honest income
-  // figure, and (unlike Yahoo's forward "dividendRate") they're always populated for distribution
-  // ETFs like SCHD/JEPQ/QYLD. Take the larger of forward-rate and TTM so we never undercount.
+  // Annual dividend per share — honest, forward-looking, and never inflated across a cut:
+  //  • Prefer Yahoo's forward "dividendRate" when present — it already reflects announced changes.
+  //  • Otherwise use the trailing-12-month actual (always populated for distribution ETFs like
+  //    SCHD/JEPQ/QYLD where the forward rate is missing) — BUT if the most recent payment run-rate
+  //    has dropped materially below TTM (a cut), use the lower run-rate so we don't cling to the
+  //    stale pre-cut figure. We no longer take max(forward, ttm), which biased income upward.
   const forward = info?.annualDividendPerShare ?? null;
-  const annual = forward && forward > 0 ? Math.max(forward, ttmSum) : ttmSum > 0 ? ttmSum : forward;
+  const freq = (patch.div_frequency as number | null) ?? null;
+  const lastPayment = history.length ? history[history.length - 1].amount : 0;
+  const recentRunRate = freq && lastPayment > 0 ? lastPayment * freq : 0;
+  let annual: number | null;
+  if (forward && forward > 0) {
+    annual = forward;
+  } else if (ttmSum > 0) {
+    annual = recentRunRate > 0 && recentRunRate < ttmSum * 0.8 ? recentRunRate : ttmSum;
+  } else {
+    annual = forward;
+  }
   if (annual != null) patch.annual_div_per_share = annual;
 
   if (Object.keys(patch).length) {

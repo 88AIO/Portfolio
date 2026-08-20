@@ -197,7 +197,14 @@ create unique index if not exists option_transactions_dedupe_uidx
 drop view if exists public.positions cascade;
 create view public.positions with (security_invoker = on) as
 with opt as (
-  select portfolio_id, instrument_id, sum(premium*contracts*100 - fee) as option_premium
+  -- Net premium kept per underlying: credits (sell_to_open) minus debits (buy_to_close/rolled),
+  -- fees always a cost. Premium is signed by action here — the raw `premium` column is entered
+  -- as a positive per-share number regardless of direction.
+  select portfolio_id, instrument_id, sum(
+    case when action = 'sell_to_open' then premium*contracts*100 - fee
+         when action in ('buy_to_close','rolled') then -(premium*contracts*100) - fee
+         else -fee end
+  ) as option_premium
   from public.option_transactions
   group by portfolio_id, instrument_id
 ),
@@ -283,7 +290,10 @@ with legs as (
              when ot.action in ('buy_to_close','expired','assigned','rolled') then -ot.contracts
              else 0 end)                                            as net_contracts,
     sum(case when ot.action='sell_to_open' then ot.contracts else 0 end) as sold_contracts,
-    sum(ot.premium*ot.contracts*100 - ot.fee)                       as premium_net,
+    -- Signed premium: credit on open, debit on close/roll, fees always a cost.
+    sum(case when ot.action='sell_to_open' then ot.premium*ot.contracts*100 - ot.fee
+             when ot.action in ('buy_to_close','rolled') then -(ot.premium*ot.contracts*100) - ot.fee
+             else -ot.fee end)                                     as premium_net,
     min(ot.trade_date)                                              as opened_at,
     max(ot.trade_date)                                              as last_action_at
   from public.option_transactions ot

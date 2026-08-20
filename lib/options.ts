@@ -73,7 +73,7 @@ export function computeOption(row: OptionPositionRow): ComputedOption {
 
   const annualizedRoC =
     isOpen && collateral > 0 && row.premium_net > 0
-      ? (row.premium_net / collateral) * (365 / Math.max(row.dte, MS))
+      ? (row.premium_net / collateral) * (365 / Math.max(row.dte, MS)) * 100 // as a percent
       : null;
 
   let status: OptionStatus;

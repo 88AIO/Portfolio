@@ -66,14 +66,29 @@ function mapType(quoteType?: string): string {
   }
 }
 
+// Yahoo quotes some markets in a currency's *minor* unit — London in pence (currency "GBp"),
+// Johannesburg in cents ("ZAc"), Tel Aviv in agorot ("ILA"). Left as-is, a £42.00 share arrives
+// as 4200 "GBp", its FX pair "GBpUSD=X" won't resolve (→ silent 1.0), and the holding reads ~100×
+// too large. Normalize to the major ISO unit (÷100) so prices, dividends, and FX all agree.
+const MINOR_UNIT: Record<string, string> = { GBP: "GBP", GBX: "GBP", ZAC: "ZAR", ILA: "ILS" };
+function normalizeCurrency(raw: string | null | undefined): { currency: string; divisor: number } {
+  if (!raw) return { currency: "USD", divisor: 1 };
+  // The tell for a minor-unit quote is a lowercase trailing letter (GBp, ZAc, ILa).
+  const isMinor = /[a-z]$/.test(raw) && MINOR_UNIT[raw.toUpperCase()] != null;
+  if (isMinor) return { currency: MINOR_UNIT[raw.toUpperCase()], divisor: 100 };
+  return { currency: raw.toUpperCase(), divisor: 1 };
+}
+
 async function getQuote(symbol: string, exchange: string): Promise<Quote> {
   try {
     const q = (await yf.quote(toYahoo(symbol, exchange))) as unknown as
       | YahooQuoteLike
       | undefined;
+    const { currency, divisor } = normalizeCurrency(q?.currency);
+    const rawPrice = typeof q?.regularMarketPrice === "number" ? q.regularMarketPrice : null;
     return {
-      price: typeof q?.regularMarketPrice === "number" ? q.regularMarketPrice : null,
-      currency: typeof q?.currency === "string" ? q.currency : null,
+      price: rawPrice != null ? rawPrice / divisor : null,
+      currency: typeof q?.currency === "string" ? currency : null,
       changePct:
         typeof q?.regularMarketChangePercent === "number" ? q.regularMarketChangePercent : null,
     };
@@ -83,11 +98,11 @@ async function getQuote(symbol: string, exchange: string): Promise<Quote> {
 }
 
 async function getFxRate(from: string, base: string): Promise<number> {
-  if (!from || !base || from === base) return 1;
+  const f = normalizeCurrency(from).currency;
+  const b = normalizeCurrency(base).currency;
+  if (!f || !b || f === b) return 1;
   try {
-    const q = (await yf.quote(
-      `${from.toUpperCase()}${base.toUpperCase()}=X`
-    )) as unknown as YahooQuoteLike | undefined;
+    const q = (await yf.quote(`${f}${b}=X`)) as unknown as YahooQuoteLike | undefined;
     const r = typeof q?.regularMarketPrice === "number" ? q.regularMarketPrice : NaN;
     return r && !isNaN(r) && r > 0 ? r : 1;
   } catch {
@@ -104,7 +119,7 @@ async function searchInstrument(symbol: string, exchange: string): Promise<Instr
     const name = q.longName || q.shortName || q.displayName || symbol;
     return {
       name,
-      currency: typeof q.currency === "string" ? q.currency : "USD",
+      currency: typeof q.currency === "string" ? normalizeCurrency(q.currency).currency : "USD",
       type: mapType(q.quoteType),
     };
   } catch {
@@ -123,6 +138,7 @@ type YahooCalendarEventsLike = { exDividendDate?: Date; dividendDate?: Date };
 type YahooQuoteSummaryLike = {
   summaryDetail?: YahooSummaryDetailLike;
   calendarEvents?: YahooCalendarEventsLike;
+  price?: { currency?: string };
 };
 
 function isoDate(d: Date | undefined | null): string | null {
@@ -137,16 +153,18 @@ function isoDate(d: Date | undefined | null): string | null {
 async function getDividendInfo(symbol: string, exchange: string): Promise<DividendInfo | null> {
   try {
     const res = (await yf.quoteSummary(toYahoo(symbol, exchange), {
-      modules: ["summaryDetail", "calendarEvents"],
+      modules: ["summaryDetail", "calendarEvents", "price"],
     })) as unknown as YahooQuoteSummaryLike;
     const sd = res?.summaryDetail;
     const ce = res?.calendarEvents;
-    const rate =
+    const { divisor } = normalizeCurrency(res?.price?.currency);
+    const rawRate =
       typeof sd?.dividendRate === "number"
         ? sd.dividendRate
         : typeof sd?.trailingAnnualDividendRate === "number"
           ? sd.trailingAnnualDividendRate
           : null;
+    const rate = rawRate != null ? rawRate / divisor : null;
     const yieldFrac =
       typeof sd?.dividendYield === "number"
         ? sd.dividendYield
@@ -176,11 +194,15 @@ async function getDividendHistory(
       period1,
       interval: "1d",
       events: "div",
-    })) as unknown as { events?: { dividends?: Array<{ date?: Date; amount?: number }> } };
+    })) as unknown as {
+      meta?: { currency?: string };
+      events?: { dividends?: Array<{ date?: Date; amount?: number }> };
+    };
+    const { divisor } = normalizeCurrency(res?.meta?.currency);
     const out: DividendHistoryPoint[] = [];
     for (const d of res?.events?.dividends ?? []) {
       const iso = isoDate(d?.date ?? null);
-      if (iso && typeof d?.amount === "number") out.push({ exDate: iso, amount: d.amount });
+      if (iso && typeof d?.amount === "number") out.push({ exDate: iso, amount: d.amount / divisor });
     }
     // Chronological (oldest → newest) so callers can take the last as most recent.
     out.sort((a, b) => a.exDate.localeCompare(b.exDate));
@@ -201,12 +223,16 @@ async function getPriceHistory(
     const res = (await yf.chart(toYahoo(symbol, exchange), {
       period1,
       interval: "1wk",
-    })) as unknown as { quotes?: Array<{ date?: Date; close?: number | null; adjclose?: number | null }> };
+    })) as unknown as {
+      meta?: { currency?: string };
+      quotes?: Array<{ date?: Date; close?: number | null; adjclose?: number | null }>;
+    };
+    const { divisor } = normalizeCurrency(res?.meta?.currency);
     const out: PriceHistoryPoint[] = [];
     for (const q of res?.quotes ?? []) {
       const iso = isoDate(q?.date ?? null);
       const close = q?.adjclose ?? q?.close;
-      if (iso && typeof close === "number" && Number.isFinite(close)) out.push({ date: iso, close });
+      if (iso && typeof close === "number" && Number.isFinite(close)) out.push({ date: iso, close: close / divisor });
     }
     out.sort((a, b) => a.date.localeCompare(b.date));
     return out;
