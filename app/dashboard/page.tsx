@@ -195,6 +195,9 @@ export default async function Dashboard({
             <Link href="/dashboard/options" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
               Options
             </Link>
+            <Link href="/dashboard/tax" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
+              Tax
+            </Link>
             <Link href="/dashboard/cash" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
               Cash
             </Link>
