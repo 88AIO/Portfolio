@@ -178,7 +178,9 @@ export default async function OptionsPage() {
 
         <p className="mt-3 text-xs text-slate-400">
           Informational only — Snowfolio tracks what you’ve done; it never recommends a trade.
-          Premium lowers your effective cost basis by {money(costBasisReduction, base)} on shares you currently hold.
+          Premium counts once, as income here — your equity cost basis stays the true price you paid.
+          If you prefer the seller’s lens, {money(costBasisReduction, base)} of premium on shares you
+          currently hold would lower your <em>effective</em> basis by that much.
         </p>
 
         {attention.length > 0 && (

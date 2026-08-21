@@ -49,6 +49,13 @@ export default async function Dashboard({
   const { data: positions } = await supabase.from("positions").select("*").order("symbol");
   const rows = (positions ?? []) as Position[];
 
+  // Net option premium across every leg (including options on underlyings not currently held),
+  // for the income picture. This is the ONLY place premium enters the totals now — it is no longer
+  // folded into equity cost basis, so it is counted exactly once.
+  const { data: optRows } = await supabase
+    .from("option_positions")
+    .select("premium_net, currency");
+
   // Portfolio names, for grouping holdings by account.
   const { data: pfList } = await supabase.from("portfolios").select("id, name");
   const pfName = new Map<string, string>(
@@ -57,7 +64,8 @@ export default async function Dashboard({
 
   // Convert every position into the base currency before summing (mixed US + intl total correctly).
   const base = portfolio.base_currency || "USD";
-  const rates = await getRates(rows.map((p) => p.currency), base);
+  const optionCurrencies = (optRows ?? []).map((o: { currency: string | null }) => o.currency ?? base);
+  const rates = await getRates([...rows.map((p) => p.currency), ...optionCurrencies], base);
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   let marketValue = 0, costBasis = 0, dayPL = 0, annualDivs = 0, dividendsReceived = 0;
@@ -72,10 +80,15 @@ export default async function Dashboard({
       dayPL += (p.last_price - prev) * p.shares * r;
     }
   }
+  let optionPremium = 0;
+  for (const o of (optRows ?? []) as { premium_net: number | null; currency: string | null }[]) {
+    optionPremium += (o.premium_net ?? 0) * fx(o.currency ?? base);
+  }
   const yieldOnValue = marketValue > 0 ? (annualDivs / marketValue) * 100 : 0;
-  const totalPL = marketValue - costBasis;
+  const totalPL = marketValue - costBasis; // pure share appreciation (premium NOT baked in)
   const totalPLpct = costBasis > 0 ? (totalPL / costBasis) * 100 : 0;
-  const totalReturn = totalPL + dividendsReceived; // capital gains + dividends received
+  // Total return = capital gains + dividends received + option premium — each counted once.
+  const totalReturn = totalPL + dividendsReceived + optionPremium;
   const totalReturnPct = costBasis > 0 ? (totalReturn / costBasis) * 100 : 0;
 
   // Group holdings by portfolio (account), with per-account subtotals.
@@ -218,8 +231,13 @@ export default async function Dashboard({
         {/* Summary tiles */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           <Tile label={`Market value (${base})`} value={money(marketValue, base)} accent />
-          <Tile label="Total return" value={money(totalReturn, base)} sub={`${pct(totalReturnPct)} incl. divs`} positive={totalReturn >= 0} />
-          <Tile label="Total P/L" value={money(totalPL, base)} sub={pct(totalPLpct)} positive={totalPL >= 0} />
+          <Tile
+            label="Total return"
+            value={money(totalReturn, base)}
+            sub={optionPremium !== 0 ? "gains + divs + premium" : `${pct(totalReturnPct)} incl. divs`}
+            positive={totalReturn >= 0}
+          />
+          <Tile label="Total P/L" value={money(totalPL, base)} sub={`${pct(totalPLpct)} on shares`} positive={totalPL >= 0} />
           <Tile label="Day P/L" value={money(dayPL, base)} positive={dayPL >= 0} />
           <Tile label="Est. annual dividends" value={money(annualDivs, base)} sub={`${pct(yieldOnValue)} yield`} neutral />
           <Tile label="Total cost" value={money(costBasis, base)} muted />

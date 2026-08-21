@@ -234,8 +234,13 @@ select
   i.logo_url,
   i.div_rating,
   a.shares,
+  -- Net option premium collected on this underlying (signed), exposed for the options/income
+  -- views. NOTE: it is deliberately NOT folded into avg_cost/cost_basis/gain_value — equity P/L
+  -- here is pure share economics (matches a broker statement), and option premium is counted once
+  -- as its own income line. Folding it in double-counted the same dollars as both a basis
+  -- reduction and premium income.
   coalesce(o.option_premium,0) as option_premium,
-  case when a.buy_shares > 0 then (a.buy_value - coalesce(o.option_premium,0)) / a.buy_shares else 0 end as avg_cost,
+  case when a.buy_shares > 0 then a.buy_value / a.buy_shares else 0 end as avg_cost,
   a.buy_value,
   a.commission_paid,
   a.div_paid,
@@ -243,8 +248,8 @@ select
   pc.change_pct       as day_change_pct,
   pc.as_of            as price_as_of,
   (pc.price * a.shares)                                                            as current_total_price,
-  (case when a.buy_shares > 0 then (a.buy_value - coalesce(o.option_premium,0)) / a.buy_shares else 0 end * a.shares) as cost_basis,
-  (pc.price * a.shares) - (case when a.buy_shares > 0 then (a.buy_value - coalesce(o.option_premium,0)) / a.buy_shares else 0 end * a.shares) as gain_value,
+  (case when a.buy_shares > 0 then a.buy_value / a.buy_shares else 0 end * a.shares) as cost_basis,
+  (pc.price * a.shares) - (case when a.buy_shares > 0 then a.buy_value / a.buy_shares else 0 end * a.shares) as gain_value,
   -- forward dividend income & current yield from instrument reference
   (coalesce(i.annual_div_per_share,0) * a.shares)                                  as year_total_divs,
   case when pc.price > 0 then coalesce(i.annual_div_per_share,0)/pc.price*100 else null end as div_yield_current,
