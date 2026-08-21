@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBrokerProvider, isBrokerSyncOwner } from "@/lib/brokersync";
-import type { BrokerAccount } from "@/lib/brokersync";
+import type { BrokerAccount, BrokerPosition } from "@/lib/brokersync";
 import { enrichInstrumentProfile } from "@/lib/enrich";
 import { transactionDedupeKey } from "@/lib/import/csv";
 
@@ -107,6 +107,15 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   let holdings = 0;
 
   for (const account of accounts) {
+    // For investment/crypto (non-cash) accounts, pull positions first and skip any that hold
+    // nothing — an empty sub-account (e.g. an unused Robinhood crypto account) shouldn't create a
+    // clutter portfolio. Cash accounts are kept regardless: they're tracked by balance, not holdings.
+    let positions: BrokerPosition[] = [];
+    if (!account.isCash) {
+      positions = await provider.getPositions(account.id);
+      if (positions.length === 0) continue;
+    }
+
     const portfolioId = await ensureBrokerPortfolio(supabase, admin, user.id, account);
     if (!portfolioId) continue;
 
@@ -126,8 +135,6 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     // Cash / deposit accounts (e.g. Chase) carry no tradable positions — they're tracked on the
     // Cash & ledger page from the balance above, not as stock holdings. Skip the positions pass.
     if (account.isCash) continue;
-
-    const positions = await provider.getPositions(account.id);
 
     // Clear ALL prior SnapTrade-sourced rows in this account's portfolio (old activity-based
     // rows + the previous position snapshot) so nothing stale or double-counted lingers.
