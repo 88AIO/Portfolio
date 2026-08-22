@@ -41,11 +41,22 @@ const YAHOO_SUFFIX: Record<string, string> = {
   KL: ".KL", KLSE: ".KL", BK: ".BK", SET: ".BK",
 };
 
+// Bursa Malaysia (KL) trades under numeric stock codes on Yahoo, but brokers often report the
+// name ticker (MAYBANK, TENAGA). Map the common ones to their code so quotes resolve.
+const BURSA_CODE: Record<string, string> = {
+  MAYBANK: "1155", TENAGA: "5347", CIMB: "1023", PBBANK: "1295",
+  PCHEM: "5183", IHH: "5225", AXIATA: "6888", SIME: "4197",
+};
+
 function toYahoo(symbol: string, exchange: string): string {
   const ex = (exchange || "US").toUpperCase();
-  const sym = symbol.toUpperCase();
+  let sym = symbol.toUpperCase();
   // Crypto quotes on Yahoo are SYMBOL-USD (e.g. BTC-USD), not the equity suffix scheme.
   if (ex === "CRYPTO" || ex === "CC") return `${sym.replace(/-USD$/, "")}-USD`;
+  // Hong Kong: Yahoo expects numeric codes zero-padded to 4 digits (66 → 0066.HK).
+  if (ex === "HK" && /^\d+$/.test(sym)) sym = sym.padStart(4, "0");
+  // Bursa Malaysia: translate a known name ticker to its numeric code.
+  if (ex === "KL" && BURSA_CODE[sym]) sym = BURSA_CODE[sym];
   const suffix = ex in YAHOO_SUFFIX ? YAHOO_SUFFIX[ex] : "";
   return `${sym}${suffix}`;
 }
