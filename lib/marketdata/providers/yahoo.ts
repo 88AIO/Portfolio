@@ -38,6 +38,7 @@ const YAHOO_SUFFIX: Record<string, string> = {
   AX: ".AX", ASX: ".AX", SI: ".SI", SGX: ".SI",
   SS: ".SS", SHG: ".SS", SZ: ".SZ", SHE: ".SZ",
   KO: ".KS", KQ: ".KQ", TW: ".TW", NS: ".NS", BO: ".BO",
+  KL: ".KL", KLSE: ".KL", BK: ".BK", SET: ".BK",
 };
 
 function toYahoo(symbol: string, exchange: string): string {

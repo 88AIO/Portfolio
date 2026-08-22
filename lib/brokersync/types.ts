@@ -15,6 +15,8 @@ export type BrokerAccount = {
 
 export type BrokerPosition = {
   symbol: string | null;
+  name: string | null; // company/security description from the broker (e.g. "Xiaomi Corp")
+  exchange: string | null; // normalized exchange code (US, HK, TW, SS, SZ, SI, KL, …)
   units: number | null;
   price: number | null; // last market price from the broker
   avgCost: number | null; // average purchase price per share (may be null for some brokers)

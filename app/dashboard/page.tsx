@@ -322,11 +322,7 @@ export default async function Dashboard({
                           return (
                             <tr key={p.instrument_id} className="border-t border-slate-100 hover:bg-slate-50/60">
                               <td className="py-2.5">
-                                <div className="font-medium text-slate-900">{p.symbol}</div>
-                                <div className="text-xs text-slate-400">
-                                  {p.exchange}
-                                  {p.type === "crypto" ? " · Crypto" : p.sector ? ` · ${p.sector}` : p.sector_weights ? " · ETF" : p.name ? ` · ${p.name}` : ""}
-                                </div>
+                                <HoldingName symbol={p.symbol} exchange={p.exchange} name={p.name} type={p.type} etf={!!p.sector_weights} sector={p.sector} />
                               </td>
                               <td className="py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>
                               <td className="py-2.5 text-right tabular-nums">{money(p.avg_cost, p.currency)}</td>
@@ -362,12 +358,7 @@ export default async function Dashboard({
                       return (
                         <tr key={p.instrument_id} className="border-t border-slate-100 hover:bg-slate-50/60">
                           <td className="py-2.5">
-                            <div className="font-medium text-slate-900">{p.symbol}</div>
-                            <div className="text-xs text-slate-400">
-                              {p.exchange}
-                              {p.type === "crypto" ? " · Crypto" : p.sector ? ` · ${p.sector}` : p.sector_weights ? " · ETF" : p.name ? ` · ${p.name}` : ""}
-                              {p.accounts.size > 1 ? ` · ${p.accounts.size} accounts` : ""}
-                            </div>
+                            <HoldingName symbol={p.symbol} exchange={p.exchange} name={p.name} type={p.type} etf={!!p.sector_weights} sector={p.sector} extra={p.accounts.size > 1 ? `${p.accounts.size} accounts` : undefined} />
                           </td>
                           <td className="py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>
                           <td className="py-2.5 text-right tabular-nums">{money(p.avg_cost, p.currency)}</td>
@@ -465,6 +456,48 @@ export default async function Dashboard({
         )}
       </div>
     </main>
+  );
+}
+
+// Friendly market label for the exchange code we store, so an intl holding reads "HKEX · 1810"
+// rather than a bare "HK". Falls back to the raw code for anything unmapped.
+const MARKET_LABEL: Record<string, string> = {
+  US: "US", HK: "HKEX", TW: "Taiwan", SS: "Shanghai", SZ: "Shenzhen", SI: "SGX",
+  KL: "Bursa", BK: "Thailand", TSE: "Tokyo", LSE: "London", TO: "Toronto", AX: "ASX",
+  KO: "Korea", NS: "NSE", BO: "BSE", CRYPTO: "Crypto",
+};
+function marketLabel(exchange: string | null): string {
+  const ex = (exchange || "US").toUpperCase();
+  return MARKET_LABEL[ex] ?? ex;
+}
+
+// Holding identity cell: company name on top (when we have a real one), with a
+// "<market> · <ticker>" line plus its category (crypto / ETF / sector) beneath.
+function HoldingName({
+  symbol,
+  exchange,
+  name,
+  type,
+  etf,
+  sector,
+  extra,
+}: {
+  symbol: string;
+  exchange: string | null;
+  name: string | null;
+  type: string | null;
+  etf?: boolean;
+  sector?: string | null;
+  extra?: string;
+}) {
+  const hasName = !!name && name.trim() !== "" && name.trim().toUpperCase() !== symbol.toUpperCase();
+  const category = type === "crypto" ? "Crypto" : etf ? "ETF" : sector || null;
+  const meta = [`${marketLabel(exchange)} · ${symbol}`, category, extra].filter(Boolean).join(" · ");
+  return (
+    <div>
+      <div className="font-medium text-slate-900">{hasName ? name : symbol}</div>
+      <div className="text-xs text-slate-400">{meta}</div>
+    </div>
   );
 }
 

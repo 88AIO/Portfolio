@@ -27,15 +27,23 @@ async function resolveInstrument(
   symbol: string,
   exchange: string,
   currency: string,
-  type: string = "stock"
+  type: string = "stock",
+  name?: string | null
 ): Promise<{ id: string; currency: string } | null> {
   const { data: existing } = await admin
-    .from("instruments").select("id, currency").eq("symbol", symbol).eq("exchange", exchange).maybeSingle();
-  if (existing) return existing as { id: string; currency: string };
-  // Create cheaply (name = symbol, no provider lookup) to keep sync fast; the dashboard's
-  // "Refresh prices" enriches names/dividends later.
+    .from("instruments").select("id, currency, name").eq("symbol", symbol).eq("exchange", exchange).maybeSingle();
+  if (existing) {
+    // Backfill a real name if this instrument was created earlier with name = symbol.
+    const e = existing as { id: string; currency: string; name: string | null };
+    if (name && (!e.name || e.name === symbol)) {
+      await admin.from("instruments").update({ name }).eq("id", e.id);
+    }
+    return { id: e.id, currency: e.currency };
+  }
+  // Use the broker's description as the name when present, so intl tickers show a company name
+  // immediately instead of a bare code. Falls back to the symbol; "Refresh prices" enriches later.
   const { data: created } = await admin.from("instruments").insert({
-    symbol, exchange, name: symbol, currency: currency || "USD", type,
+    symbol, exchange, name: name || symbol, currency: currency || "USD", type,
   }).select("id, currency").single();
   return (created as { id: string; currency: string } | null) ?? null;
 }
@@ -157,7 +165,9 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
       if (!pos.symbol || !pos.units || pos.units <= 0) continue;
       const isCrypto = pos.isCrypto || brokerIsCrypto;
       let symbol = pos.symbol.toUpperCase();
-      let exchange = "US";
+      // Use the broker's real exchange (HK, TW, SS, SI, KL, …) so intl holdings aren't mislabeled
+      // as US and price/dividend lookups resolve to the right market. Defaults to US.
+      let exchange = (pos.exchange || "US").toUpperCase();
       let instType = "stock";
       if (isCrypto) {
         symbol = symbol.replace(/[-/]?(USD|USDC|USDT)$/i, "") || symbol; // BTC-USD -> BTC
@@ -168,7 +178,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
       const key = `${symbol}|${exchange}`;
       let inst = instBySymbol.get(key);
       if (!inst) {
-        const resolved = await resolveInstrument(admin, symbol, exchange, pos.currency ?? "USD", instType);
+        const resolved = await resolveInstrument(admin, symbol, exchange, pos.currency ?? "USD", instType, pos.name);
         if (!resolved) continue;
         inst = resolved;
         instBySymbol.set(key, inst);

@@ -32,6 +32,54 @@ function extractTicker(s: unknown): string | null {
   return null;
 }
 
+// Map SnapTrade exchange identifiers (code or MIC) onto our internal exchange codes, which the
+// market-data layer turns into Yahoo suffixes. Covers the non-US markets our holdings actually use.
+const EXCHANGE_MAP: Record<string, string> = {
+  // Hong Kong
+  SEHK: "HK", HKEX: "HK", XHKG: "HK", HKG: "HK",
+  // Taiwan
+  TAI: "TW", TWSE: "TW", TPE: "TW", ROCO: "TW", XTAI: "TW",
+  // Shanghai
+  SSE: "SS", SHG: "SS", SHH: "SS", SHA: "SS", XSHG: "SS",
+  // Shenzhen
+  SZSE: "SZ", SHE: "SZ", SHZ: "SZ", XSHE: "SZ",
+  // Singapore
+  SGX: "SI", SES: "SI", XSES: "SI",
+  // Malaysia (Bursa)
+  KLS: "KL", MYX: "KL", BURSA: "KL", KLSE: "KL", XKLS: "KL",
+  // Thailand
+  SET: "BK", XBKK: "BK",
+  // Japan
+  TSE: "TSE", JPX: "TSE", XTKS: "TSE",
+  // London
+  LSE: "LSE", XLON: "LSE",
+};
+
+// The security's exchange lives on the (possibly nested) symbol object as `exchange.code` /
+// `exchange.mic_code`. Return our normalized code; default to US when unknown/not mapped.
+function extractExchange(p: unknown): string {
+  const pos = p as { instrument?: unknown; symbol?: unknown };
+  const s = (pos.instrument ?? pos.symbol) as { symbol?: unknown; exchange?: unknown } | undefined;
+  const inner = (s?.symbol && typeof s.symbol === "object" ? s.symbol : s) as
+    | { exchange?: { code?: string; mic_code?: string } }
+    | undefined;
+  const ex = inner?.exchange;
+  const code = (ex?.code ?? "").toString().toUpperCase();
+  const mic = (ex?.mic_code ?? "").toString().toUpperCase();
+  return EXCHANGE_MAP[code] ?? EXCHANGE_MAP[mic] ?? "US";
+}
+
+// The human-readable security name/description, from the (possibly nested) symbol object.
+function extractName(p: unknown): string | null {
+  const pos = p as { instrument?: unknown; symbol?: unknown };
+  const s = (pos.instrument ?? pos.symbol) as { symbol?: unknown; description?: string } | undefined;
+  const inner = (s?.symbol && typeof s.symbol === "object" ? s.symbol : s) as
+    | { description?: string; name?: string }
+    | undefined;
+  const desc = inner?.description ?? inner?.name ?? (s as { description?: string })?.description;
+  return typeof desc === "string" && desc.trim() ? desc.trim() : null;
+}
+
 // The security type code ("cs", "et", "crypto", …) lives on the (possibly nested) symbol.
 function extractAssetType(p: unknown): string | null {
   const pos = p as { instrument?: unknown; symbol?: unknown };
@@ -124,6 +172,8 @@ export const snaptradeProvider: BrokerSyncProvider = {
           const assetType = extractAssetType(p);
           return {
             symbol: extractTicker(p.instrument ?? p.symbol),
+            name: extractName(p),
+            exchange: extractExchange(p),
             units: isFinite(units) ? units : null,
             price: isFinite(priceNum) ? priceNum : null,
             avgCost,
