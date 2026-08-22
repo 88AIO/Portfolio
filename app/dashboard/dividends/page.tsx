@@ -150,10 +150,26 @@ export default async function DividendsPage() {
         <div className="mb-2 flex justify-end">
           <PricesAsOf asOf={oldestPriceAsOf(rows)} />
         </div>
+        <div className="mb-4">
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">Your dividend income</h1>
+          <p className="mt-1 text-sm text-slate-500">What your holdings pay you, what&apos;s coming up, and how dependable it looks.</p>
+        </div>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-          <Card label={`Est. annual income (${base})`} value={money(annualIncome, base)} />
-          <Card label="Yield on value" value={pct(yieldOnValue)} />
-          <Card label="Est. monthly avg" value={money(annualIncome / 12, base)} />
+          <Card
+            label="Income / year"
+            hint="Estimated dividend income over the next year at current payout rates."
+            value={money(annualIncome, base)}
+          />
+          <Card
+            label="Yield"
+            hint="Your dividend income as a percentage of what your holdings are worth today."
+            value={pct(yieldOnValue)}
+          />
+          <Card
+            label="Per month (avg)"
+            hint="Your yearly dividend income spread evenly across 12 months."
+            value={money(annualIncome / 12, base)}
+          />
         </div>
 
         {/* Forward calendar — next 12 months of projected income by month */}
@@ -165,8 +181,8 @@ export default async function DividendsPage() {
             </span>
           </div>
           <p className="mb-4 text-xs text-slate-400">
-            Estimated payouts by month, projected from each holding&apos;s next ex-date and payout
-            frequency.
+            What you can expect to collect each month, projected from when each holding usually pays and
+            how often.
             {calendar.untimedCount > 0 &&
               ` ${calendar.untimedCount} payer${calendar.untimedCount === 1 ? "" : "s"} with no known next date ${calendar.untimedCount === 1 ? "is" : "are"} not shown.`}
           </p>
@@ -216,7 +232,8 @@ export default async function DividendsPage() {
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
           {/* Upcoming */}
           <section className="rounded-2xl border border-slate-200 bg-white p-5">
-            <h2 className="mb-4 font-semibold">Upcoming payouts</h2>
+            <h2 className="font-semibold">Coming up</h2>
+            <p className="mb-4 text-xs text-slate-400">The next dividend from each holding, with your estimated payout.</p>
             {upcoming.length === 0 ? (
               <p className="py-8 text-center text-sm text-slate-400">
                 No upcoming ex-dividend dates yet. Add holdings and hit “Refresh prices”.
@@ -240,7 +257,8 @@ export default async function DividendsPage() {
 
           {/* Per-holding forecast */}
           <section className="rounded-2xl border border-slate-200 bg-white p-5">
-            <h2 className="mb-4 font-semibold">Annual income by holding</h2>
+            <h2 className="font-semibold">Income by holding</h2>
+            <p className="mb-4 text-xs text-slate-400">How much each stock is expected to pay you over a year.</p>
             {forecast.length === 0 ? (
               <p className="py-8 text-center text-sm text-slate-400">No dividend-paying holdings yet.</p>
             ) : (
@@ -313,10 +331,10 @@ export default async function DividendsPage() {
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase text-slate-400">
                   <tr>
-                    <th className="pb-2">Ex-date</th>
-                    <th className="pb-2">Symbol</th>
-                    <th className="pb-2 text-right">Per share</th>
-                    <th className="pb-2 text-right">Total (at current shares)</th>
+                    <th className="pb-2" title="Ex-dividend date — you had to own the stock before this day to receive the payout.">Ex-date</th>
+                    <th className="pb-2">Stock</th>
+                    <th className="pb-2 text-right" title="The dividend paid for each share.">Per share</th>
+                    <th className="pb-2 text-right" title="Per-share amount × the shares you hold today.">Your total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -338,10 +356,13 @@ export default async function DividendsPage() {
   );
 }
 
-function Card({ label, value }: { label: string; value: string }) {
+function Card({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <div className="text-xs uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="flex items-center gap-1 text-xs uppercase tracking-wide text-slate-400">
+        {label}
+        {hint && <span title={hint} aria-label={hint} className="cursor-help text-slate-300">ⓘ</span>}
+      </div>
       <div className="mt-1 text-xl font-semibold">{value}</div>
     </div>
   );
