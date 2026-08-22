@@ -12,6 +12,10 @@ export type BrokerAccount = {
   cashBalance: number | null; // total/cash balance the broker reports (used for cash accounts)
   currency: string; // balance currency
   isCash: boolean; // true for bank/deposit accounts (route to the cash ledger, not holdings)
+  // SnapTrade's own transaction-sync status for this account — the definitive read on why the
+  // activities feed is (or isn't) populated: whether the initial backfill finished, and the
+  // earliest transaction SnapTrade holds. null when the provider doesn't report it.
+  txnSync?: { initialDone: boolean | null; firstDate: string | null; lastSync: string | null };
   raw?: unknown; // temporary: the raw account object, for shape inspection
 };
 

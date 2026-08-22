@@ -261,10 +261,16 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
 
     if (provider.getOptionActivities) {
       const act = await provider.getOptionActivities(account.id);
+      // SnapTrade's own transaction-sync status explains an empty activities feed: whether the
+      // initial backfill finished, and the earliest transaction it holds.
+      const ts = account.txnSync;
+      const tsNote = ts
+        ? ` {txnSync: initialDone=${ts.initialDone}, firstTxn=${ts.firstDate ?? "none"}}`
+        : " {txnSync: unknown}";
       optionDebug.push(
         act.error
           ? `${acctLabel}: activities error — ${act.error}`
-          : `${acctLabel}: ${act.scanned} activities, ${act.optionRows} option, ${act.legs.length} imported${act.scanned === 0 && act.shape ? ` [resp: ${act.shape}]` : ""}`
+          : `${acctLabel}: ${act.scanned} activities, ${act.optionRows} option, ${act.legs.length} imported${act.scanned === 0 && act.shape ? ` [resp: ${act.shape}]` : ""}${tsNote}`
       );
       optionLegs += await importOptionLegs(portfolioId, act.legs, "snaptrade-act");
     }

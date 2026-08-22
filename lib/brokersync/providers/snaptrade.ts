@@ -139,6 +139,7 @@ export const snaptradeProvider: BrokerSyncProvider = {
     return accounts.map((a) => {
       const category = (a.account_category ?? "").toString().trim();
       const isCash = /deposit|loc|bank|checking|saving|cash/i.test(category);
+      const txn = (a as { sync_status?: { transactions?: { initial_sync_completed?: boolean; first_transaction_date?: string | null; last_successful_sync?: string | null } } }).sync_status?.transactions;
       return {
         id: a.id,
         brokerageName: a.institution_name ?? "Brokerage",
@@ -151,6 +152,9 @@ export const snaptradeProvider: BrokerSyncProvider = {
         cashBalance: extractCash(a),
         currency: extractCurrency(a),
         isCash,
+        txnSync: txn
+          ? { initialDone: txn.initial_sync_completed ?? null, firstDate: txn.first_transaction_date ?? null, lastSync: txn.last_successful_sync ?? null }
+          : undefined,
         raw: a,
       };
     });
