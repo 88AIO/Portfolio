@@ -3,8 +3,8 @@
 // and no connection portal. Reads current positions (the /positions endpoint — the deprecated
 // /holdings endpoint returns 410 Gone for accounts created after May 2026). See docs/SPEC_broker-sync.md.
 import { Snaptrade, SnaptradeAuth } from "snaptrade-typescript-sdk";
-import type { BrokerAccount, BrokerPosition, BrokerSyncProvider, BrokerOptionLeg, BrokerOptionActivityResult } from "../types";
-import { normalizeSnaptradeActivity } from "../options";
+import type { BrokerAccount, BrokerPosition, BrokerSyncProvider, BrokerOptionLeg, BrokerOptionActivityResult, BrokerOptionPositionResult } from "../types";
+import { normalizeSnaptradeActivity, normalizeSnaptradeOptionPosition, isOptionPosition } from "../options";
 
 function buildClient() {
   const clientId = process.env.SNAPTRADE_CLIENT_ID;
@@ -163,7 +163,9 @@ export const snaptradeProvider: BrokerSyncProvider = {
       const res = await snap.accountInformation.getAllAccountPositions({ accountId });
       const results = res.data?.results ?? [];
       return results
-        .filter((p) => !p.cash_equivalent)
+        // Skip cash-equivalents and option contracts — options are handled by getOptionPositions;
+        // mapping them here would create a bogus equity holding from the OCC symbol.
+        .filter((p) => !p.cash_equivalent && !isOptionPosition(p))
         .map((p): BrokerPosition => {
           const units = p.units != null ? Number(p.units) : NaN;
           const priceNum = p.price != null ? Number(p.price) : NaN;
@@ -226,6 +228,34 @@ export const snaptradeProvider: BrokerSyncProvider = {
     } catch (e) {
       // Surface the failure instead of masking it as "no options" — the caller reports it.
       return { legs, scanned, optionRows, error: String((e as { message?: string })?.message ?? e).slice(0, 200) };
+    }
+  },
+
+  async getOptionPositions(accountId): Promise<BrokerOptionPositionResult> {
+    const snap = getClient();
+    if (!snap) return { legs: [], positions: 0, optionPositions: 0, error: "SnapTrade not configured" };
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      const res = await snap.accountInformation.getAllAccountPositions({ accountId });
+      const results = (res.data?.results ?? []) as unknown[];
+      const legs: BrokerOptionLeg[] = [];
+      let optionPositions = 0;
+      let sample: string | undefined;
+      for (const p of results) {
+        if (!isOptionPosition(p)) continue;
+        optionPositions++;
+        // Capture the shape of the first option position we ever see, so the exact field mapping
+        // (esp. per-share vs per-contract premium) can be verified against real data.
+        if (!sample) {
+          const inst = (p as { instrument?: Record<string, unknown> }).instrument ?? {};
+          sample = `pos[${Object.keys(p as object).slice(0, 8).join(",")}] inst[${Object.keys(inst).slice(0, 10).join(",")}]`;
+        }
+        const leg = normalizeSnaptradeOptionPosition(p, today);
+        if (leg) legs.push(leg);
+      }
+      return { legs, positions: results.length, optionPositions, sample };
+    } catch (e) {
+      return { legs: [], positions: 0, optionPositions: 0, error: String((e as { message?: string })?.message ?? e).slice(0, 200) };
     }
   },
 };

@@ -40,6 +40,9 @@ export interface BrokerSyncProvider {
   // the legs so a caller can tell "no options traded" (scanned>0, legs=0) from "the call failed"
   // (error set) — otherwise both look like an empty result.
   getOptionActivities?(accountId: string, since?: string): Promise<BrokerOptionActivityResult>;
+  // Optional: read CURRENT open option positions from the positions feed (works even when the
+  // transactions feed is empty). Returns short seller legs plus diagnostics.
+  getOptionPositions?(accountId: string): Promise<BrokerOptionPositionResult>;
 }
 
 export type BrokerOptionActivityResult = {
@@ -48,4 +51,12 @@ export type BrokerOptionActivityResult = {
   optionRows: number; // rows that were option events (before seller-flow filtering)
   error?: string; // set when the provider call threw / was rejected
   shape?: string; // debug: top-level response keys when the feed came back empty (to spot a mis-read)
+};
+
+export type BrokerOptionPositionResult = {
+  legs: BrokerOptionLeg[];
+  positions: number; // total positions scanned in the feed
+  optionPositions: number; // how many were option contracts (short + long)
+  sample?: string; // debug: keys of the first option position seen (to verify field mapping)
+  error?: string;
 };

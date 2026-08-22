@@ -2,7 +2,7 @@
 import type { BrokerSyncProvider } from "./types";
 import { snaptradeProvider } from "./providers/snaptrade";
 
-export type { BrokerAccount, BrokerPosition, BrokerSyncProvider } from "./types";
+export type { BrokerAccount, BrokerPosition, BrokerSyncProvider, BrokerOptionLeg } from "./types";
 
 export function getBrokerProvider(): BrokerSyncProvider {
   return snaptradeProvider;

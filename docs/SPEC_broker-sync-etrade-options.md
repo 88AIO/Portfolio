@@ -71,6 +71,28 @@ against a live E*TRADE options fill (the owner has none yet). On the owner's **f
 trade, re-check the mapping — especially `option_type` action strings and `price` vs `amount` for
 premium-per-share — and adjust `normalizeSnaptradeActivity()` if E*TRADE labels differ.
 
+## Update (Aug 2026): activities feed is empty → use the positions feed
+
+Live QC finding: for these connections SnapTrade's **transactions/activities feed returns 0 rows**
+across every account (diagnostic showed `data,pagination` with an empty `data` array — our read is
+correct; the feed is genuinely empty). This is a known SnapTrade trait — many connections expose
+*holdings* but not the full *transaction* history (it can require a higher data tier / brokerage
+support). So the activities path, while still wired, won't populate here.
+
+**Primary path is now the positions feed** (`getAllAccountPositions`), which demonstrably works (it
+already syncs all stock holdings). Per SnapTrade's schema, an open option contract appears there as
+an `AccountPosition` with `instrument.kind === "option"` (OCC symbol, `option_type`, `strike_price`,
+`expiration_date`, `multiplier`, `underlying`). `getOptionPositions()` reads those and imports each
+**short** position (`units < 0`) as an open `sell_to_open` leg under the `opt:snaptrade-pos:` prefix.
+Long options are skipped (not seller income). A latent bug was fixed alongside: `getPositions` now
+skips option rows so an OCC symbol never becomes a bogus equity holding.
+
+**One thing to verify on the first real position:** the premium-per-share mapping. We use SnapTrade's
+per-share `cost_basis` (the same convention the equity sync relies on), falling back to `price`. The
+sync's per-account diagnostic prints the raw shape of the first option position it sees
+(`[pos[...] inst[...]]`) so the exact field semantics (per-share vs per-contract) can be confirmed
+against a live short option before the premium figure is trusted.
+
 ## Fallback if SnapTrade ever falls short
 
 A CSV importer for E*TRADE's own options export (mirroring the existing stock CSV importer) is the

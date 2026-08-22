@@ -116,3 +116,68 @@ export function normalizeSnaptradeActivity(raw: unknown): BrokerOptionLeg | null
     ref,
   };
 }
+
+// --- Option POSITIONS (from the working getAllAccountPositions feed) ---
+// SnapTrade's transactions feed is empty for many connections, but current OPEN option positions
+// ride along in the positions response as an AccountPosition whose instrument.kind === "option".
+// This turns one such position into an open seller leg. We import SHORT positions only (units < 0)
+// — a sold put/call is the wheel story; a long option isn't seller income. See
+// docs/SPEC_broker-sync-etrade-options.md.
+
+// True when a positions-feed row is an option contract.
+export function isOptionPosition(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const inst = (raw as { instrument?: unknown }).instrument;
+  if (!inst || typeof inst !== "object") return false;
+  const i = inst as Record<string, unknown>;
+  return str(i.kind).toLowerCase() === "option" || (i.strike_price != null && i.expiration_date != null && i.option_type != null);
+}
+
+/**
+ * Normalize one option position (AccountPosition with an option instrument) into an open
+ * `sell_to_open` leg, or null if it isn't a short option we track.
+ * @param today YYYY-MM-DD — used as the leg's trade date (a snapshot has no open date).
+ */
+export function normalizeSnaptradeOptionPosition(raw: unknown, today: string): BrokerOptionLeg | null {
+  if (!isOptionPosition(raw)) return null;
+  const p = raw as Record<string, unknown>;
+  const inst = p.instrument as Record<string, unknown>;
+
+  const units = numOf(p.units);
+  if (units == null || units >= 0) return null; // short only (negative units); skip long / flat
+  const contracts = Math.abs(Math.round(units)) || 1;
+
+  const rawOptType = str(inst.option_type).toUpperCase();
+  const optionType: "put" | "call" | null = rawOptType.startsWith("P") ? "put" : rawOptType.startsWith("C") ? "call" : null;
+  if (!optionType) return null;
+
+  const strike = numOf(inst.strike_price);
+  const expiration = str(inst.expiration_date).slice(0, 10);
+  if (strike == null || !expiration) return null;
+
+  // Underlying ticker: the instrument's underlying object, else the OCC symbol's leading root.
+  const und = inst.underlying as Record<string, unknown> | undefined;
+  const occRoot = str(inst.symbol).trim().split(/[\s\d]/)[0];
+  const underlying = (str(und?.symbol) || str(und?.raw_symbol) || str(und?.ticker) || occRoot).toUpperCase();
+  if (!underlying) return null;
+
+  // Premium per share: SnapTrade cost_basis is the per-share average (same convention the equity
+  // sync relies on); fall back to the market price. Stored positive — the DB view signs by action.
+  const premiumPerShare = Math.abs(numOf(p.cost_basis) ?? numOf(p.price) ?? 0);
+
+  return {
+    underlying,
+    exchange: "US",
+    optionType,
+    strike,
+    expiration,
+    action: "sell_to_open",
+    contracts,
+    premiumPerShare,
+    fee: 0,
+    currency: currencyOf(p.currency),
+    tradeDate: today,
+    // One open short position per contract → stable key for snapshot upsert.
+    ref: `pos:${underlying}:${optionType}:${strike}:${expiration}`,
+  };
+}
