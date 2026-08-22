@@ -8,9 +8,11 @@ import {
 import { enrichInstrumentProfile } from "@/lib/enrich";
 import { searchInstrument } from "@/lib/marketdata";
 import { FINDER_UNIVERSE } from "@/lib/options/finder-universe";
+import { runBrokerSyncForUser } from "@/app/dashboard/broker/actions";
+import { isBrokerSyncOwner } from "@/lib/brokersync";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // Nightly market-data sync (Vercel Cron). Does the heavy provider work the user-facing "Refresh
 // prices" deliberately skips: fresh quotes, dividend history, weekly price history, and
@@ -39,6 +41,21 @@ export async function GET(request: Request) {
   if (!authorized(request)) return new Response("Unauthorized", { status: 401 });
 
   const admin = createAdminClient();
+
+  // --- Brokerage auto-sync (runs first, so newly-synced holdings get priced in the same run) ---
+  // Pull each owner's connected brokerages so options/holdings self-update nightly with no clicks.
+  // Gated to BROKER_SYNC_OWNER_EMAILS — the personal SnapTrade key only reads the owner's accounts,
+  // so we must only ever sync into an owner's own portfolios. Failures here never abort the run.
+  let brokerSynced = 0;
+  try {
+    const { data: userList } = await admin.auth.admin.listUsers();
+    const ownerIds = (userList?.users ?? []).filter((u) => isBrokerSyncOwner(u.email)).map((u) => u.id);
+    for (const uid of ownerIds) {
+      const res = await runBrokerSyncForUser(uid);
+      if (res.ok) brokerSynced += res.options ?? 0;
+    }
+  } catch { /* isolate — market-data sync still runs */ }
+
   // The positions view is security_invoker; the service-role client bypasses RLS, so this returns
   // every held position across all users. Dedupe to one row per instrument.
   const { data, error } = await admin
@@ -98,5 +115,5 @@ export async function GET(request: Request) {
     );
   }
 
-  return Response.json({ synced: ok, failed, total: held.length, ivCaptured: ivOk });
+  return Response.json({ synced: ok, failed, total: held.length, ivCaptured: ivOk, brokerOptionLegs: brokerSynced });
 }

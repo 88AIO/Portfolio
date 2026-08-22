@@ -54,8 +54,9 @@ async function resolveInstrument(
 }
 
 // Each brokerage account maps to its own Snowfolio portfolio (named with the masked account #).
+// All writes go through the service-role admin client (scoped explicitly by userId) so this works
+// both from the signed-in action and the session-less nightly cron.
 async function ensureBrokerPortfolio(
-  supabase: Awaited<ReturnType<typeof createClient>>,
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
   account: BrokerAccount
@@ -74,7 +75,7 @@ async function ensureBrokerPortfolio(
     return existing.portfolio_id as string;
   }
 
-  const { data: pf } = await supabase.from("portfolios").insert({
+  const { data: pf } = await admin.from("portfolios").insert({
     user_id: userId, name,
     broker: account.brokerageName, sync_provider: "snaptrade", is_auto_sync_enabled: true,
   }).select("id").single();
@@ -95,12 +96,8 @@ async function ensureBrokerPortfolio(
   return portfolioId;
 }
 
-// Pull the CURRENT positions from every connected brokerage account and mirror them into Snowfolio.
-// Each sync replaces this account's synced snapshot, so holdings always match the broker exactly.
+// Signed-in entry point: verify the caller is the SnapTrade key owner, then run the sync for them.
 export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
-  const provider = getBrokerProvider();
-  if (!provider.isConfigured()) return { ok: false, message: "Broker sync isn't configured." };
-
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, message: "Not signed in." };
@@ -111,8 +108,17 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   if (!isBrokerSyncOwner(user.email)) {
     return { ok: false, message: "Broker sync is limited to the account owner on this instance." };
   }
+  return runBrokerSyncForUser(user.id);
+}
 
-  const userId = user.id; // captured so the concurrent per-account closure sees a non-null id
+// Session-agnostic core: pull every connected brokerage account and mirror it into the given user's
+// Snowfolio. All DB writes go through the service-role admin client, scoped by userId, so this runs
+// identically from the signed-in action above and the nightly cron. The CALLER is responsible for
+// the owner-gate (the action checks the session; the cron only passes owner user IDs).
+export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncResult> {
+  const provider = getBrokerProvider();
+  if (!provider.isConfigured()) return { ok: false, message: "Broker sync isn't configured." };
+
   const admin = createAdminClient();
   const accounts = await provider.listAccounts();
   const today = todayIso();
@@ -135,7 +141,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     mode: "accumulate" | "snapshot"
   ): Promise<number> {
     if (mode === "snapshot") {
-      await supabase.from("option_transactions").delete()
+      await admin.from("option_transactions").delete()
         .eq("portfolio_id", portfolioId).like("dedupe_key", `opt:${source}:%`);
     }
     if (!legs.length) return 0;
@@ -163,7 +169,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     }
     if (!optRows.length) return 0;
     // ignoreDuplicates keeps already-imported rows untouched — the accumulate guarantee.
-    await supabase.from("option_transactions")
+    await admin.from("option_transactions")
       .upsert(optRows, { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true });
     return optRows.length;
   }
@@ -184,7 +190,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
       if (positions.length === 0) return { holdings, optionLegs, debug };
     }
 
-    const portfolioId = await ensureBrokerPortfolio(supabase, admin, userId, account);
+    const portfolioId = await ensureBrokerPortfolio(admin, userId, account);
     if (!portfolioId) return { holdings, optionLegs, debug };
 
     // Record the account's balance/category snapshot (and raw shape) on every sync.
@@ -205,7 +211,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     if (account.isCash) return { holdings, optionLegs, debug };
 
     // Equity holdings are a current snapshot: clear this account's prior synced rows, then insert.
-    await supabase
+    await admin
       .from("transactions")
       .delete()
       .eq("portfolio_id", portfolioId)
@@ -260,7 +266,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     }
 
     if (priceRows.length) await admin.from("price_cache").upsert(priceRows);
-    if (rows.length) await supabase.from("transactions").insert(rows);
+    if (rows.length) await admin.from("transactions").insert(rows);
     holdings += rows.length;
 
     // --- Options: import into the options ledger, kept separate from the equity snapshot above ---
