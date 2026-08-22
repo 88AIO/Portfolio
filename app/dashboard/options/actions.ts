@@ -13,6 +13,29 @@ function todayIso(): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
+// --- Notification preferences (options/dividend alerts + weekly income digest) ---
+export async function getNotificationPrefs(): Promise<{ email_alerts: boolean; email_digest: boolean }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { email_alerts: false, email_digest: false };
+  const { data } = await supabase
+    .from("notification_prefs").select("email_alerts, email_digest").eq("user_id", user.id).maybeSingle();
+  return { email_alerts: !!data?.email_alerts, email_digest: !!data?.email_digest };
+}
+
+export async function updateNotificationPrefs(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  const email_alerts = formData.get("email_alerts") === "on";
+  const email_digest = formData.get("email_digest") === "on";
+  await supabase.from("notification_prefs").upsert(
+    { user_id: user.id, email_alerts, email_digest, updated_at: new Date().toISOString() },
+    { onConflict: "user_id" }
+  );
+  revalidatePath("/dashboard/options");
+}
+
 // Record a sold/closed/expired/assigned option leg. Premium is entered PER SHARE
 // (how sellers think); the DB stores it per share and multiplies by 100×contracts in the views.
 // An "assigned" action also writes the linked equity leg (put → buy shares at strike,

@@ -14,6 +14,8 @@ import {
 } from "@/lib/options";
 import AddOptionForm from "@/components/AddOptionForm";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
+import NotificationSettings from "@/components/NotificationSettings";
+import { getNotificationPrefs } from "./actions";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -37,12 +39,13 @@ export default async function OptionsPage() {
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
 
-  const [{ data: optRows }, { data: posRows }, { data: pfList }] = await Promise.all([
+  const [{ data: optRows }, { data: posRows }, { data: pfList }, notifPrefs] = await Promise.all([
     supabase.from("option_positions").select("*").order("expiration"),
     supabase.from("positions").select(
       "symbol, currency, shares, last_price, price_as_of, div_paid, option_premium, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
     ),
     supabase.from("portfolios").select("id, name").order("created_at"),
+    getNotificationPrefs(),
   ]);
 
   const rawOptions = (optRows ?? []) as OptionPositionRow[];
@@ -196,10 +199,19 @@ export default async function OptionsPage() {
               ))}
             </ul>
             <p className="mt-3 text-xs text-slate-400">
-              Email &amp; push alerts are on the roadmap; for now these surface whenever you open this page.
+              Turn on email alerts below to get these before you open the app.
             </p>
           </section>
         )}
+
+        {/* Notification settings */}
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+          <h2 className="mb-1 text-base font-semibold">Notifications</h2>
+          <p className="mb-4 text-xs text-slate-400">
+            Optional emails — assignment/expiry/ex-dividend heads-ups, and a weekly income digest.
+          </p>
+          <NotificationSettings initial={notifPrefs} />
+        </section>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           {/* Open positions */}

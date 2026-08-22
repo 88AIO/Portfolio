@@ -433,3 +433,28 @@ create policy "own cash_ledger" on public.cash_ledger for all using (
 ) with check (
   exists (select 1 from public.portfolios p where p.id = cash_ledger.portfolio_id and p.user_id = auth.uid())
 );
+
+-- ============================================================
+-- 10. NOTIFICATIONS — options alerts + weekly income digest
+-- ============================================================
+-- Per-user email preferences (opt-in; off by default).
+create table if not exists public.notification_prefs (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  email_alerts boolean not null default false,   -- assignment/expiry/ex-dividend alerts
+  email_digest boolean not null default false,   -- weekly income digest
+  updated_at timestamptz not null default now()
+);
+alter table public.notification_prefs enable row level security;
+drop policy if exists "own notification_prefs" on public.notification_prefs;
+create policy "own notification_prefs" on public.notification_prefs for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Idempotency log so a daily alert cron never emails the same event twice.
+-- Service-role only (RLS on, no client policies).
+create table if not exists public.sent_notifications (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  dedupe_key text not null,
+  sent_at timestamptz not null default now(),
+  primary key (user_id, dedupe_key)
+);
+alter table public.sent_notifications enable row level security;

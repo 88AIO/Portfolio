@@ -1,0 +1,80 @@
+import { createAdminClient } from "@/lib/supabase/admin";
+import { computeOption, type OptionPositionRow } from "@/lib/options";
+import { buildAlerts, alertsEmailHtml, type PositionLite } from "@/lib/notifications/build";
+import { sendEmail, emailShell } from "@/lib/email";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+// Daily options/dividend alerts. For each user who opted in, detect assignment risk, near expiries,
+// and upcoming ex-dividends, skip anything already emailed (sent_notifications), and send one
+// summary email. CRON_SECRET-guarded; fails closed.
+
+function authorized(request: Request): boolean {
+  const secret = process.env.CRON_SECRET;
+  return !!secret && request.headers.get("authorization") === `Bearer ${secret}`;
+}
+
+export async function GET(request: Request) {
+  if (!authorized(request)) return new Response("Unauthorized", { status: 401 });
+  const admin = createAdminClient();
+  const today = new Date().toISOString().slice(0, 10);
+
+  const [{ data: prefs }, { data: portfolios }, { data: posData }, { data: optData }] = await Promise.all([
+    admin.from("notification_prefs").select("user_id").eq("email_alerts", true),
+    admin.from("portfolios").select("id, user_id"),
+    admin.from("positions").select("portfolio_id, symbol, currency, shares, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"),
+    admin.from("option_positions").select("*"),
+  ]);
+
+  const userByPortfolio = new Map<string, string>((portfolios ?? []).map((p: { id: string; user_id: string }) => [p.id, p.user_id]));
+  const enabledUsers = new Set((prefs ?? []).map((r: { user_id: string }) => r.user_id));
+
+  // Group positions + option rows by user.
+  const posByUser = new Map<string, PositionLite[]>();
+  for (const p of (posData ?? []) as (PositionLite & { portfolio_id: string })[]) {
+    const uid = userByPortfolio.get(p.portfolio_id);
+    if (!uid || !enabledUsers.has(uid)) continue;
+    (posByUser.get(uid) ?? posByUser.set(uid, []).get(uid)!).push(p);
+  }
+  const optByUser = new Map<string, OptionPositionRow[]>();
+  for (const o of (optData ?? []) as (OptionPositionRow & { portfolio_id: string })[]) {
+    const uid = userByPortfolio.get(o.portfolio_id);
+    if (!uid || !enabledUsers.has(uid)) continue;
+    (optByUser.get(uid) ?? optByUser.set(uid, []).get(uid)!).push(o);
+  }
+
+  let emailed = 0;
+  for (const uid of enabledUsers) {
+    const options = (optByUser.get(uid) ?? []).map(computeOption);
+    const items = buildAlerts(options, posByUser.get(uid) ?? [], today);
+    if (!items.length) continue;
+
+    // Skip events already emailed.
+    const keys = items.map((i) => i.dedupeKey);
+    const { data: already } = await admin
+      .from("sent_notifications").select("dedupe_key").eq("user_id", uid).in("dedupe_key", keys);
+    const sentSet = new Set((already ?? []).map((r: { dedupe_key: string }) => r.dedupe_key));
+    const fresh = items.filter((i) => !sentSet.has(i.dedupeKey));
+    if (!fresh.length) continue;
+
+    const { data: userRes } = await admin.auth.admin.getUserById(uid);
+    const email = userRes.user?.email;
+    if (!email) continue;
+
+    const res = await sendEmail(
+      email,
+      `Snowfolio: ${fresh.length} thing${fresh.length === 1 ? "" : "s"} to know`,
+      emailShell("A few heads-ups", alertsEmailHtml(fresh))
+    );
+    if (res.sent) {
+      await admin.from("sent_notifications").upsert(
+        fresh.map((i) => ({ user_id: uid, dedupe_key: i.dedupeKey })),
+        { onConflict: "user_id,dedupe_key", ignoreDuplicates: true }
+      );
+      emailed++;
+    }
+  }
+
+  return Response.json({ emailed, users: enabledUsers.size });
+}
