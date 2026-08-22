@@ -24,13 +24,13 @@ export default function WheelCycles({
       <table className="w-full text-sm">
         <thead className="text-left text-[11px] uppercase tracking-wide text-slate-400">
           <tr>
-            <th className="pb-2 pr-2">Underlying</th>
-            <th className="px-2 pb-2">Phase</th>
-            <th className="px-2 pb-2 text-right">Premium</th>
-            <th className="px-2 pb-2 text-right">Dividends</th>
-            <th className="px-2 pb-2 text-right">Realized stock</th>
-            <th className="px-2 pb-2 text-right">Total profit</th>
-            <th className="px-2 pb-2 text-right">Ann. return</th>
+            <th className="pb-2 pr-2">Stock</th>
+            <th className="px-2 pb-2" title="What you're doing on this name right now.">Doing now</th>
+            <th className="px-2 pb-2 text-right" title="Option premium you've kept on this stock.">Premium</th>
+            <th className="px-2 pb-2 text-right" title="Dividends collected while holding it.">Dividends</th>
+            <th className="px-2 pb-2 text-right" title="Profit or loss from shares you've sold.">Stock gains</th>
+            <th className="px-2 pb-2 text-right" title="Premium + dividends + stock gains.">Total earned</th>
+            <th className="px-2 pb-2 text-right" title="A rough yearly return on the cash tied up.">Return / yr</th>
             <th className="pb-2 pl-2" />
           </tr>
         </thead>

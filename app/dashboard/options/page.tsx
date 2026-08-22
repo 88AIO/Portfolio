@@ -257,32 +257,50 @@ export default async function OptionsPage() {
         <div className="mb-2 flex justify-end">
           <PricesAsOf asOf={oldestPriceAsOf(positions)} />
         </div>
+        {/* Page intro */}
+        <div className="mb-4">
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">Your options income</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Every option you&apos;ve sold, the income it&apos;s earned, and anything that needs your eye —
+            all in plain numbers.
+          </p>
+        </div>
+
         {/* Cockpit tiles */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Tile
-            label={`Total income (${base})`}
+            label="Total income"
+            hint="All the cash you've earned from options premium plus dividends, in your base currency."
             value={money(totalIncome, base)}
-            sub={`${money(dividendsReceived, base)} divs · ${money(totals.premiumIncome, base)} premium`}
+            sub={`${money(dividendsReceived, base)} dividends · ${money(totals.premiumIncome, base)} premium`}
             accent
           />
-          <Tile label="Premium collected" value={money(totals.premiumIncome, base)} sub={`${money(totals.openPremium, base)} on open`} />
           <Tile
-            label="Avg annualized RoC"
-            value={totals.avgAnnualizedRoC != null ? pct(totals.avgAnnualizedRoC) : "—"}
-            sub={`${money(totals.totalCollateral, base)} collateral at work`}
+            label="Premium earned"
+            hint="Cash you kept from selling options. Green the moment you sell — it's yours to keep."
+            value={money(totals.premiumIncome, base)}
+            sub={`${money(totals.openPremium, base)} from still-open trades`}
           />
           <Tile
-            label="Expiring ≤ 7 days"
+            label="Return per year"
+            hint="Your average annualized return on the cash tied up as collateral — a yardstick, not a promise."
+            value={totals.avgAnnualizedRoC != null ? pct(totals.avgAnnualizedRoC) : "—"}
+            sub={`on ${money(totals.totalCollateral, base)} set aside`}
+          />
+          <Tile
+            label="Expiring soon"
+            hint="Open options expiring within 7 days — the ones most likely to need action."
             value={String(totals.expiringCount)}
-            sub={`${money(totals.expiringPremium, base)} premium${totals.nakedCount ? ` · ${totals.nakedCount} naked` : ""}`}
+            sub={`next 7 days · ${money(totals.expiringPremium, base)} premium${totals.nakedCount ? ` · ${totals.nakedCount} uncovered` : ""}`}
           />
         </div>
 
         <p className="mt-3 text-xs text-slate-400">
-          Informational only — Snowfolio tracks what you’ve done; it never recommends a trade.
-          Premium counts once, as income here — your equity cost basis stays the true price you paid.
-          If you prefer the seller’s lens, {money(costBasisReduction, base)} of premium on shares you
-          currently hold would lower your <em>effective</em> basis by that much.
+          For tracking only — Snowfolio never tells you what to trade. Premium is counted once, as income.
+          {costBasisReduction > 0 && (
+            <> If you think of it as lowering your cost, the {money(costBasisReduction, base)} of premium on
+            shares you still hold has effectively shaved that much off what those shares cost you.</>
+          )}
         </p>
 
         {attention.length > 0 && (
@@ -315,47 +333,49 @@ export default async function OptionsPage() {
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           {/* Open positions */}
           <section className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-base font-semibold">Open positions</h2>
+            <h2 className="mb-1 text-base font-semibold">Open trades</h2>
+            <p className="mb-4 text-xs text-slate-400">Options you&apos;ve sold that haven&apos;t expired or been closed yet.</p>
             {open.length === 0 ? (
               <p className="py-10 text-center text-sm text-slate-400">
-                No open options yet. Log a sold put or covered call on the right →
+                No open options right now. Sell a put or covered call and it&apos;ll appear here — or log one on the right →
               </p>
             ) : (
+              <>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-left text-[11px] uppercase tracking-wide text-slate-400">
                     <tr>
-                      <th className="pb-2">Contract</th>
-                      <th className="pb-2 text-right">Qty</th>
-                      <th className="pb-2 text-right">Premium</th>
-                      <th className="pb-2 text-right">Collateral</th>
-                      <th className="pb-2 text-right">Ann. RoC</th>
-                      <th className="pb-2 text-right">DTE</th>
-                      <th className="pb-2 text-right">Δ strike</th>
-                      <th className="pb-2 text-right">Status</th>
+                      <th className="pb-2 pr-2">Contract</th>
+                      <th className="px-2 pb-2 text-right" title="How many contracts (1 contract = 100 shares).">Contracts</th>
+                      <th className="px-2 pb-2 text-right" title="Cash you kept for selling this option.">Income</th>
+                      <th className="px-2 pb-2 text-right" title="Cash set aside to back this trade — the strike × 100 for a put, or the shares' value for a covered call.">Cash set aside</th>
+                      <th className="px-2 pb-2 text-right" title="Annualized return on the cash set aside — a yardstick, not a promise.">Return / yr</th>
+                      <th className="px-2 pb-2 text-right" title="Days until the option expires.">Days left</th>
+                      <th className="px-2 pb-2 text-right" title="Cushion: how far today's price sits from the strike. More cushion = less likely to be assigned.">Cushion</th>
+                      <th className="px-2 pb-2 text-right">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {open.map((o) => (
                       <tr key={`${o.instrument_id}-${o.option_type}-${o.strike}-${o.expiration}`} className="border-t border-slate-100 hover:bg-slate-50/60">
-                        <td className="py-2.5">
+                        <td className="py-2.5 pr-2">
                           <div className="font-medium text-slate-900">
                             {o.symbol} {money(o.strike, o.currency)} {o.option_type === "put" ? "Put" : "Call"}
                           </div>
                           <div className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400">
-                            <span>{o.expiration}</span>
+                            <span>exp {o.expiration}</span>
                             <Badge kind={o.covered ? "covered" : o.naked ? "naked" : "secured"} />
                           </div>
                         </td>
-                        <td className="py-2.5 text-right tabular-nums">{o.contracts}</td>
-                        <td className="py-2.5 text-right tabular-nums font-medium text-emerald-600">{money(o.premiumCollected, o.currency)}</td>
-                        <td className="py-2.5 text-right tabular-nums text-slate-500">{money(o.collateral, o.currency)}</td>
-                        <td className="py-2.5 text-right tabular-nums">{o.annualizedRoC != null ? pct(o.annualizedRoC) : "—"}</td>
-                        <td className="py-2.5 text-right tabular-nums">{o.dte}</td>
-                        <td className="py-2.5 text-right tabular-nums text-slate-500">
+                        <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{o.contracts}</td>
+                        <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium text-emerald-600">{money(o.premiumCollected, o.currency)}</td>
+                        <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">{money(o.collateral, o.currency)}</td>
+                        <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{o.annualizedRoC != null ? pct(o.annualizedRoC) : "—"}</td>
+                        <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{o.dte}d</td>
+                        <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">
                           {o.distanceToStrikePct != null ? pct(o.distanceToStrikePct) : "—"}
                         </td>
-                        <td className="py-2.5 text-right">
+                        <td className="py-2.5 pl-2 text-right">
                           <StatusPill status={o.status} />
                         </td>
                       </tr>
@@ -363,11 +383,18 @@ export default async function OptionsPage() {
                   </tbody>
                 </table>
               </div>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
+                <span><Badge kind="covered" /> you own the shares behind it</span>
+                <span><Badge kind="secured" /> backed by cash</span>
+                <span><Badge kind="naked" /> not backed by shares</span>
+              </div>
+              </>
             )}
 
             {closed.length > 0 && (
               <>
-                <h3 className="mb-2 mt-8 text-sm font-semibold text-slate-500">Closed / expired</h3>
+                <h3 className="mb-1 mt-8 text-sm font-semibold text-slate-500">Finished trades</h3>
+                <p className="mb-2 text-xs text-slate-400">Closed, expired, or assigned — with the income each one kept.</p>
                 <ul className="divide-y divide-slate-100 text-sm">
                   {closed.slice(0, 12).map((o) => (
                     <li key={`${o.instrument_id}-${o.option_type}-${o.strike}-${o.expiration}`} className="flex items-center justify-between py-2">
@@ -394,12 +421,12 @@ export default async function OptionsPage() {
               <AddOptionForm portfolios={portfolios} />
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-5 text-xs text-slate-500 shadow-sm">
-              <h3 className="mb-2 text-sm font-semibold text-slate-700">How income is counted</h3>
+              <h3 className="mb-2 text-sm font-semibold text-slate-700">Good to know</h3>
               <ul className="space-y-1.5">
-                <li>• Premium is realized income the moment you sell to open.</li>
-                <li>• <strong>Annualized RoC</strong> = premium ÷ collateral × 365 ÷ days to expiry.</li>
-                <li>• A short call is <strong>Covered</strong> when you hold ≥ 100 shares per contract, else flagged <strong>Naked</strong>.</li>
-                <li>• <strong>Assigned</strong> a put? We add the share purchase at the strike automatically.</li>
+                <li>• The <strong>premium</strong> is yours to keep the moment you sell — it counts as income right away.</li>
+                <li>• <strong>Return / yr</strong> scales that income up to a yearly rate, so short and long trades compare fairly.</li>
+                <li>• A call is <strong>Covered</strong> when you own the 100 shares behind each contract — otherwise it&apos;s <strong>uncovered</strong>.</li>
+                <li>• If a put gets <strong>assigned</strong>, we add the share purchase for you automatically.</li>
               </ul>
             </div>
           </section>
@@ -407,16 +434,15 @@ export default async function OptionsPage() {
 
         {wheels.length > 0 && (
           <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold">Wheel cycles</h2>
+            <h2 className="text-base font-semibold">By stock</h2>
             <p className="mb-4 text-xs text-slate-400">
-              Each name&apos;s whole wheel in one line — premium, dividends, and realized stock P/L rolled
-              together, with its current phase and a blended return annualized over the capital it tied up.
-              Click a ticker to expand its full history since inception.
+              Everything you&apos;ve earned on each stock — option premium, dividends, and stock gains — added up
+              into one total, with a rough yearly return. <strong>Click any row</strong> to see its full history.
             </p>
             <WheelCycles wheels={wheels} history={historyBySymbol} base={base} />
             <p className="mt-3 text-xs text-slate-400">
-              Annualized return is total profit ÷ capital at risk × 365 ÷ days active — a rough blended
-              yardstick across the whole cycle, not a projection. Informational only.
+              Return per year is a rough yardstick (total earned ÷ cash tied up, scaled to a year) — for
+              tracking, not a projection.
             </p>
           </section>
         )}
@@ -429,16 +455,23 @@ function Tile({
   label,
   value,
   sub,
+  hint,
   accent,
 }: {
   label: string;
   value: string;
   sub?: string;
+  hint?: string;
   accent?: boolean;
 }) {
   return (
     <div className={`rounded-2xl border p-4 shadow-sm ${accent ? "border-indigo-200 bg-gradient-to-br from-indigo-50 to-white" : "border-slate-200 bg-white"}`}>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">
+        {label}
+        {hint && (
+          <span title={hint} className="cursor-help text-slate-300" aria-label={hint}>ⓘ</span>
+        )}
+      </div>
       <div className="mt-1.5 text-2xl font-bold tracking-tight text-slate-900">{value}</div>
       {sub && <div className="mt-0.5 text-xs font-medium text-slate-500">{sub}</div>}
     </div>
@@ -447,12 +480,12 @@ function Tile({
 
 function Badge({ kind }: { kind: "covered" | "naked" | "secured" }) {
   const map = {
-    covered: { text: "Covered", cls: "bg-emerald-50 text-emerald-700" },
-    naked: { text: "Naked", cls: "bg-amber-50 text-amber-700" },
-    secured: { text: "Cash-secured", cls: "bg-slate-100 text-slate-600" },
+    covered: { text: "Covered", cls: "bg-emerald-50 text-emerald-700", hint: "You own the 100 shares per contract behind this call." },
+    naked: { text: "Uncovered", cls: "bg-amber-50 text-amber-700", hint: "You don't own the shares behind this call — higher risk if it's assigned." },
+    secured: { text: "Cash-backed", cls: "bg-slate-100 text-slate-600", hint: "Backed by the cash to buy the shares if the put is assigned." },
   } as const;
   const b = map[kind];
-  return <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${b.cls}`}>{b.text}</span>;
+  return <span title={b.hint} className={`cursor-help rounded-full px-1.5 py-0.5 text-[10px] font-medium ${b.cls}`}>{b.text}</span>;
 }
 
 function StatusPill({ status }: { status: ComputedOption["status"] }) {
