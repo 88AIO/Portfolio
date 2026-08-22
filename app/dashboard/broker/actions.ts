@@ -259,30 +259,38 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     // snapshot, so no equity legs are written here. See docs/SPEC_broker-sync-etrade-options.md.
     const acctLabel = account.label || account.brokerageName || account.id.slice(0, 6);
 
+    // The activities feed (full transaction history) is the source of truth when available: it
+    // records opens AND closes, so the option_positions view derives current open contracts from
+    // it correctly. The positions feed is a FALLBACK for connections whose activities are empty —
+    // running both would double-count every open position (its opening trade + its live snapshot).
+    let activitiesHaveOptions = false;
     if (provider.getOptionActivities) {
       const act = await provider.getOptionActivities(account.id);
-      // SnapTrade's own transaction-sync status explains an empty activities feed: whether the
-      // initial backfill finished, and the earliest transaction it holds.
       const ts = account.txnSync;
-      const tsNote = ts
-        ? ` {txnSync: initialDone=${ts.initialDone}, firstTxn=${ts.firstDate ?? "none"}}`
-        : " {txnSync: unknown}";
+      const tsNote = ts ? ` {txnSync: initialDone=${ts.initialDone}, firstTxn=${ts.firstDate ?? "none"}}` : "";
       optionDebug.push(
         act.error
           ? `${acctLabel}: activities error — ${act.error}`
           : `${acctLabel}: ${act.scanned} activities, ${act.optionRows} option, ${act.legs.length} imported${act.scanned === 0 && act.shape ? ` [resp: ${act.shape}]` : ""}${tsNote}`
       );
+      activitiesHaveOptions = act.optionRows > 0;
       optionLegs += await importOptionLegs(portfolioId, act.legs, "snaptrade-act");
     }
 
     if (provider.getOptionPositions) {
-      const pos = await provider.getOptionPositions(account.id);
-      optionDebug.push(
-        pos.error
-          ? `${acctLabel}: positions error — ${pos.error}`
-          : `${acctLabel}: ${pos.optionPositions} open option pos, ${pos.legs.length} imported${pos.sample ? ` [${pos.sample}]` : ""}`
-      );
-      optionLegs += await importOptionLegs(portfolioId, pos.legs, "snaptrade-pos");
+      if (activitiesHaveOptions) {
+        // Activities already cover this account's options — clear any stale positions-fallback rows
+        // so they don't double-count, and skip the positions import.
+        await importOptionLegs(portfolioId, [], "snaptrade-pos");
+      } else {
+        const pos = await provider.getOptionPositions(account.id);
+        optionDebug.push(
+          pos.error
+            ? `${acctLabel}: positions error — ${pos.error}`
+            : `${acctLabel}: ${pos.optionPositions} open option pos, ${pos.legs.length} imported (fallback)${pos.sample ? ` [${pos.sample}]` : ""}`
+        );
+        optionLegs += await importOptionLegs(portfolioId, pos.legs, "snaptrade-pos");
+      }
     }
   }
 
