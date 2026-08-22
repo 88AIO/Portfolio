@@ -13,6 +13,7 @@ type BrokerSyncResult = {
   message?: string;
   accounts?: number;
   holdings?: number;
+  options?: number;
 };
 
 function todayIso(): string {
@@ -113,6 +114,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   const now = new Date().toISOString();
   const instBySymbol = new Map<string, { id: string; currency: string }>();
   let holdings = 0;
+  let optionLegs = 0;
 
   for (const account of accounts) {
     // For investment/crypto (non-cash) accounts, pull positions first and skip any that hold
@@ -206,6 +208,47 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
 
     if (rows.length) await supabase.from("transactions").insert(rows);
     holdings += rows.length;
+
+    // --- Options: import the account's seller-flow option legs into the options ledger ---
+    // Kept separate from the equity snapshot above. We import ONLY the option legs (premium
+    // income); shares from an assignment are already reflected in the position snapshot, so we do
+    // NOT also write equity legs here (that would double-count shares). See docs/SPEC_broker-sync-etrade-options.md.
+    if (provider.getOptionActivities) {
+      const legs = await provider.getOptionActivities(account.id);
+      if (legs.length) {
+        // Snapshot semantics: clear this portfolio's previously-synced option rows, then re-insert.
+        await supabase.from("option_transactions").delete()
+          .eq("portfolio_id", portfolioId).like("dedupe_key", "opt:snaptrade%");
+
+        const optRows: {
+          portfolio_id: string; instrument_id: string; action: string; option_type: string;
+          strike: number; expiration: string; contracts: number; premium: number; fee: number;
+          trade_date: string; currency: string; dedupe_key: string;
+        }[] = [];
+        for (const leg of legs) {
+          const key = `${leg.underlying}|${leg.exchange}`;
+          let inst = instBySymbol.get(key);
+          if (!inst) {
+            const resolved = await resolveInstrument(admin, leg.underlying, leg.exchange, leg.currency, "stock");
+            if (!resolved) continue;
+            inst = resolved;
+            instBySymbol.set(key, inst);
+          }
+          optRows.push({
+            portfolio_id: portfolioId, instrument_id: inst.id, action: leg.action,
+            option_type: leg.optionType, strike: leg.strike, expiration: leg.expiration,
+            contracts: leg.contracts, premium: leg.premiumPerShare, fee: leg.fee,
+            trade_date: leg.tradeDate, currency: leg.currency,
+            dedupe_key: `opt:snaptrade:${leg.ref}`,
+          });
+        }
+        if (optRows.length) {
+          await supabase.from("option_transactions")
+            .upsert(optRows, { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true });
+          optionLegs += optRows.length;
+        }
+      }
+    }
   }
 
   // Enrich sector/country for the synced instruments (only those still missing it), in a small
@@ -223,5 +266,6 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/broker");
-  return { ok: true, accounts: accounts.length, holdings };
+  revalidatePath("/dashboard/options");
+  return { ok: true, accounts: accounts.length, holdings, options: optionLegs };
 }

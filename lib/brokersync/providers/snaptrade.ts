@@ -3,7 +3,8 @@
 // and no connection portal. Reads current positions (the /positions endpoint — the deprecated
 // /holdings endpoint returns 410 Gone for accounts created after May 2026). See docs/SPEC_broker-sync.md.
 import { Snaptrade, SnaptradeAuth } from "snaptrade-typescript-sdk";
-import type { BrokerAccount, BrokerPosition, BrokerSyncProvider } from "../types";
+import type { BrokerAccount, BrokerPosition, BrokerSyncProvider, BrokerOptionLeg } from "../types";
+import { normalizeSnaptradeActivity } from "../options";
 
 function buildClient() {
   const clientId = process.env.SNAPTRADE_CLIENT_ID;
@@ -184,6 +185,31 @@ export const snaptradeProvider: BrokerSyncProvider = {
         });
     } catch {
       // One account failing (e.g. a disabled connection) shouldn't abort syncing the others.
+      return [];
+    }
+  },
+
+  async getOptionActivities(accountId, since): Promise<BrokerOptionLeg[]> {
+    const snap = getClient();
+    if (!snap) return [];
+    try {
+      // Page through the account's activities; keep only the option events we track. SnapTrade
+      // paginates via offset/limit and returns { data: UniversalActivity[] } per page.
+      const legs: BrokerOptionLeg[] = [];
+      const limit = 1000;
+      for (let offset = 0, page = 0; page < 20; page++, offset += limit) {
+        const res = await snap.accountInformation.getAccountActivities({
+          accountId, startDate: since, offset, limit,
+        });
+        const rows = (res.data?.data ?? []) as unknown[];
+        for (const r of rows) {
+          const leg = normalizeSnaptradeActivity(r);
+          if (leg) legs.push(leg);
+        }
+        if (rows.length < limit) break; // last page
+      }
+      return legs;
+    } catch {
       return [];
     }
   },

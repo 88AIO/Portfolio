@@ -1,4 +1,6 @@
 // Broker-sync provider port — shared types. Read-only, positions-based. See docs/SPEC_broker-sync.md.
+import type { BrokerOptionLeg } from "./options";
+export type { BrokerOptionLeg } from "./options";
 
 export type BrokerAccount = {
   id: string;
@@ -33,4 +35,7 @@ export interface BrokerSyncProvider {
   dashboardUrl(): string;
   listAccounts(): Promise<BrokerAccount[]>;
   getPositions(accountId: string): Promise<BrokerPosition[]>;
+  // Optional: read the account's option activity (sold/closed/expired/assigned legs) since a date.
+  // Providers that don't expose an activities feed simply omit this.
+  getOptionActivities?(accountId: string, since?: string): Promise<BrokerOptionLeg[]>;
 }
