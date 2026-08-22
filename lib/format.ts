@@ -1,9 +1,21 @@
+// Currencies whose default Intl "symbol" is a spelled-out code (e.g. "SGD 1,234") rather than a
+// glyph — give them a compact, recognizable symbol so a mixed-currency table reads cleanly.
+const PREFERRED_SYMBOL: Record<string, string> = {
+  SGD: "S$", MYR: "RM", CNH: "CN¥", IDR: "Rp", PHP: "₱", THB: "฿", VND: "₫",
+};
+
 export function money(n: number | null | undefined, ccy = "USD") {
   if (n == null || isNaN(n)) return "—";
+  const code = (ccy || "USD").toUpperCase();
+  const sym = PREFERRED_SYMBOL[code];
+  if (sym) {
+    const num = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `${n < 0 ? "-" : ""}${sym}${num}`;
+  }
   try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: ccy }).format(n);
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: code }).format(n);
   } catch {
-    return `${ccy} ${n.toFixed(2)}`;
+    return `${code} ${n.toFixed(2)}`;
   }
 }
 

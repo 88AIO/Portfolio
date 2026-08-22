@@ -282,14 +282,14 @@ export default async function Dashboard({
                 <table className="w-full text-sm">
                   <thead className="text-left text-[11px] uppercase tracking-wide text-slate-400">
                     <tr>
-                      <th className="pb-2">Symbol</th>
-                      <th className="pb-2 text-right">Shares</th>
-                      <th className="pb-2 text-right">Avg cost</th>
-                      <th className="pb-2 text-right">Price</th>
-                      <th className="pb-2 text-right">Day</th>
-                      <th className="pb-2 text-right">Value</th>
-                      <th className="pb-2 text-right">Yield</th>
-                      <th className="pb-2 text-right">P/L</th>
+                      <th className="pb-2 pr-2">Symbol</th>
+                      <th className="px-2 pb-2 text-right">Shares</th>
+                      <th className="px-2 pb-2 text-right">Avg cost</th>
+                      <th className="px-2 pb-2 text-right">Price</th>
+                      <th className="px-2 pb-2 text-right">Day</th>
+                      <th className="px-2 pb-2 text-right">Value</th>
+                      <th className="px-2 pb-2 text-right">Yield</th>
+                      <th className="px-2 pb-2 text-right">P/L</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -321,18 +321,18 @@ export default async function Dashboard({
                           const pl = mv - p.avg_cost * p.shares;
                           return (
                             <tr key={p.instrument_id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                              <td className="py-2.5">
+                              <td className="py-2.5 pr-3">
                                 <HoldingName symbol={p.symbol} exchange={p.exchange} name={p.name} type={p.type} etf={!!p.sector_weights} sector={p.sector} />
                               </td>
-                              <td className="py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>
-                              <td className="py-2.5 text-right tabular-nums">{money(p.avg_cost, p.currency)}</td>
+                              <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>
+                              <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{money(p.avg_cost, p.currency)}</td>
                               <td
-                                className="py-2.5 text-right tabular-nums"
+                                className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums"
                                 title={p.price_as_of ? `as of ${timeAgo(p.price_as_of)}` : undefined}
                               >
                                 {p.last_price == null ? <span className="text-slate-300">—</span> : money(p.last_price, p.currency)}
                               </td>
-                              <td className="py-2.5 text-right tabular-nums">
+                              <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">
                                 {p.day_change_pct == null ? (
                                   <span className="text-slate-300">—</span>
                                 ) : (
@@ -341,11 +341,11 @@ export default async function Dashboard({
                                   </span>
                                 )}
                               </td>
-                              <td className="py-2.5 text-right tabular-nums font-medium">{money(mv, p.currency)}</td>
-                              <td className="py-2.5 text-right tabular-nums text-slate-500">
+                              <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium">{money(mv, p.currency)}</td>
+                              <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">
                                 {p.div_yield_current != null ? pct(p.div_yield_current) : "—"}
                               </td>
-                              <td className={`py-2.5 text-right tabular-nums font-medium ${pl >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                              <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium ${pl >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                                 {money(pl, p.currency)}
                               </td>
                             </tr>
@@ -357,18 +357,18 @@ export default async function Dashboard({
                       const pl = mv - p.avg_cost * p.shares;
                       return (
                         <tr key={p.instrument_id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                          <td className="py-2.5">
+                          <td className="py-2.5 pr-3">
                             <HoldingName symbol={p.symbol} exchange={p.exchange} name={p.name} type={p.type} etf={!!p.sector_weights} sector={p.sector} extra={p.accounts.size > 1 ? `${p.accounts.size} accounts` : undefined} />
                           </td>
-                          <td className="py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>
-                          <td className="py-2.5 text-right tabular-nums">{money(p.avg_cost, p.currency)}</td>
+                          <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>
+                          <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{money(p.avg_cost, p.currency)}</td>
                           <td
-                            className="py-2.5 text-right tabular-nums"
+                            className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums"
                             title={p.price_as_of ? `as of ${timeAgo(p.price_as_of)}` : undefined}
                           >
                             {p.last_price == null ? <span className="text-slate-300">—</span> : money(p.last_price, p.currency)}
                           </td>
-                          <td className="py-2.5 text-right tabular-nums">
+                          <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">
                             {p.day_change_pct == null ? (
                               <span className="text-slate-300">—</span>
                             ) : (
@@ -377,11 +377,11 @@ export default async function Dashboard({
                               </span>
                             )}
                           </td>
-                          <td className="py-2.5 text-right tabular-nums font-medium">{money(mv, p.currency)}</td>
-                          <td className="py-2.5 text-right tabular-nums text-slate-500">
+                          <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium">{money(mv, p.currency)}</td>
+                          <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">
                             {p.div_yield_current != null ? pct(p.div_yield_current) : "—"}
                           </td>
-                          <td className={`py-2.5 text-right tabular-nums font-medium ${pl >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                          <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium ${pl >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                             {money(pl, p.currency)}
                           </td>
                         </tr>
