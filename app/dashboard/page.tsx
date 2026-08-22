@@ -322,7 +322,7 @@ export default async function Dashboard({
                           return (
                             <tr key={p.instrument_id} className="border-t border-slate-100 hover:bg-slate-50/60">
                               <td className="py-2.5 pr-3">
-                                <HoldingName symbol={p.symbol} exchange={p.exchange} name={p.name} type={p.type} etf={!!p.sector_weights} sector={p.sector} />
+                                <HoldingName symbol={p.symbol} exchange={p.exchange} name={p.name} type={p.type} etf={!!p.sector_weights} sector={p.sector} href={`/dashboard/holding/${p.instrument_id}`} />
                               </td>
                               <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>
                               <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{money(p.avg_cost, p.currency)}</td>
@@ -358,7 +358,7 @@ export default async function Dashboard({
                       return (
                         <tr key={p.instrument_id} className="border-t border-slate-100 hover:bg-slate-50/60">
                           <td className="py-2.5 pr-3">
-                            <HoldingName symbol={p.symbol} exchange={p.exchange} name={p.name} type={p.type} etf={!!p.sector_weights} sector={p.sector} extra={p.accounts.size > 1 ? `${p.accounts.size} accounts` : undefined} />
+                            <HoldingName symbol={p.symbol} exchange={p.exchange} name={p.name} type={p.type} etf={!!p.sector_weights} sector={p.sector} extra={p.accounts.size > 1 ? `${p.accounts.size} accounts` : undefined} href={`/dashboard/holding/${p.instrument_id}`} />
                           </td>
                           <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{num(p.shares, 4)}</td>
                           <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{money(p.avg_cost, p.currency)}</td>
@@ -481,6 +481,7 @@ function HoldingName({
   etf,
   sector,
   extra,
+  href,
 }: {
   symbol: string;
   exchange: string | null;
@@ -489,6 +490,7 @@ function HoldingName({
   etf?: boolean;
   sector?: string | null;
   extra?: string;
+  href?: string;
 }) {
   const hasName = !!name && name.trim() !== "" && name.trim().toUpperCase() !== symbol.toUpperCase();
   const category = type === "crypto" ? "Crypto" : etf ? "ETF" : sector || null;
@@ -497,9 +499,14 @@ function HoldingName({
   // market (no duplicated ticker).
   const marketPart = hasName ? `${marketLabel(exchange)} · ${symbol}` : marketLabel(exchange);
   const meta = [marketPart, category, extra].filter(Boolean).join(" · ");
+  const primary = hasName ? name : symbol;
   return (
     <div>
-      <div className="font-medium text-slate-900">{hasName ? name : symbol}</div>
+      {href ? (
+        <Link href={href} className="font-medium text-slate-900 hover:text-indigo-600 hover:underline">{primary}</Link>
+      ) : (
+        <div className="font-medium text-slate-900">{primary}</div>
+      )}
       <div className="text-xs text-slate-400">{meta}</div>
     </div>
   );

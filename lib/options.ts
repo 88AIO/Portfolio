@@ -213,3 +213,20 @@ export function statusLabel(s: OptionStatus): string {
       return "On track";
   }
 }
+
+export function optionActionLabel(action: string): string {
+  switch (action) {
+    case "sell_to_open":
+      return "Sold to open";
+    case "buy_to_close":
+      return "Bought to close";
+    case "expired":
+      return "Expired";
+    case "assigned":
+      return "Assigned";
+    case "rolled":
+      return "Rolled";
+    default:
+      return action;
+  }
+}
