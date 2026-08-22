@@ -197,8 +197,24 @@ export async function refreshPrices() {
 
   const admin = createAdminClient();
   const { data: pos } = await supabase
-    .from("positions").select("instrument_id, symbol, exchange, currency, sector, sector_weights, type");
+    .from("positions").select("instrument_id, symbol, exchange, name, currency, sector, sector_weights, type");
   if (!pos) return;
+
+  // Pass 0 — backfill company names for holdings that still show a bare ticker (e.g. broker-synced
+  // intl positions whose brokerage feed gave no description). Look the name up from the market-data
+  // provider, which carries clean company names, and only for the ones missing it. Automatic on
+  // every refresh, idempotent once named.
+  const needName = pos.filter((p) => !p.name || p.name.trim() === "" || p.name === p.symbol);
+  for (let i = 0; i < needName.length; i += 6) {
+    await Promise.all(
+      needName.slice(i, i + 6).map(async (p) => {
+        const meta = await searchInstrument(p.symbol, p.exchange);
+        if (meta?.name && meta.name !== p.symbol) {
+          await admin.from("instruments").update({ name: meta.name }).eq("id", p.instrument_id);
+        }
+      })
+    );
+  }
 
   // Pass 1 — sector enrichment first (stocks get a single sector; ETFs get a look-through
   // breakdown), only for holdings still missing both, so it commits even if the heavier
