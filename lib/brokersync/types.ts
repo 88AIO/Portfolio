@@ -43,19 +43,39 @@ export interface BrokerSyncProvider {
   // Providers that don't expose an activities feed simply omit this. Returns diagnostics alongside
   // the legs so a caller can tell "no options traded" (scanned>0, legs=0) from "the call failed"
   // (error set) — otherwise both look like an empty result.
-  getOptionActivities?(accountId: string, since?: string): Promise<BrokerOptionActivityResult>;
+  // Optional: read the account's full transaction history (one fetch), returning both the
+  // seller-flow option legs and the real-dated equity transactions (buys/sells/dividends).
+  getActivities?(accountId: string, since?: string): Promise<BrokerActivitiesResult>;
   // Optional: read CURRENT open option positions from the positions feed (works even when the
   // transactions feed is empty). Returns short seller legs plus diagnostics.
   getOptionPositions?(accountId: string): Promise<BrokerOptionPositionResult>;
 }
 
-export type BrokerOptionActivityResult = {
-  legs: BrokerOptionLeg[];
+// One real, dated equity transaction from the broker's activity feed.
+export type BrokerEquityTxn = {
+  symbol: string;
+  exchange: string; // normalized code, resolved the SAME way as positions so instrument ids match
+  name: string | null;
+  txnType: "buy" | "sell" | "dividend";
+  quantity: number; // shares (buys/sells); 1 for a dividend (price carries the cash amount)
+  price: number; // per share (buys/sells); total dividend cash for a dividend row
+  fee: number;
+  currency: string;
+  tradeDate: string; // YYYY-MM-DD
+  ref: string; // stable broker/SnapTrade activity id, for idempotent dedupe
+};
+
+export type BrokerActivitiesResult = {
+  optionLegs: BrokerOptionLeg[];
+  equityTxns: BrokerEquityTxn[];
   scanned: number; // total activity rows fetched from the provider (all types)
   optionRows: number; // rows that were option events (before seller-flow filtering)
+  equityRows: number; // rows that were equity buys/sells/dividends
   error?: string; // set when the provider call threw / was rejected
   shape?: string; // debug: top-level response keys when the feed came back empty (to spot a mis-read)
 };
+
+// (BrokerOptionActivityResult removed — getActivities now returns options + equity together.)
 
 export type BrokerOptionPositionResult = {
   legs: BrokerOptionLeg[];

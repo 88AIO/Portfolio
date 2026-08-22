@@ -4,9 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBrokerProvider, isBrokerSyncOwner } from "@/lib/brokersync";
-import type { BrokerAccount, BrokerPosition, BrokerOptionLeg } from "@/lib/brokersync";
+import type { BrokerAccount, BrokerPosition, BrokerOptionLeg, BrokerEquityTxn } from "@/lib/brokersync";
 import { enrichInstrumentProfile } from "@/lib/enrich";
-import { transactionDedupeKey } from "@/lib/import/csv";
 
 type BrokerSyncResult = {
   ok: boolean;
@@ -174,6 +173,76 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     return optRows.length;
   }
 
+  // Import real, dated equity transactions (buys/sells/dividends) and reconcile to the broker's
+  // current holdings. The real rows ACCUMULATE (ref:snaptrade-act:* — never deleted, so history
+  // persists forever). Then, per currently-held instrument, we add ONE opening-balance lot for any
+  // gap between the shares those trades imply and what the broker reports now (transfers-in,
+  // pre-window shares, splits) — so current holdings still match the broker EXACTLY, while giving
+  // true value-over-time and cost basis. `heldByInst` is the broker's current snapshot.
+  async function importEquityHistory(
+    portfolioId: string,
+    txns: BrokerEquityTxn[],
+    heldByInst: Map<string, { shares: number; avgCost: number; currency: string; symbol: string }>
+  ): Promise<number> {
+    // Drop the legacy today-snapshot and any prior reconciling lots (recomputed below). Leave the
+    // accumulated real-trade rows (ref:snaptrade-act:*) untouched.
+    await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-pos:%");
+    await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-recon:%");
+
+    type Row = {
+      portfolio_id: string; instrument_id: string; type: string; quantity: number; price: number;
+      fees: number; currency: string; executed_at: string; dedupe_key: string; note?: string;
+    };
+    const rows: Row[] = [];
+    const computedByInst = new Map<string, number>();
+    const earliestByInst = new Map<string, string>();
+    let earliestOverall: string | null = null;
+
+    for (const tx of txns) {
+      const key = `${tx.symbol}|${tx.exchange}`;
+      let inst = instBySymbol.get(key);
+      if (!inst) {
+        const resolved = await resolveInstrument(admin, tx.symbol, tx.exchange, tx.currency, "stock", tx.name);
+        if (!resolved) continue;
+        inst = resolved;
+        instBySymbol.set(key, inst);
+      }
+      rows.push({
+        portfolio_id: portfolioId, instrument_id: inst.id, type: tx.txnType,
+        quantity: tx.quantity, price: tx.price, fees: tx.fee, currency: tx.currency,
+        executed_at: tx.tradeDate, dedupe_key: `ref:snaptrade-act:${tx.ref}`,
+      });
+      if (tx.txnType === "buy") computedByInst.set(inst.id, (computedByInst.get(inst.id) ?? 0) + tx.quantity);
+      else if (tx.txnType === "sell") computedByInst.set(inst.id, (computedByInst.get(inst.id) ?? 0) - tx.quantity);
+      if (tx.txnType !== "dividend") {
+        const cur = earliestByInst.get(inst.id);
+        if (!cur || tx.tradeDate < cur) earliestByInst.set(inst.id, tx.tradeDate);
+        if (!earliestOverall || tx.tradeDate < earliestOverall) earliestOverall = tx.tradeDate;
+      }
+    }
+    // Accumulate — ignoreDuplicates so already-imported trades are never overwritten or re-counted.
+    if (rows.length) await admin.from("transactions").upsert(rows, { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true });
+
+    // Reconcile computed shares to the broker's current holdings.
+    const reconRows: Row[] = [];
+    for (const [instId, held] of heldByInst) {
+      const computed = computedByInst.get(instId) ?? 0;
+      const diff = held.shares - computed;
+      if (Math.abs(diff) < 1e-6) continue;
+      reconRows.push({
+        portfolio_id: portfolioId, instrument_id: instId,
+        type: diff > 0 ? "buy" : "sell", quantity: Math.abs(diff),
+        price: held.avgCost, fees: 0, currency: held.currency,
+        executed_at: earliestByInst.get(instId) ?? earliestOverall ?? today,
+        dedupe_key: `ref:snaptrade-recon:${instId}`,
+        note: "Opening balance (reconciled to broker)",
+      });
+    }
+    if (reconRows.length) await admin.from("transactions").insert(reconRows);
+
+    return rows.length + reconRows.length;
+  }
+
   // Process one brokerage account end-to-end. Returns its counts + diagnostics so the accounts can
   // run concurrently without racing on shared counters.
   async function processAccount(account: BrokerAccount): Promise<{ holdings: number; optionLegs: number; debug: string[] }> {
@@ -210,24 +279,15 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     // Cash & ledger page from the balance above, not as stock holdings. Skip the positions pass.
     if (account.isCash) return { holdings, optionLegs, debug };
 
-    // Equity holdings are a current snapshot: clear this account's prior synced rows, then insert.
-    await admin
-      .from("transactions")
-      .delete()
-      .eq("portfolio_id", portfolioId)
-      .like("dedupe_key", "ref:snaptrade%");
-
     // Coinbase (and any crypto-typed position) is priced as SYMBOL-USD, not as a US equity.
     const brokerIsCrypto = /coinbase/i.test(account.brokerageName);
+    const acctLabel = account.label || account.brokerageName || account.id.slice(0, 6);
 
-    const rows: {
-      portfolio_id: string; instrument_id: string; type: string;
-      quantity: number; price: number; fees: number; currency: string;
-      executed_at: string; dedupe_key: string;
-    }[] = [];
-    // Collect price rows and upsert them in ONE call per account instead of one round-trip each.
+    // Resolve instruments for the CURRENT positions, cache the broker's last price, and record what
+    // the broker says you hold now (instrument_id → shares, avg cost). This feeds both the equity
+    // snapshot fallback and the real-history reconciliation.
+    const heldByInst = new Map<string, { shares: number; avgCost: number; currency: string; symbol: string }>();
     const priceRows: { instrument_id: string; price: number; currency: string; as_of: string }[] = [];
-
     for (const pos of positions) {
       if (!pos.symbol || !pos.units || pos.units <= 0) continue;
       const isCrypto = pos.isCrypto || brokerIsCrypto;
@@ -241,7 +301,6 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
         exchange = "CRYPTO";
         instType = "crypto";
       }
-
       const key = `${symbol}|${exchange}`;
       let inst = instBySymbol.get(key);
       if (!inst) {
@@ -250,45 +309,44 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
         inst = resolved;
         instBySymbol.set(key, inst);
       }
-
       const currency = pos.currency || inst.currency || "USD";
-      // Synthetic opening buy at the per-share cost basis (falls back to price if cost is missing).
-      const price = pos.avgCost ?? pos.price ?? 0;
-      rows.push({
-        portfolio_id: portfolioId, instrument_id: inst.id, type: "buy",
-        quantity: pos.units, price, fees: 0, currency, executed_at: today,
-        dedupe_key: transactionDedupeKey({
-          ref: `snaptrade-pos:${account.id}:${symbol}`, type: "buy",
-          instrument_id: inst.id, executed_at: today, quantity: pos.units, price, fees: 0,
-        }),
-      });
+      heldByInst.set(inst.id, { shares: pos.units, avgCost: pos.avgCost ?? pos.price ?? 0, currency, symbol });
       if (pos.price != null) priceRows.push({ instrument_id: inst.id, price: pos.price, currency, as_of: now });
     }
-
     if (priceRows.length) await admin.from("price_cache").upsert(priceRows);
-    if (rows.length) await admin.from("transactions").insert(rows);
-    holdings += rows.length;
 
-    // --- Options: import into the options ledger, kept separate from the equity snapshot above ---
-    const acctLabel = account.label || account.brokerageName || account.id.slice(0, 6);
-
-    // The activities feed (full transaction history) is the source of truth when available: it
-    // records opens AND closes, so the option_positions view derives current open contracts from
-    // it correctly. The positions feed is a FALLBACK for connections whose activities are empty —
-    // running both would double-count every open position (its opening trade + its live snapshot).
+    // --- Full activity history (one fetch): real equity trades + option legs ---
     let activitiesHaveOptions = false;
-    if (provider.getOptionActivities) {
-      const act = await provider.getOptionActivities(account.id);
+    let equityFromActivities = false;
+    if (provider.getActivities) {
+      const act = await provider.getActivities(account.id);
       const ts = account.txnSync;
       const tsNote = ts ? ` {txnSync: initialDone=${ts.initialDone}, firstTxn=${ts.firstDate ?? "none"}}` : "";
       debug.push(
         act.error
           ? `${acctLabel}: activities error — ${act.error}`
-          : `${acctLabel}: ${act.scanned} activities, ${act.optionRows} option, ${act.legs.length} imported${act.scanned === 0 && act.shape ? ` [resp: ${act.shape}]` : ""}${tsNote}`
+          : `${acctLabel}: ${act.scanned} activities · ${act.equityRows} equity · ${act.optionRows} option${act.scanned === 0 && act.shape ? ` [resp: ${act.shape}]` : ""}${tsNote}`
       );
       activitiesHaveOptions = act.optionRows > 0;
       // Accumulate: option history is never deleted, so a 2025 trade stays even in 2030.
-      optionLegs += await importOptionLegs(portfolioId, act.legs, "snaptrade-act", "accumulate");
+      optionLegs += await importOptionLegs(portfolioId, act.optionLegs, "snaptrade-act", "accumulate");
+
+      // Real dated equity history (buys/sells/dividends) + reconciliation to the broker snapshot.
+      equityFromActivities = act.equityRows > 0;
+      if (equityFromActivities) holdings += await importEquityHistory(portfolioId, act.equityTxns, heldByInst);
+    }
+
+    // Equity snapshot FALLBACK — only when the activity feed gave us no real equity history. A
+    // synthetic "today" buy at the broker's cost basis, snapshot-refreshed each sync.
+    if (!equityFromActivities) {
+      await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-pos:%");
+      const rows = [...heldByInst.entries()].map(([instId, h]) => ({
+        portfolio_id: portfolioId, instrument_id: instId, type: "buy",
+        quantity: h.shares, price: h.avgCost, fees: 0, currency: h.currency, executed_at: today,
+        dedupe_key: `ref:snaptrade-pos:${account.id}:${h.symbol}`,
+      }));
+      if (rows.length) await admin.from("transactions").insert(rows);
+      holdings += rows.length;
     }
 
     if (provider.getOptionPositions) {

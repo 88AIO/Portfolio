@@ -3,8 +3,62 @@
 // and no connection portal. Reads current positions (the /positions endpoint — the deprecated
 // /holdings endpoint returns 410 Gone for accounts created after May 2026). See docs/SPEC_broker-sync.md.
 import { Snaptrade, SnaptradeAuth } from "snaptrade-typescript-sdk";
-import type { BrokerAccount, BrokerPosition, BrokerSyncProvider, BrokerOptionLeg, BrokerOptionActivityResult, BrokerOptionPositionResult } from "../types";
+import type { BrokerAccount, BrokerPosition, BrokerSyncProvider, BrokerOptionLeg, BrokerEquityTxn, BrokerActivitiesResult, BrokerOptionPositionResult } from "../types";
 import { normalizeSnaptradeActivity, normalizeSnaptradeOptionPosition, isOptionPosition } from "../options";
+
+// Map a SnapTrade equity/dividend activity onto a real dated transaction, or null to skip. Reuses
+// the SAME ticker/exchange extractors as positions, so the resulting instrument matches the holding
+// snapshot (critical for share reconciliation). Only BUY / SELL / DIVIDEND are taken; cash movements,
+// transfers, fees and interest are left out (a transfer-in is handled later by share reconciliation).
+function normalizeEquityActivity(raw: unknown): BrokerEquityTxn | null {
+  if (!raw || typeof raw !== "object") return null;
+  const a = raw as Record<string, unknown>;
+  if (a.option_symbol) return null; // options handled elsewhere
+  const t = String(a.type ?? "").toUpperCase().replace(/[\s_]/g, "");
+  const txnType = t === "BUY" ? "buy" : t === "SELL" ? "sell" : t === "DIVIDEND" ? "dividend" : null;
+  if (!txnType) return null;
+
+  const symObj = a.symbol;
+  const symbol = (extractTicker(symObj) ?? "").toUpperCase();
+  if (!symbol) return null;
+  const exchange = extractExchange({ symbol: symObj });
+  const name = extractName({ symbol: symObj });
+
+  const units = toNum(a.units);
+  const price = toNum(a.price);
+  const amount = toNum(a.amount);
+  const fee = Math.abs(toNum(a.fee) ?? 0);
+  const currency = extractActivityCurrency(a.currency);
+  const tradeDate = String(a.trade_date ?? a.settlement_date ?? "").slice(0, 10);
+  if (!tradeDate) return null;
+  const ref = String(a.id ?? a.external_reference_id ?? `${symbol}:${txnType}:${tradeDate}:${units ?? amount ?? ""}`);
+
+  if (txnType === "dividend") {
+    // Store the whole cash amount as a single-"share" dividend row (quantity 1 × price = amount),
+    // so the positions view's div_paid picks it up as real dividend income.
+    const cash = Math.abs(amount ?? 0);
+    if (cash <= 0) return null;
+    return { symbol, exchange, name, txnType, quantity: 1, price: cash, fee, currency, tradeDate, ref };
+  }
+
+  const qty = units != null ? Math.abs(units) : 0;
+  if (qty <= 0) return null;
+  // Per-share price: prefer the reported price, else back it out of the total amount.
+  const perShare = price != null && price > 0 ? price : amount != null ? Math.abs(amount) / qty : 0;
+  if (perShare <= 0) return null;
+  return { symbol, exchange, name, txnType, quantity: qty, price: perShare, fee, currency, tradeDate, ref };
+}
+
+// Activity-level currency can be a bare code or an object { code }.
+function extractActivityCurrency(c: unknown): string {
+  if (typeof c === "string" && c) return c;
+  if (c && typeof c === "object") {
+    const o = c as { code?: string; currency?: string };
+    if (typeof o.code === "string" && o.code) return o.code;
+    if (typeof o.currency === "string" && o.currency) return o.currency;
+  }
+  return "USD";
+}
 
 function buildClient() {
   const clientId = process.env.SNAPTRADE_CLIENT_ID;
@@ -195,43 +249,46 @@ export const snaptradeProvider: BrokerSyncProvider = {
     }
   },
 
-  async getOptionActivities(accountId, since): Promise<BrokerOptionActivityResult> {
+  async getActivities(accountId, since): Promise<BrokerActivitiesResult> {
     const snap = getClient();
-    if (!snap) return { legs: [], scanned: 0, optionRows: 0, error: "SnapTrade not configured" };
+    if (!snap) return { optionLegs: [], equityTxns: [], scanned: 0, optionRows: 0, equityRows: 0, error: "SnapTrade not configured" };
     // Pull the FULL history by default: without an explicit startDate SnapTrade returns only a
-    // recent window, which would miss older option cycles. Look back to a fixed far-past date.
+    // recent window, which would miss older trades. Look back to a fixed far-past date.
     const startDate = since ?? "2015-01-01";
-    const legs: BrokerOptionLeg[] = [];
+    const optionLegs: BrokerOptionLeg[] = [];
+    const equityTxns: BrokerEquityTxn[] = [];
     let scanned = 0;
     let optionRows = 0;
+    let equityRows = 0;
     let shape: string | undefined;
     try {
-      // Page through the account's activities; keep only the option events we track. SnapTrade
-      // paginates via offset/limit and returns { data: UniversalActivity[] } per page.
+      // Page through the account's activities. SnapTrade paginates via offset/limit and returns
+      // { data: UniversalActivity[] } per page. Each row is either an option event (option_symbol
+      // set), an equity trade/dividend (symbol set, a BUY/SELL/DIVIDEND type), or cash/other.
       const limit = 1000;
       for (let offset = 0, page = 0; page < 20; page++, offset += limit) {
-        const res = await snap.accountInformation.getAccountActivities({
-          accountId, startDate, offset, limit,
-        });
+        const res = await snap.accountInformation.getAccountActivities({ accountId, startDate, offset, limit });
         const body = res.data as unknown;
         const rows = ((body as { data?: unknown[] })?.data ?? (Array.isArray(body) ? body : [])) as unknown[];
-        // First page only: if nothing came back, record the response's top-level shape so we can
-        // tell "SnapTrade returned empty" from "we read the wrong field".
         if (page === 0 && rows.length === 0) {
           shape = Array.isArray(body) ? "array" : body && typeof body === "object" ? Object.keys(body).slice(0, 8).join(",") : String(typeof body);
         }
         scanned += rows.length;
         for (const r of rows) {
-          if (r && typeof r === "object" && (r as { option_symbol?: unknown }).option_symbol) optionRows++;
-          const leg = normalizeSnaptradeActivity(r);
-          if (leg) legs.push(leg);
+          if (r && typeof r === "object" && (r as { option_symbol?: unknown }).option_symbol) {
+            optionRows++;
+            const leg = normalizeSnaptradeActivity(r);
+            if (leg) optionLegs.push(leg);
+          } else {
+            const tx = normalizeEquityActivity(r);
+            if (tx) { equityRows++; equityTxns.push(tx); }
+          }
         }
         if (rows.length < limit) break; // last page
       }
-      return { legs, scanned, optionRows, shape };
+      return { optionLegs, equityTxns, scanned, optionRows, equityRows, shape };
     } catch (e) {
-      // Surface the failure instead of masking it as "no options" — the caller reports it.
-      return { legs, scanned, optionRows, error: String((e as { message?: string })?.message ?? e).slice(0, 200) };
+      return { optionLegs, equityTxns, scanned, optionRows, equityRows, error: String((e as { message?: string })?.message ?? e).slice(0, 200) };
     }
   },
 
