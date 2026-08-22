@@ -6,10 +6,12 @@ import { syncBrokerAccounts } from "@/app/dashboard/broker/actions";
 export default function BrokerConnect() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [debug, setDebug] = useState<string | null>(null);
 
   async function sync() {
     setBusy(true);
     setMsg(null);
+    setDebug(null);
     try {
       const res = await syncBrokerAccounts();
       setMsg(
@@ -17,6 +19,7 @@ export default function BrokerConnect() {
           ? `Synced ${res.accounts ?? 0} account(s): ${res.holdings ?? 0} holding(s)${res.options ? `, ${res.options} option leg(s)` : ""}.`
           : res.message ?? "Sync failed."
       );
+      setDebug(res.debug ?? null);
     } catch {
       setMsg("Sync failed — please try again.");
     } finally {
@@ -34,6 +37,11 @@ export default function BrokerConnect() {
         {busy ? "Syncing…" : "Sync now"}
       </button>
       {msg && <p className="text-sm text-slate-600">{msg}</p>}
+      {debug && (
+        <p className="rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-500">
+          Options diagnostics — {debug}
+        </p>
+      )}
     </div>
   );
 }

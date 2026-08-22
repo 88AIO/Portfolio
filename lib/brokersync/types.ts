@@ -36,6 +36,15 @@ export interface BrokerSyncProvider {
   listAccounts(): Promise<BrokerAccount[]>;
   getPositions(accountId: string): Promise<BrokerPosition[]>;
   // Optional: read the account's option activity (sold/closed/expired/assigned legs) since a date.
-  // Providers that don't expose an activities feed simply omit this.
-  getOptionActivities?(accountId: string, since?: string): Promise<BrokerOptionLeg[]>;
+  // Providers that don't expose an activities feed simply omit this. Returns diagnostics alongside
+  // the legs so a caller can tell "no options traded" (scanned>0, legs=0) from "the call failed"
+  // (error set) — otherwise both look like an empty result.
+  getOptionActivities?(accountId: string, since?: string): Promise<BrokerOptionActivityResult>;
 }
+
+export type BrokerOptionActivityResult = {
+  legs: BrokerOptionLeg[];
+  scanned: number; // total activity rows fetched from the provider (all types)
+  optionRows: number; // rows that were option events (before seller-flow filtering)
+  error?: string; // set when the provider call threw / was rejected
+};

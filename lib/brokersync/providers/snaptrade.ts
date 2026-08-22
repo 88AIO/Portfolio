@@ -3,7 +3,7 @@
 // and no connection portal. Reads current positions (the /positions endpoint — the deprecated
 // /holdings endpoint returns 410 Gone for accounts created after May 2026). See docs/SPEC_broker-sync.md.
 import { Snaptrade, SnaptradeAuth } from "snaptrade-typescript-sdk";
-import type { BrokerAccount, BrokerPosition, BrokerSyncProvider, BrokerOptionLeg } from "../types";
+import type { BrokerAccount, BrokerPosition, BrokerSyncProvider, BrokerOptionLeg, BrokerOptionActivityResult } from "../types";
 import { normalizeSnaptradeActivity } from "../options";
 
 function buildClient() {
@@ -189,28 +189,36 @@ export const snaptradeProvider: BrokerSyncProvider = {
     }
   },
 
-  async getOptionActivities(accountId, since): Promise<BrokerOptionLeg[]> {
+  async getOptionActivities(accountId, since): Promise<BrokerOptionActivityResult> {
     const snap = getClient();
-    if (!snap) return [];
+    if (!snap) return { legs: [], scanned: 0, optionRows: 0, error: "SnapTrade not configured" };
+    // Pull the FULL history by default: without an explicit startDate SnapTrade returns only a
+    // recent window, which would miss older option cycles. Look back to a fixed far-past date.
+    const startDate = since ?? "2015-01-01";
+    const legs: BrokerOptionLeg[] = [];
+    let scanned = 0;
+    let optionRows = 0;
     try {
       // Page through the account's activities; keep only the option events we track. SnapTrade
       // paginates via offset/limit and returns { data: UniversalActivity[] } per page.
-      const legs: BrokerOptionLeg[] = [];
       const limit = 1000;
       for (let offset = 0, page = 0; page < 20; page++, offset += limit) {
         const res = await snap.accountInformation.getAccountActivities({
-          accountId, startDate: since, offset, limit,
+          accountId, startDate, offset, limit,
         });
         const rows = (res.data?.data ?? []) as unknown[];
+        scanned += rows.length;
         for (const r of rows) {
+          if (r && typeof r === "object" && (r as { option_symbol?: unknown }).option_symbol) optionRows++;
           const leg = normalizeSnaptradeActivity(r);
           if (leg) legs.push(leg);
         }
         if (rows.length < limit) break; // last page
       }
-      return legs;
-    } catch {
-      return [];
+      return { legs, scanned, optionRows };
+    } catch (e) {
+      // Surface the failure instead of masking it as "no options" — the caller reports it.
+      return { legs, scanned, optionRows, error: String((e as { message?: string })?.message ?? e).slice(0, 200) };
     }
   },
 };

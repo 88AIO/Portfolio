@@ -14,6 +14,7 @@ type BrokerSyncResult = {
   accounts?: number;
   holdings?: number;
   options?: number;
+  debug?: string; // per-account option diagnostics (activities scanned / options found / errors)
 };
 
 function todayIso(): string {
@@ -115,6 +116,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   const instBySymbol = new Map<string, { id: string; currency: string }>();
   let holdings = 0;
   let optionLegs = 0;
+  const optionDebug: string[] = [];
 
   for (const account of accounts) {
     // For investment/crypto (non-cash) accounts, pull positions first and skip any that hold
@@ -214,7 +216,16 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     // income); shares from an assignment are already reflected in the position snapshot, so we do
     // NOT also write equity legs here (that would double-count shares). See docs/SPEC_broker-sync-etrade-options.md.
     if (provider.getOptionActivities) {
-      const legs = await provider.getOptionActivities(account.id);
+      const act = await provider.getOptionActivities(account.id);
+      const legs = act.legs;
+      // One-line diagnostic per account so a 0-result is explainable: did the provider return
+      // any activities at all, were any of them options, did the call error?
+      const acctLabel = account.label || account.brokerageName || account.id.slice(0, 6);
+      optionDebug.push(
+        act.error
+          ? `${acctLabel}: activities error — ${act.error}`
+          : `${acctLabel}: ${act.scanned} activities, ${act.optionRows} option, ${legs.length} imported`
+      );
       if (legs.length) {
         // Snapshot semantics: clear this portfolio's previously-synced option rows, then re-insert.
         await supabase.from("option_transactions").delete()
@@ -267,5 +278,8 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/broker");
   revalidatePath("/dashboard/options");
-  return { ok: true, accounts: accounts.length, holdings, options: optionLegs };
+  return {
+    ok: true, accounts: accounts.length, holdings, options: optionLegs,
+    debug: optionDebug.length ? optionDebug.join(" · ") : undefined,
+  };
 }
