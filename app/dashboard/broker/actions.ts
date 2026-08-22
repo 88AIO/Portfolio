@@ -224,7 +224,7 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
       optionDebug.push(
         act.error
           ? `${acctLabel}: activities error — ${act.error}`
-          : `${acctLabel}: ${act.scanned} activities, ${act.optionRows} option, ${legs.length} imported`
+          : `${acctLabel}: ${act.scanned} activities, ${act.optionRows} option, ${legs.length} imported${act.scanned === 0 && act.shape ? ` [resp: ${act.shape}]` : ""}`
       );
       if (legs.length) {
         // Snapshot semantics: clear this portfolio's previously-synced option rows, then re-insert.

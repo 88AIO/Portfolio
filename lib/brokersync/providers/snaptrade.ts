@@ -198,6 +198,7 @@ export const snaptradeProvider: BrokerSyncProvider = {
     const legs: BrokerOptionLeg[] = [];
     let scanned = 0;
     let optionRows = 0;
+    let shape: string | undefined;
     try {
       // Page through the account's activities; keep only the option events we track. SnapTrade
       // paginates via offset/limit and returns { data: UniversalActivity[] } per page.
@@ -206,7 +207,13 @@ export const snaptradeProvider: BrokerSyncProvider = {
         const res = await snap.accountInformation.getAccountActivities({
           accountId, startDate, offset, limit,
         });
-        const rows = (res.data?.data ?? []) as unknown[];
+        const body = res.data as unknown;
+        const rows = ((body as { data?: unknown[] })?.data ?? (Array.isArray(body) ? body : [])) as unknown[];
+        // First page only: if nothing came back, record the response's top-level shape so we can
+        // tell "SnapTrade returned empty" from "we read the wrong field".
+        if (page === 0 && rows.length === 0) {
+          shape = Array.isArray(body) ? "array" : body && typeof body === "object" ? Object.keys(body).slice(0, 8).join(",") : String(typeof body);
+        }
         scanned += rows.length;
         for (const r of rows) {
           if (r && typeof r === "object" && (r as { option_symbol?: unknown }).option_symbol) optionRows++;
@@ -215,7 +222,7 @@ export const snaptradeProvider: BrokerSyncProvider = {
         }
         if (rows.length < limit) break; // last page
       }
-      return { legs, scanned, optionRows };
+      return { legs, scanned, optionRows, shape };
     } catch (e) {
       // Surface the failure instead of masking it as "no options" — the caller reports it.
       return { legs, scanned, optionRows, error: String((e as { message?: string })?.message ?? e).slice(0, 200) };

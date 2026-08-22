@@ -47,4 +47,5 @@ export type BrokerOptionActivityResult = {
   scanned: number; // total activity rows fetched from the provider (all types)
   optionRows: number; // rows that were option events (before seller-flow filtering)
   error?: string; // set when the provider call threw / was rejected
+  shape?: string; // debug: top-level response keys when the feed came back empty (to spot a mis-read)
 };
