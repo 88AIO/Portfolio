@@ -458,3 +458,23 @@ create table if not exists public.sent_notifications (
   primary key (user_id, dedupe_key)
 );
 alter table public.sent_notifications enable row level security;
+
+-- ============================================================
+-- 11. IV HISTORY — trailing implied-volatility samples for IV Rank (O3 finder)
+-- ============================================================
+-- One IV reading per symbol per day, captured on each put-finder scan (and nightly). We rank
+-- today's IV against this trailing range. Keyed by symbol/exchange (not instrument_id) so we can
+-- sample names the user doesn't hold yet. Shared reference data: service-role writes, authed reads.
+create table if not exists public.iv_history (
+  symbol text not null,
+  exchange text not null default 'US',
+  captured_on date not null,
+  iv numeric not null,                       -- implied volatility, percent (e.g. 32.4)
+  created_at timestamptz not null default now(),
+  primary key (symbol, exchange, captured_on)
+);
+create index if not exists iv_history_symbol_idx on public.iv_history(symbol, exchange, captured_on desc);
+
+alter table public.iv_history enable row level security;
+drop policy if exists "read iv_history" on public.iv_history;
+create policy "read iv_history" on public.iv_history for select using (auth.role() = 'authenticated');

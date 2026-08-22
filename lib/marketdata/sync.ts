@@ -8,9 +8,52 @@ import {
   getDividendHistory,
   getPriceHistory,
   getQuote,
+  getOptionChain,
 } from "@/lib/marketdata";
 
 type Admin = ReturnType<typeof createAdminClient>;
+
+// Capture one daily implied-volatility sample for a name, so the O3 put finder can rank today's
+// IV against its own trailing range. We store the near-the-money put's IV at ~`targetDte` days —
+// a stable reference point (see finder-actions.ts, which stores the same measurement on scan).
+// Keyed by symbol/exchange so names the user doesn't hold yet still accrue history.
+export async function syncIvSample(
+  admin: Admin,
+  symbol: string,
+  exchange: string,
+  targetDte = 35
+): Promise<boolean> {
+  const base = await getOptionChain(symbol, exchange);
+  if (!base) return false;
+  const now = Date.now();
+  const dteOf = (iso: string) => (new Date(`${iso}T00:00:00Z`).getTime() - now) / 86_400_000;
+
+  // Choose the listed expiration nearest the target DTE.
+  const exps = base.expirations.length ? base.expirations : base.expiration ? [base.expiration] : [];
+  let bestExp: string | null = null;
+  let bestDiff = Infinity;
+  for (const e of exps) {
+    const d = Math.abs(dteOf(e) - targetDte);
+    if (dteOf(e) > 0 && d < bestDiff) { bestDiff = d; bestExp = e; }
+  }
+  if (!bestExp) return false;
+
+  const contracts =
+    base.expiration === bestExp ? base.contracts : (await getOptionChain(symbol, exchange, bestExp))?.contracts ?? [];
+  const q = await getQuote(symbol, exchange);
+  const price = q.price;
+  const puts = contracts.filter((c) => c.type === "put" && c.iv != null && (price == null || c.strike <= price));
+  if (!puts.length || price == null) return false;
+  const atm = puts.sort((a, b) => Math.abs(a.strike - price) - Math.abs(b.strike - price))[0];
+  if (atm.iv == null) return false;
+
+  const captured_on = new Date().toISOString().slice(0, 10);
+  await admin.from("iv_history").upsert(
+    { symbol: symbol.toUpperCase(), exchange, captured_on, iv: atm.iv * 100 },
+    { onConflict: "symbol,exchange,captured_on" }
+  );
+  return true;
+}
 
 // Backfill ~13 months of weekly closes for an instrument, so the performance chart can draw
 // value-over-time from cached data.

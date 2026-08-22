@@ -3,9 +3,11 @@ import {
   syncInstrumentQuote,
   syncInstrumentDividends,
   syncInstrumentPriceHistory,
+  syncIvSample,
 } from "@/lib/marketdata/sync";
 import { enrichInstrumentProfile } from "@/lib/enrich";
 import { searchInstrument } from "@/lib/marketdata";
+import { FINDER_UNIVERSE } from "@/lib/options/finder-universe";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -81,5 +83,20 @@ export async function GET(request: Request) {
     );
   }
 
-  return Response.json({ synced: ok, failed, total: held.length });
+  // Capture a daily IV sample for every US name the O3 put finder can scan (held + its seed
+  // universe), so IV Rank builds a trailing range even on days no one runs a manual scan.
+  const ivUniverse = [...new Set([
+    ...held.filter((p) => (p.exchange ?? "US").toUpperCase() === "US").map((p) => p.symbol.toUpperCase()),
+    ...FINDER_UNIVERSE,
+  ])];
+  let ivOk = 0;
+  for (let i = 0; i < ivUniverse.length; i += BATCH) {
+    await Promise.all(
+      ivUniverse.slice(i, i + BATCH).map(async (sym) => {
+        try { if (await syncIvSample(admin, sym, "US")) ivOk++; } catch { /* isolate per-name */ }
+      })
+    );
+  }
+
+  return Response.json({ synced: ok, failed, total: held.length, ivCaptured: ivOk });
 }

@@ -10,8 +10,9 @@ import {
   type OptionPositionRow,
   type ComputedOption,
   type AttentionItem,
-  type UnderlyingIncome,
 } from "@/lib/options";
+import { computeWheels, wheelPhaseLabel, type WheelPosition, type WheelRow } from "@/lib/options/wheel";
+import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
 import AddOptionForm from "@/components/AddOptionForm";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 import NotificationSettings from "@/components/NotificationSettings";
@@ -24,6 +25,7 @@ type PositionLite = {
   symbol: string;
   currency: string;
   shares: number;
+  avg_cost: number | null;
   last_price: number | null;
   price_as_of: string | null;
   div_paid: number | null;
@@ -34,23 +36,36 @@ type PositionLite = {
   div_frequency: number | null;
 };
 
+// Raw ledger row joined to its instrument symbol, for per-symbol realized-gain math.
+type LedgerRow = {
+  type: string;
+  quantity: number;
+  price: number;
+  fees: number | null;
+  currency: string;
+  executed_at: string;
+  instruments: { symbol: string } | { symbol: string }[] | null;
+};
+
 export default async function OptionsPage() {
   const supabase = await createClient();
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
 
-  const [{ data: optRows }, { data: posRows }, { data: pfList }, notifPrefs] = await Promise.all([
+  const [{ data: optRows }, { data: posRows }, { data: pfList }, { data: ledgerRows }, notifPrefs] = await Promise.all([
     supabase.from("option_positions").select("*").order("expiration"),
     supabase.from("positions").select(
-      "symbol, currency, shares, last_price, price_as_of, div_paid, option_premium, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
+      "symbol, currency, shares, avg_cost, last_price, price_as_of, div_paid, option_premium, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
     ),
     supabase.from("portfolios").select("id, name").order("created_at"),
+    supabase.from("transactions").select("type, quantity, price, fees, currency, executed_at, instruments(symbol)"),
     getNotificationPrefs(),
   ]);
 
   const rawOptions = (optRows ?? []) as OptionPositionRow[];
   const positions = (posRows ?? []) as PositionLite[];
   const portfolios = (pfList ?? []) as { id: string; name: string }[];
+  const ledger = (ledgerRows ?? []) as LedgerRow[];
 
   // FX across every currency in play (options + equity positions).
   const currencies = [...rawOptions.map((o) => o.currency), ...positions.map((p) => p.currency)];
@@ -106,32 +121,48 @@ export default async function OptionsPage() {
   }
   attention.sort((a, b) => a.date.localeCompare(b.date));
 
-  // O2 — income by underlying (single-name wheel story): option premium + dividends per ticker,
-  // limited to names with option activity so it stays an options view, not a dividend dump.
-  const incomeMap = new Map<string, UnderlyingIncome>();
-  const initInc = (symbol: string): UnderlyingIncome => {
-    let e = incomeMap.get(symbol);
-    if (!e) {
-      e = { symbol, premium: 0, dividends: 0, total: 0, shares: 0, openPuts: 0, openCalls: 0 };
-      incomeMap.set(symbol, e);
-    }
-    return e;
-  };
-  for (const o of computed) {
-    const e = initInc(o.symbol);
-    e.premium += o.premiumCollected * fx(o.currency);
-    if (o.isOpen && o.option_type === "put") e.openPuts += o.contracts;
-    if (o.isOpen && o.option_type === "call") e.openCalls += o.contracts;
+  // O2 — the wheel as one story: each underlying's option premium + dividends + realized stock P/L,
+  // its current phase (selling puts / covered call / holding / idle) and a blended annualized return.
+  // Realized stock P/L per symbol comes from FIFO lot-matching the raw equity ledger.
+  const realizedLots = computeRealizedLots(
+    ledger.map((t): LedgerTx => {
+      const rel = Array.isArray(t.instruments) ? t.instruments[0] : t.instruments;
+      return {
+        symbol: rel?.symbol ?? "",
+        currency: t.currency,
+        type: t.type,
+        quantity: t.quantity,
+        price: t.price,
+        fees: t.fees ?? 0,
+        executed_at: t.executed_at,
+      };
+    }).filter((t) => t.symbol)
+  );
+  const realizedBySymbol = new Map<string, number>();
+  const lotsBySymbol = new Map<string, typeof realizedLots>();
+  for (const lot of realizedLots) {
+    const arr = lotsBySymbol.get(lot.symbol);
+    if (arr) arr.push(lot);
+    else lotsBySymbol.set(lot.symbol, [lot]);
   }
+  for (const [symbol, lots] of lotsBySymbol) {
+    realizedBySymbol.set(symbol, summarizeRealized(lots, fx).totalGain);
+  }
+
+  // Current equity state per option-active underlying (shares, avg cost, price, dividends).
+  const wheelPositions = new Map<string, WheelPosition>();
   for (const p of positions) {
-    if (!p.symbol || !incomeMap.has(p.symbol)) continue; // only annotate option-active names
-    const e = initInc(p.symbol);
-    e.dividends += (p.div_paid ?? 0) * fx(p.currency);
-    e.shares += p.shares;
+    if (!p.symbol) continue;
+    wheelPositions.set(p.symbol, {
+      symbol: p.symbol,
+      currency: p.currency,
+      shares: p.shares,
+      avg_cost: p.avg_cost ?? 0,
+      last_price: p.last_price,
+      div_paid: p.div_paid,
+    });
   }
-  const incomeByUnderlying = [...incomeMap.values()]
-    .map((e) => ({ ...e, total: e.premium + e.dividends }))
-    .sort((a, b) => b.total - a.total);
+  const wheels: WheelRow[] = computeWheels(computed, wheelPositions, realizedBySymbol, fx, today);
   const closed = computed
     .filter((o) => !o.isOpen)
     .sort((a, b) => b.last_action_at.localeCompare(a.last_action_at));
@@ -306,40 +337,60 @@ export default async function OptionsPage() {
           </section>
         </div>
 
-        {incomeByUnderlying.length > 0 && (
+        {wheels.length > 0 && (
           <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold">Income by underlying</h2>
+            <h2 className="text-base font-semibold">Wheel cycles</h2>
             <p className="mb-4 text-xs text-slate-400">
-              Each wheel’s full income on one name — option premium plus dividends earned while you held it.
+              Each name&apos;s whole wheel in one line — premium, dividends, and realized stock P/L rolled
+              together, with its current phase and a blended return annualized over the capital it tied up.
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-[11px] uppercase tracking-wide text-slate-400">
                   <tr>
-                    <th className="pb-2">Underlying</th>
-                    <th className="pb-2 text-right">Premium</th>
-                    <th className="pb-2 text-right">Dividends</th>
-                    <th className="pb-2 text-right">Total income</th>
-                    <th className="pb-2 text-right">State</th>
+                    <th className="pb-2 pr-2">Underlying</th>
+                    <th className="px-2 pb-2">Phase</th>
+                    <th className="px-2 pb-2 text-right">Premium</th>
+                    <th className="px-2 pb-2 text-right">Dividends</th>
+                    <th className="px-2 pb-2 text-right">Realized stock</th>
+                    <th className="px-2 pb-2 text-right">Total profit</th>
+                    <th className="px-2 pb-2 text-right">Ann. return</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {incomeByUnderlying.map((e) => (
-                    <tr key={e.symbol} className="border-t border-slate-100">
-                      <td className="py-2.5 font-medium text-slate-900">{e.symbol}</td>
-                      <td className="py-2.5 text-right tabular-nums text-emerald-600">{money(e.premium, base)}</td>
-                      <td className="py-2.5 text-right tabular-nums text-slate-500">{money(e.dividends, base)}</td>
-                      <td className="py-2.5 text-right tabular-nums font-semibold">{money(e.total, base)}</td>
-                      <td className="py-2.5 text-right text-xs text-slate-500">
-                        {e.shares > 0 ? `${num(e.shares, 0)} sh` : "no shares"}
-                        {e.openPuts > 0 ? ` · ${e.openPuts}P` : ""}
-                        {e.openCalls > 0 ? ` · ${e.openCalls}C` : ""}
+                  {wheels.map((w) => (
+                    <tr key={w.symbol} className="border-t border-slate-100">
+                      <td className="py-2.5 pr-2">
+                        <div className="font-medium text-slate-900">{w.symbol}</div>
+                        <div className="mt-0.5 text-[11px] text-slate-400">
+                          {w.shares > 0 ? `${num(w.shares, 0)} sh` : "no shares"}
+                          {w.openPuts > 0 ? ` · ${w.openPuts}P` : ""}
+                          {w.openCalls > 0 ? ` · ${w.openCalls}C` : ""}
+                        </div>
+                      </td>
+                      <td className="px-2 py-2.5"><PhaseBadge phase={w.phase} /></td>
+                      <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-emerald-600">{money(w.premium, base)}</td>
+                      <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">{money(w.dividends, base)}</td>
+                      <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums ${w.realizedStock >= 0 ? "text-slate-500" : "text-rose-600"}`}>
+                        {w.realizedStock !== 0 ? money(w.realizedStock, base) : "—"}
+                      </td>
+                      <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-semibold ${w.totalProfit >= 0 ? "text-slate-900" : "text-rose-600"}`}>{money(w.totalProfit, base)}</td>
+                      <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">
+                        {w.annualizedReturn != null ? (
+                          <span className={w.annualizedReturn >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(w.annualizedReturn)}</span>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <p className="mt-3 text-xs text-slate-400">
+              Annualized return is total profit ÷ capital at risk × 365 ÷ days active — a rough blended
+              yardstick across the whole cycle, not a projection. Informational only.
+            </p>
           </section>
         )}
       </div>
@@ -375,6 +426,16 @@ function Badge({ kind }: { kind: "covered" | "naked" | "secured" }) {
   } as const;
   const b = map[kind];
   return <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${b.cls}`}>{b.text}</span>;
+}
+
+function PhaseBadge({ phase }: { phase: WheelRow["phase"] }) {
+  const map = {
+    selling_puts: "bg-sky-50 text-sky-700",
+    covered_call: "bg-violet-50 text-violet-700",
+    holding: "bg-emerald-50 text-emerald-700",
+    idle: "bg-slate-100 text-slate-500",
+  } as const;
+  return <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${map[phase]}`}>{wheelPhaseLabel(phase)}</span>;
 }
 
 function StatusPill({ status }: { status: ComputedOption["status"] }) {

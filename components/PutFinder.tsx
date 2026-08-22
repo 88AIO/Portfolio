@@ -26,6 +26,17 @@ export default function PutFinder() {
   const ivClass = (iv: number | null) =>
     iv == null ? "text-slate-300" : iv >= 60 ? "text-rose-600" : iv >= 35 ? "text-amber-600" : "text-emerald-600";
 
+  // IV rank: high rank = premium is genuinely rich vs. this name's own history.
+  const rankClass = (r: number | null) =>
+    r == null ? "text-slate-300" : r >= 66 ? "text-emerald-600" : r >= 33 ? "text-amber-600" : "text-slate-500";
+
+  const safetyClass = (band: string) =>
+    band === "very-safe" ? "bg-emerald-50 text-emerald-700"
+      : band === "safe" ? "bg-sky-50 text-sky-700"
+      : band === "watch" ? "bg-amber-50 text-amber-700"
+      : band === "at-risk" ? "bg-rose-50 text-rose-700"
+      : "bg-slate-100 text-slate-400";
+
   return (
     <div>
       <div className="flex flex-wrap items-end gap-3">
@@ -68,7 +79,9 @@ export default function PutFinder() {
                     <th className="pb-2 text-right">Premium</th>
                     <th className="pb-2 text-right">Ann. RoC</th>
                     <th className="pb-2 text-right">IV</th>
+                    <th className="pb-2 text-right">IV rank</th>
                     <th className="pb-2 text-right">Div yield</th>
+                    <th className="pb-2 text-right">Div safety</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -88,13 +101,35 @@ export default function PutFinder() {
                       <td className={`py-2.5 text-right tabular-nums ${ivClass(r.iv)}`}>
                         {r.iv != null ? `${r.iv.toFixed(0)}%` : "—"}
                       </td>
+                      <td className={`py-2.5 text-right tabular-nums ${rankClass(r.ivRank)}`}>
+                        {r.ivRank != null ? (
+                          r.ivRank.toFixed(0)
+                        ) : (
+                          <span className="text-[11px] text-slate-400">{r.ivBuilding ? "building" : "—"}</span>
+                        )}
+                      </td>
                       <td className="py-2.5 text-right tabular-nums text-slate-500">
                         {r.divYield != null ? `${r.divYield.toFixed(2)}%` : "—"}
+                      </td>
+                      <td className="py-2.5 text-right">
+                        {r.safetyScore != null ? (
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${safetyClass(r.safetyBand)}`}>
+                            {r.safetyScore}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <p className="mt-3 text-xs text-slate-400">
+                <strong>IV rank</strong> shows where today&apos;s implied volatility sits in this name&apos;s own
+                trailing range (0 = calmest, 100 = richest premium vs. its history) — it reads
+                &ldquo;building&rdquo; until we&apos;ve gathered enough samples to be honest. <strong>Div safety</strong> is
+                a 0–100 read from the payout record. Informational only, never advice.
+              </p>
             </div>
           )}
         </div>

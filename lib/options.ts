@@ -188,8 +188,13 @@ export type FinderRow = {
   dte: number;
   premium: number; // per share (option mark)
   annualizedRoC: number; // percent
-  iv: number | null; // current implied volatility, percent (NOT IV rank yet)
+  iv: number | null; // current implied volatility, percent
+  ivRank: number | null; // where current IV sits in its trailing range, 0..100 (null while building)
+  ivBuilding: boolean; // true when we don't yet have enough IV history to rank honestly
   divYield: number | null; // trailing dividend yield, percent
+  safetyScore: number | null; // dividend-safety score 0..100 (null when history too thin)
+  safetyBand: string; // "very-safe" | "safe" | "watch" | "at-risk" | "unrated"
+  safetyLabel: string; // human label for the band
   held: boolean; // already in the user's holdings
 };
 
