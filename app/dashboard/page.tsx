@@ -228,19 +228,43 @@ export default async function Dashboard({
       </header>
 
       <div className="mx-auto max-w-6xl px-6 py-8">
+        {/* Page intro */}
+        <div className="mb-4">
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">Your portfolio</h1>
+          <p className="mt-1 text-sm text-slate-500">Everything you own and what it&apos;s earned, at a glance.</p>
+        </div>
+
         {/* Summary tiles */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-          <Tile label={`Market value (${base})`} value={money(marketValue, base)} accent />
           <Tile
-            label="Total return"
+            label="Worth now"
+            hint="What all your holdings are worth right now, in your base currency."
+            value={money(marketValue, base)}
+            accent
+          />
+          <Tile
+            label="Total earned"
+            hint="Everything you've made: share price gains + dividends received + option premium — counted once each."
             value={money(totalReturn, base)}
-            sub={optionPremium !== 0 ? "gains + divs + premium" : `${pct(totalReturnPct)} incl. divs`}
+            sub={optionPremium !== 0 ? "gains + dividends + premium" : `${pct(totalReturnPct)} incl. dividends`}
             positive={totalReturn >= 0}
           />
-          <Tile label="Total P/L" value={money(totalPL, base)} sub={`${pct(totalPLpct)} on shares`} positive={totalPL >= 0} />
-          <Tile label="Day P/L" value={money(dayPL, base)} positive={dayPL >= 0} />
-          <Tile label="Est. annual dividends" value={money(annualDivs, base)} sub={`${pct(yieldOnValue)} yield`} neutral />
-          <Tile label="Total cost" value={money(costBasis, base)} muted />
+          <Tile
+            label="Gain / loss"
+            hint="How much your shares are up or down versus what you paid — price only, before dividends."
+            value={money(totalPL, base)}
+            sub={`${pct(totalPLpct)} on shares`}
+            positive={totalPL >= 0}
+          />
+          <Tile label="Today" hint="How much your holdings moved so far today." value={money(dayPL, base)} positive={dayPL >= 0} />
+          <Tile
+            label="Dividends / yr"
+            hint="Estimated dividend income over the next year at current rates."
+            value={money(annualDivs, base)}
+            sub={`${pct(yieldOnValue)} yield`}
+            neutral
+          />
+          <Tile label="Invested" hint="What you paid for everything you currently hold." value={money(costBasis, base)} muted />
         </div>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
@@ -282,14 +306,14 @@ export default async function Dashboard({
                 <table className="w-full text-sm">
                   <thead className="text-left text-[11px] uppercase tracking-wide text-slate-400">
                     <tr>
-                      <th className="pb-2 pr-2">Symbol</th>
+                      <th className="pb-2 pr-2">Holding</th>
                       <th className="px-2 pb-2 text-right">Shares</th>
-                      <th className="px-2 pb-2 text-right">Avg cost</th>
-                      <th className="px-2 pb-2 text-right">Price</th>
-                      <th className="px-2 pb-2 text-right">Day</th>
-                      <th className="px-2 pb-2 text-right">Value</th>
-                      <th className="px-2 pb-2 text-right">Yield</th>
-                      <th className="px-2 pb-2 text-right">P/L</th>
+                      <th className="px-2 pb-2 text-right" title="The average price you paid per share.">Paid / sh</th>
+                      <th className="px-2 pb-2 text-right" title="The latest market price per share.">Price</th>
+                      <th className="px-2 pb-2 text-right" title="How much the price moved so far today.">Today</th>
+                      <th className="px-2 pb-2 text-right" title="What this holding is worth now (shares × price).">Value</th>
+                      <th className="px-2 pb-2 text-right" title="Dividend yield — annual dividend as a % of today's price.">Yield</th>
+                      <th className="px-2 pb-2 text-right" title="Gain or loss: what it's worth now minus what you paid.">Gain / loss</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -396,11 +420,12 @@ export default async function Dashboard({
           {/* Right column: allocation + add + import */}
           <section className="space-y-6">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-3 text-base font-semibold">Allocation</h2>
+              <h2 className="text-base font-semibold">What you hold</h2>
+              <p className="mb-3 text-xs text-slate-400">How your money is split across holdings.</p>
               {alloc.length ? (
                 <AllocationChart data={alloc} currency={base} />
               ) : (
-                <p className="py-6 text-center text-sm text-slate-400">Add holdings to see allocation.</p>
+                <p className="py-6 text-center text-sm text-slate-400">Add holdings to see the breakdown.</p>
               )}
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -440,16 +465,18 @@ export default async function Dashboard({
         {rows.length > 0 && (
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-4 text-base font-semibold">By sector</h2>
+              <h2 className="text-base font-semibold">By sector</h2>
+              <p className="mb-4 text-xs text-slate-400">Which industries your money is spread across (funds counted by what they hold).</p>
               <AllocBars items={sectorAlloc} base={base} />
             </section>
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-1 flex items-center justify-between">
                 <h2 className="text-base font-semibold">By region</h2>
                 <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">
                   International {intlPct.toFixed(1)}%
                 </span>
               </div>
+              <p className="mb-4 text-xs text-slate-400">How much sits in the US versus the rest of the world.</p>
               <AllocBars items={regionAlloc} base={base} />
             </section>
           </div>
@@ -516,6 +543,7 @@ function Tile({
   label,
   value,
   sub,
+  hint,
   positive,
   accent,
   muted,
@@ -524,6 +552,7 @@ function Tile({
   label: string;
   value: string;
   sub?: string;
+  hint?: string;
   positive?: boolean;
   accent?: boolean;
   muted?: boolean;
@@ -535,7 +564,10 @@ function Tile({
         accent ? "border-indigo-200 bg-gradient-to-br from-indigo-50 to-white" : "border-slate-200 bg-white"
       }`}
     >
-      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">
+        {label}
+        {hint && <span title={hint} aria-label={hint} className="cursor-help text-slate-300">ⓘ</span>}
+      </div>
       <div className={`mt-1.5 text-2xl font-bold tracking-tight ${muted ? "text-slate-500" : "text-slate-900"}`}>
         {value}
       </div>
