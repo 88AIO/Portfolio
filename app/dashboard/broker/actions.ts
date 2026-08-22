@@ -44,9 +44,12 @@ async function resolveInstrument(
   }
   // Use the broker's description as the name when present, so intl tickers show a company name
   // immediately instead of a bare code. Falls back to the symbol; "Refresh prices" enriches later.
-  const { data: created } = await admin.from("instruments").insert({
-    symbol, exchange, name: name || symbol, currency: currency || "USD", type,
-  }).select("id, currency").single();
+  // Upsert (not insert) on the (symbol, exchange) unique key so concurrent account syncs resolving
+  // the same ticker can't collide — the loser gets the existing row instead of a unique violation.
+  const { data: created } = await admin.from("instruments").upsert(
+    { symbol, exchange, name: name || symbol, currency: currency || "USD", type },
+    { onConflict: "symbol,exchange" }
+  ).select("id, currency").single();
   return (created as { id: string; currency: string } | null) ?? null;
 }
 
@@ -109,26 +112,32 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
     return { ok: false, message: "Broker sync is limited to the account owner on this instance." };
   }
 
+  const userId = user.id; // captured so the concurrent per-account closure sees a non-null id
   const admin = createAdminClient();
   const accounts = await provider.listAccounts();
   const today = todayIso();
   const now = new Date().toISOString();
   const instBySymbol = new Map<string, { id: string; currency: string }>();
-  let holdings = 0;
-  let optionLegs = 0;
   const optionDebug: string[] = [];
 
-  // Import a set of option legs into one portfolio under a source-specific dedupe prefix, with
-  // snapshot semantics: clear this source's prior rows for the portfolio, then insert. Keeping the
-  // activities source ("snaptrade-act") and positions source ("snaptrade-pos") on separate prefixes
-  // means they never clobber each other. Returns how many rows were written.
+  // Import option legs into a portfolio.
+  //  • "accumulate" NEVER deletes — history persists in the DB forever, even years later when the
+  //    broker/SnapTrade no longer returns those old trades. New legs are added; existing skipped.
+  //    Used for the transaction-activities feed (immutable historical facts).
+  //  • "snapshot" clears this source's prior rows then inserts — used for the current-open-positions
+  //    fallback, where a position that has since closed must disappear.
+  // Activities ("snaptrade-act") and positions ("snaptrade-pos") use separate prefixes so they
+  // never clobber each other. Returns how many rows were written.
   async function importOptionLegs(
     portfolioId: string,
     legs: BrokerOptionLeg[],
-    source: string
+    source: string,
+    mode: "accumulate" | "snapshot"
   ): Promise<number> {
-    await supabase.from("option_transactions").delete()
-      .eq("portfolio_id", portfolioId).like("dedupe_key", `opt:${source}:%`);
+    if (mode === "snapshot") {
+      await supabase.from("option_transactions").delete()
+        .eq("portfolio_id", portfolioId).like("dedupe_key", `opt:${source}:%`);
+    }
     if (!legs.length) return 0;
     const optRows: {
       portfolio_id: string; instrument_id: string; action: string; option_type: string;
@@ -153,23 +162,30 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
       });
     }
     if (!optRows.length) return 0;
+    // ignoreDuplicates keeps already-imported rows untouched — the accumulate guarantee.
     await supabase.from("option_transactions")
       .upsert(optRows, { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true });
     return optRows.length;
   }
 
-  for (const account of accounts) {
+  // Process one brokerage account end-to-end. Returns its counts + diagnostics so the accounts can
+  // run concurrently without racing on shared counters.
+  async function processAccount(account: BrokerAccount): Promise<{ holdings: number; optionLegs: number; debug: string[] }> {
+    const debug: string[] = [];
+    let holdings = 0;
+    let optionLegs = 0;
+
     // For investment/crypto (non-cash) accounts, pull positions first and skip any that hold
     // nothing — an empty sub-account (e.g. an unused Robinhood crypto account) shouldn't create a
     // clutter portfolio. Cash accounts are kept regardless: they're tracked by balance, not holdings.
     let positions: BrokerPosition[] = [];
     if (!account.isCash) {
       positions = await provider.getPositions(account.id);
-      if (positions.length === 0) continue;
+      if (positions.length === 0) return { holdings, optionLegs, debug };
     }
 
-    const portfolioId = await ensureBrokerPortfolio(supabase, admin, user.id, account);
-    if (!portfolioId) continue;
+    const portfolioId = await ensureBrokerPortfolio(supabase, admin, userId, account);
+    if (!portfolioId) return { holdings, optionLegs, debug };
 
     // Record the account's balance/category snapshot (and raw shape) on every sync.
     await admin.from("broker_accounts")
@@ -182,14 +198,13 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
         is_cash: account.isCash,
         raw: account.raw ?? null,
       })
-      .eq("user_id", user.id).eq("provider", "snaptrade").eq("provider_account_id", account.id);
+      .eq("user_id", userId).eq("provider", "snaptrade").eq("provider_account_id", account.id);
 
     // Cash / deposit accounts (e.g. Chase) carry no tradable positions — they're tracked on the
     // Cash & ledger page from the balance above, not as stock holdings. Skip the positions pass.
-    if (account.isCash) continue;
+    if (account.isCash) return { holdings, optionLegs, debug };
 
-    // Clear ALL prior SnapTrade-sourced rows in this account's portfolio (old activity-based
-    // rows + the previous position snapshot) so nothing stale or double-counted lingers.
+    // Equity holdings are a current snapshot: clear this account's prior synced rows, then insert.
     await supabase
       .from("transactions")
       .delete()
@@ -204,6 +219,8 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
       quantity: number; price: number; fees: number; currency: string;
       executed_at: string; dedupe_key: string;
     }[] = [];
+    // Collect price rows and upsert them in ONE call per account instead of one round-trip each.
+    const priceRows: { instrument_id: string; price: number; currency: string; as_of: string }[] = [];
 
     for (const pos of positions) {
       if (!pos.symbol || !pos.units || pos.units <= 0) continue;
@@ -239,24 +256,14 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
           instrument_id: inst.id, executed_at: today, quantity: pos.units, price, fees: 0,
         }),
       });
-
-      // Cache the broker's last price so market value shows immediately (before any price refresh).
-      if (pos.price != null) {
-        await admin.from("price_cache").upsert({
-          instrument_id: inst.id, price: pos.price, currency, as_of: now,
-        });
-      }
+      if (pos.price != null) priceRows.push({ instrument_id: inst.id, price: pos.price, currency, as_of: now });
     }
 
+    if (priceRows.length) await admin.from("price_cache").upsert(priceRows);
     if (rows.length) await supabase.from("transactions").insert(rows);
     holdings += rows.length;
 
     // --- Options: import into the options ledger, kept separate from the equity snapshot above ---
-    // Two independent sources, each with its own snapshot prefix:
-    //  1. Transaction activities (full history) — empty on many SnapTrade connections.
-    //  2. Open option positions (current) — rides along in the working positions feed.
-    // We import ONLY option legs (premium income); assigned shares already show in the position
-    // snapshot, so no equity legs are written here. See docs/SPEC_broker-sync-etrade-options.md.
     const acctLabel = account.label || account.brokerageName || account.id.slice(0, 6);
 
     // The activities feed (full transaction history) is the source of truth when available: it
@@ -268,29 +275,45 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
       const act = await provider.getOptionActivities(account.id);
       const ts = account.txnSync;
       const tsNote = ts ? ` {txnSync: initialDone=${ts.initialDone}, firstTxn=${ts.firstDate ?? "none"}}` : "";
-      optionDebug.push(
+      debug.push(
         act.error
           ? `${acctLabel}: activities error — ${act.error}`
           : `${acctLabel}: ${act.scanned} activities, ${act.optionRows} option, ${act.legs.length} imported${act.scanned === 0 && act.shape ? ` [resp: ${act.shape}]` : ""}${tsNote}`
       );
       activitiesHaveOptions = act.optionRows > 0;
-      optionLegs += await importOptionLegs(portfolioId, act.legs, "snaptrade-act");
+      // Accumulate: option history is never deleted, so a 2025 trade stays even in 2030.
+      optionLegs += await importOptionLegs(portfolioId, act.legs, "snaptrade-act", "accumulate");
     }
 
     if (provider.getOptionPositions) {
       if (activitiesHaveOptions) {
         // Activities already cover this account's options — clear any stale positions-fallback rows
         // so they don't double-count, and skip the positions import.
-        await importOptionLegs(portfolioId, [], "snaptrade-pos");
+        await importOptionLegs(portfolioId, [], "snaptrade-pos", "snapshot");
       } else {
         const pos = await provider.getOptionPositions(account.id);
-        optionDebug.push(
+        debug.push(
           pos.error
             ? `${acctLabel}: positions error — ${pos.error}`
             : `${acctLabel}: ${pos.optionPositions} open option pos, ${pos.legs.length} imported (fallback)${pos.sample ? ` [${pos.sample}]` : ""}`
         );
-        optionLegs += await importOptionLegs(portfolioId, pos.legs, "snaptrade-pos");
+        optionLegs += await importOptionLegs(portfolioId, pos.legs, "snaptrade-pos", "snapshot");
       }
+    }
+    return { holdings, optionLegs, debug };
+  }
+
+  // Run accounts concurrently in small batches — the slow part is provider round-trips, so this
+  // cuts wall-clock roughly by the batch size while staying under SnapTrade's rate limits.
+  let holdings = 0;
+  let optionLegs = 0;
+  const ACCOUNT_BATCH = 4;
+  for (let i = 0; i < accounts.length; i += ACCOUNT_BATCH) {
+    const settled = await Promise.all(accounts.slice(i, i + ACCOUNT_BATCH).map(processAccount));
+    for (const r of settled) {
+      holdings += r.holdings;
+      optionLegs += r.optionLegs;
+      optionDebug.push(...r.debug);
     }
   }
 
