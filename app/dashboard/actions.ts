@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote, searchInstrument, getDividendInfo, getDividendHistory, getPriceHistory } from "@/lib/marketdata";
-import { enrichInstrumentProfile } from "@/lib/enrich";
+import { getQuote, searchInstrument } from "@/lib/marketdata";
+import { syncInstrumentDividends, syncInstrumentPriceHistory } from "@/lib/marketdata/sync";
 import {
   parseTransactionsCsv,
   transactionDedupeKey,
@@ -23,98 +23,6 @@ function todayIso(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${m}-${day}`;
-}
-
-// Backfill ~13 months of weekly closes for an instrument, so the performance chart can draw
-// value-over-time from cached data (service role; shared reference table).
-async function syncInstrumentPriceHistory(
-  admin: ReturnType<typeof createAdminClient>,
-  instrumentId: string,
-  symbol: string,
-  exchange: string
-) {
-  const history = await getPriceHistory(symbol, exchange, 400);
-  if (!history.length) return;
-  await admin.from("price_history").upsert(
-    history.map((h) => ({ instrument_id: instrumentId, d: h.date, close: h.close })),
-    { onConflict: "instrument_id,d" }
-  );
-}
-
-// Infer payout frequency from the spacing between recent ex-dates, snapped to a standard
-// cadence — more stable than counting payments in a rolling 366-day window (which flickers
-// between e.g. 3/4/5 for a quarterly payer as the boundary crosses a payment).
-function inferDivFrequency(history: { exDate: string; amount: number }[]): number | null {
-  if (history.length < 2) return history.length || null;
-  const recent = history.slice(-9); // up to 8 gaps
-  const gaps: number[] = [];
-  for (let i = 1; i < recent.length; i++) {
-    const days = (Date.parse(recent[i].exDate) - Date.parse(recent[i - 1].exDate)) / 86_400_000;
-    if (days > 0) gaps.push(days);
-  }
-  if (!gaps.length) return null;
-  gaps.sort((a, b) => a - b);
-  const medianGap = gaps[Math.floor(gaps.length / 2)];
-  const perYear = 365 / medianGap;
-  const cadences = [1, 2, 4, 6, 12, 26, 52];
-  return cadences.reduce((best, c) => (Math.abs(c - perYear) < Math.abs(best - perYear) ? c : best), cadences[0]);
-}
-
-// Sync an instrument's dividend reference + history from the market-data provider (service role).
-async function syncInstrumentDividends(
-  admin: ReturnType<typeof createAdminClient>,
-  instrumentId: string,
-  symbol: string,
-  exchange: string,
-  currency: string
-) {
-  const [info, history] = await Promise.all([
-    getDividendInfo(symbol, exchange),
-    getDividendHistory(symbol, exchange),
-  ]);
-  const patch: Record<string, unknown> = {};
-  if (info) {
-    patch.div_yield_ttm = info.yieldTtm;
-    patch.ex_dividend_date = info.exDividendDate;
-    patch.next_dividend_date = info.nextDividendDate;
-  }
-
-  let ttmSum = 0;
-  if (history.length) {
-    await admin.from("dividends").upsert(
-      history.map((h) => ({ instrument_id: instrumentId, ex_date: h.exDate, amount: h.amount, currency })),
-      { onConflict: "instrument_id,ex_date" }
-    );
-    const now = Date.now();
-    const last12 = history.filter((h) => now - new Date(h.exDate).getTime() < 366 * 24 * 60 * 60 * 1000);
-    ttmSum = last12.reduce((s, h) => s + (h.amount || 0), 0);
-    patch.div_frequency = inferDivFrequency(history);
-    patch.next_dividend_per_share = history[history.length - 1].amount;
-  }
-
-  // Annual dividend per share — honest, forward-looking, and never inflated across a cut:
-  //  • Prefer Yahoo's forward "dividendRate" when present — it already reflects announced changes.
-  //  • Otherwise use the trailing-12-month actual (always populated for distribution ETFs like
-  //    SCHD/JEPQ/QYLD where the forward rate is missing) — BUT if the most recent payment run-rate
-  //    has dropped materially below TTM (a cut), use the lower run-rate so we don't cling to the
-  //    stale pre-cut figure. We no longer take max(forward, ttm), which biased income upward.
-  const forward = info?.annualDividendPerShare ?? null;
-  const freq = (patch.div_frequency as number | null) ?? null;
-  const lastPayment = history.length ? history[history.length - 1].amount : 0;
-  const recentRunRate = freq && lastPayment > 0 ? lastPayment * freq : 0;
-  let annual: number | null;
-  if (forward && forward > 0) {
-    annual = forward;
-  } else if (ttmSum > 0) {
-    annual = recentRunRate > 0 && recentRunRate < ttmSum * 0.8 ? recentRunRate : ttmSum;
-  } else {
-    annual = forward;
-  }
-  if (annual != null) patch.annual_div_per_share = annual;
-
-  if (Object.keys(patch).length) {
-    await admin.from("instruments").update(patch).eq("id", instrumentId);
-  }
 }
 
 // Get the user's default portfolio, creating one on first use.
@@ -200,49 +108,23 @@ export async function refreshPrices() {
     .from("positions").select("instrument_id, symbol, exchange, name, currency, sector, sector_weights, type");
   if (!pos) return;
 
-  // Pass 0 — backfill company names for holdings that still show a bare ticker (e.g. broker-synced
-  // intl positions whose brokerage feed gave no description). Look the name up from the market-data
-  // provider, which carries clean company names, and only for the ones missing it. Automatic on
-  // every refresh, idempotent once named.
-  const needName = pos.filter((p) => !p.name || p.name.trim() === "" || p.name === p.symbol);
-  for (let i = 0; i < needName.length; i += 6) {
+  // "Refresh prices" is the FAST path — it only fetches live quotes (price + day change), one call
+  // per holding, so it always finishes well inside the function limit even for large portfolios.
+  // The heavier provider work (dividends, price history, sector/name enrichment) runs from the
+  // nightly cron at /api/cron/sync, matching the project brief: the app reads cached tables and
+  // only the scheduled sync fans out to the provider. New manual adds still sync their own
+  // fundamentals immediately in addTransaction.
+  for (let i = 0; i < pos.length; i += 10) {
     await Promise.all(
-      needName.slice(i, i + 6).map(async (p) => {
-        const meta = await searchInstrument(p.symbol, p.exchange);
-        if (meta?.name && meta.name !== p.symbol) {
-          await admin.from("instruments").update({ name: meta.name }).eq("id", p.instrument_id);
-        }
-      })
-    );
-  }
-
-  // Pass 1 — sector enrichment first (stocks get a single sector; ETFs get a look-through
-  // breakdown), only for holdings still missing both, so it commits even if the heavier
-  // price/dividend pass runs long.
-  const toEnrich = pos.filter((p) => !p.sector && !p.sector_weights);
-  for (let i = 0; i < toEnrich.length; i += 6) {
-    await Promise.all(
-      toEnrich.slice(i, i + 6).map((p) =>
-        enrichInstrumentProfile(admin, {
-          id: p.instrument_id, symbol: p.symbol, exchange: p.exchange, type: p.type,
-        })
-      )
-    );
-  }
-
-  // Pass 2 — prices + dividends (heavier), batched to bound concurrency.
-  for (let i = 0; i < pos.length; i += 5) {
-    await Promise.all(
-      pos.slice(i, i + 5).map(async (p) => {
+      pos.slice(i, i + 10).map(async (p) => {
         const q = await getQuote(p.symbol, p.exchange);
         if (q.price != null) {
           await admin.from("price_cache").upsert({
             instrument_id: p.instrument_id, price: q.price,
-            change_pct: q.changePct, as_of: new Date().toISOString(),
+            change_pct: q.changePct, currency: q.currency ?? p.currency ?? null,
+            as_of: new Date().toISOString(),
           });
         }
-        await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
-        await syncInstrumentPriceHistory(admin, p.instrument_id, p.symbol, p.exchange);
       })
     );
   }
