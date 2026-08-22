@@ -492,7 +492,11 @@ function HoldingName({
 }) {
   const hasName = !!name && name.trim() !== "" && name.trim().toUpperCase() !== symbol.toUpperCase();
   const category = type === "crypto" ? "Crypto" : etf ? "ETF" : sector || null;
-  const meta = [`${marketLabel(exchange)} · ${symbol}`, category, extra].filter(Boolean).join(" · ");
+  // When we have a real name, the top line is the name and the meta line carries "market · ticker".
+  // When the name is still pending, the top line IS the ticker, so the meta line shows just the
+  // market (no duplicated ticker).
+  const marketPart = hasName ? `${marketLabel(exchange)} · ${symbol}` : marketLabel(exchange);
+  const meta = [marketPart, category, extra].filter(Boolean).join(" · ");
   return (
     <div>
       <div className="font-medium text-slate-900">{hasName ? name : symbol}</div>
