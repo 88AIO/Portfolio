@@ -183,22 +183,22 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     portfolioId: string,
     txns: BrokerEquityTxn[],
     heldByInst: Map<string, { shares: number; avgCost: number; currency: string; symbol: string }>
-  ): Promise<number> {
-    // Drop the legacy today-snapshot and any prior reconciling lots (recomputed below). Leave the
-    // accumulated real-trade rows (ref:snaptrade-act:*) untouched.
-    await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-pos:%");
-    await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-recon:%");
-
+  ): Promise<{ count: number; error?: string }> {
     type Row = {
       portfolio_id: string; instrument_id: string; type: string; quantity: number; price: number;
       fees: number; currency: string; executed_at: string; dedupe_key: string; note?: string;
     };
-    const rows: Row[] = [];
+    // Dedupe rows by dedupe_key: SnapTrade can emit several legs sharing one reference id, and a
+    // single INSERT … ON CONFLICT cannot touch the same key twice — one dup would fail the whole
+    // batch. Keep the first occurrence.
+    const byKey = new Map<string, Row>();
     const computedByInst = new Map<string, number>();
     const earliestByInst = new Map<string, string>();
     let earliestOverall: string | null = null;
 
     for (const tx of txns) {
+      // Skip anything numerically unsound — one bad row would otherwise reject the whole batch.
+      if (!Number.isFinite(tx.quantity) || !Number.isFinite(tx.price) || tx.quantity <= 0) continue;
       const key = `${tx.symbol}|${tx.exchange}`;
       let inst = instBySymbol.get(key);
       if (!inst) {
@@ -207,21 +207,38 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
         inst = resolved;
         instBySymbol.set(key, inst);
       }
-      rows.push({
-        portfolio_id: portfolioId, instrument_id: inst.id, type: tx.txnType,
-        quantity: tx.quantity, price: tx.price, fees: tx.fee, currency: tx.currency,
-        executed_at: tx.tradeDate, dedupe_key: `ref:snaptrade-act:${tx.ref}`,
-      });
-      if (tx.txnType === "buy") computedByInst.set(inst.id, (computedByInst.get(inst.id) ?? 0) + tx.quantity);
-      else if (tx.txnType === "sell") computedByInst.set(inst.id, (computedByInst.get(inst.id) ?? 0) - tx.quantity);
-      if (tx.txnType !== "dividend") {
-        const cur = earliestByInst.get(inst.id);
-        if (!cur || tx.tradeDate < cur) earliestByInst.set(inst.id, tx.tradeDate);
-        if (!earliestOverall || tx.tradeDate < earliestOverall) earliestOverall = tx.tradeDate;
+      const dk = `ref:snaptrade-act:${tx.ref}`;
+      if (!byKey.has(dk)) {
+        byKey.set(dk, {
+          portfolio_id: portfolioId, instrument_id: inst.id, type: tx.txnType,
+          quantity: tx.quantity, price: tx.price, fees: Number.isFinite(tx.fee) ? tx.fee : 0,
+          currency: tx.currency, executed_at: tx.tradeDate, dedupe_key: dk,
+        });
+        if (tx.txnType === "buy") computedByInst.set(inst.id, (computedByInst.get(inst.id) ?? 0) + tx.quantity);
+        else if (tx.txnType === "sell") computedByInst.set(inst.id, (computedByInst.get(inst.id) ?? 0) - tx.quantity);
+        if (tx.txnType !== "dividend") {
+          const cur = earliestByInst.get(inst.id);
+          if (!cur || tx.tradeDate < cur) earliestByInst.set(inst.id, tx.tradeDate);
+          if (!earliestOverall || tx.tradeDate < earliestOverall) earliestOverall = tx.tradeDate;
+        }
       }
     }
-    // Accumulate — ignoreDuplicates so already-imported trades are never overwritten or re-counted.
-    if (rows.length) await admin.from("transactions").upsert(rows, { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true });
+    const rows = [...byKey.values()];
+    if (!rows.length) return { count: 0 };
+
+    // Only NOW do we touch the DB. Drop the legacy today-snapshot and prior reconciling lots (both
+    // recomputed here); the accumulated real trades (ref:snaptrade-act:*) are left untouched.
+    const delPos = await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-pos:%");
+    if (delPos.error) return { count: 0, error: `del pos: ${delPos.error.message}` };
+    await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-recon:%");
+
+    // Accumulate in chunks — ignoreDuplicates so already-imported trades are never re-counted. Any
+    // error is RETURNED (Supabase never throws), so it can be surfaced instead of failing silently.
+    for (let i = 0; i < rows.length; i += 500) {
+      const { error } = await admin.from("transactions")
+        .upsert(rows.slice(i, i + 500), { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true });
+      if (error) return { count: 0, error: `equity upsert: ${error.message}` };
+    }
 
     // Reconcile computed shares to the broker's current holdings.
     const reconRows: Row[] = [];
@@ -232,15 +249,18 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
       reconRows.push({
         portfolio_id: portfolioId, instrument_id: instId,
         type: diff > 0 ? "buy" : "sell", quantity: Math.abs(diff),
-        price: held.avgCost, fees: 0, currency: held.currency,
+        price: Number.isFinite(held.avgCost) ? held.avgCost : 0, fees: 0, currency: held.currency,
         executed_at: earliestByInst.get(instId) ?? earliestOverall ?? today,
         dedupe_key: `ref:snaptrade-recon:${instId}`,
         note: "Opening balance (reconciled to broker)",
       });
     }
-    if (reconRows.length) await admin.from("transactions").insert(reconRows);
+    if (reconRows.length) {
+      const { error } = await admin.from("transactions").insert(reconRows);
+      if (error) return { count: rows.length, error: `recon: ${error.message}` };
+    }
 
-    return rows.length + reconRows.length;
+    return { count: rows.length + reconRows.length };
   }
 
   // Process one brokerage account end-to-end. Returns its counts + diagnostics so the accounts can
@@ -333,7 +353,15 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
 
       // Real dated equity history (buys/sells/dividends) + reconciliation to the broker snapshot.
       equityFromActivities = act.equityRows > 0;
-      if (equityFromActivities) holdings += await importEquityHistory(portfolioId, act.equityTxns, heldByInst);
+      if (equityFromActivities) {
+        const eq = await importEquityHistory(portfolioId, act.equityTxns, heldByInst);
+        holdings += eq.count;
+        if (eq.error) {
+          // Don't lose the account's holdings on an import error — surface it and fall back to the snapshot.
+          debug.push(`${acctLabel}: equity import error — ${eq.error}`);
+          equityFromActivities = false;
+        }
+      }
     }
 
     // Equity snapshot FALLBACK — only when the activity feed gave us no real equity history. A
