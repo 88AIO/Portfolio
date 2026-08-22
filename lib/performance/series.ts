@@ -69,6 +69,51 @@ function closeAsOf(closes: PerfClose[], date: string): number | null {
   return val;
 }
 
+export type BacktestPoint = { date: string; value: number };
+
+/**
+ * "Growth of current holdings" backtest — value-over-time computed from the shares you hold NOW,
+ * priced back through the weekly-close history. Used when the ledger has no real trade dates (e.g.
+ * broker holdings synced as a single current snapshot), so a true historical reconstruction would
+ * wrongly show "held nothing until today". This is an honest what-if — the basket you hold today,
+ * valued over the past year — NOT your actual historical portfolio value.
+ * @param holdings          current holdings (instrument_id, shares, price currency)
+ * @param historyById       instrument_id → ascending weekly closes
+ * @param currentValueById  optional live base-currency value per instrument, for the final point
+ */
+export function buildHoldingsBacktest(
+  holdings: { instrument_id: string; shares: number; currency: string }[],
+  historyById: Map<string, PerfClose[]>,
+  fx: (currency: string) => number,
+  today: string,
+  currentValueById?: Map<string, number>
+): { points: BacktestPoint[]; startValue: number; endValue: number } {
+  const gridSet = new Set<string>();
+  for (const h of holdings) {
+    const closes = historyById.get(h.instrument_id);
+    if (closes) for (const c of closes) if (c.date <= today) gridSet.add(c.date);
+  }
+  gridSet.add(today);
+  const grid = [...gridSet].sort();
+
+  const points: BacktestPoint[] = [];
+  for (const date of grid) {
+    let value = 0;
+    for (const h of holdings) {
+      if (!h.shares) continue;
+      if (date === today && currentValueById?.has(h.instrument_id)) {
+        value += currentValueById.get(h.instrument_id) ?? 0;
+        continue;
+      }
+      const close = closeAsOf(historyById.get(h.instrument_id) ?? [], date);
+      if (close == null) continue;
+      value += h.shares * close * fx(h.currency);
+    }
+    points.push({ date, value });
+  }
+  return { points, startValue: points[0]?.value ?? 0, endValue: points[points.length - 1]?.value ?? 0 };
+}
+
 /**
  * Build the performance series.
  * @param txs           all of the user's transactions (any instrument)
