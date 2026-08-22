@@ -31,6 +31,17 @@ export type WheelRow = {
   annualizedReturn: number | null; // totalProfit / capital, annualized, as a percent
 };
 
+// One dated entry in a ticker's full wheel history — an option leg, a share assignment/trade,
+// or a dividend. Amounts are in that event's native currency (signed: + cash in, − cash out).
+export type WheelEvent = {
+  date: string; // YYYY-MM-DD
+  kind: "option" | "buy" | "sell" | "dividend";
+  title: string;
+  detail: string;
+  amount: number | null;
+  currency: string;
+};
+
 const PHASE_LABEL: Record<WheelPhase, string> = {
   selling_puts: "Selling puts",
   covered_call: "Covered call",

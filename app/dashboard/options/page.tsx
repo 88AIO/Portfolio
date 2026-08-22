@@ -11,9 +11,10 @@ import {
   type ComputedOption,
   type AttentionItem,
 } from "@/lib/options";
-import { computeWheels, wheelPhaseLabel, type WheelPosition, type WheelRow } from "@/lib/options/wheel";
+import { computeWheels, type WheelPosition, type WheelRow, type WheelEvent } from "@/lib/options/wheel";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
 import AddOptionForm from "@/components/AddOptionForm";
+import WheelCycles from "@/components/WheelCycles";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 import NotificationSettings from "@/components/NotificationSettings";
 import { getNotificationPrefs } from "./actions";
@@ -47,18 +48,38 @@ type LedgerRow = {
   instruments: { symbol: string } | { symbol: string }[] | null;
 };
 
+// Raw option-transaction leg joined to its underlying symbol, for the per-ticker wheel history.
+type OptTxnRow = {
+  action: string;
+  option_type: string;
+  strike: number;
+  expiration: string;
+  contracts: number;
+  premium: number;
+  fee: number | null;
+  currency: string;
+  trade_date: string;
+  instruments: { symbol: string } | { symbol: string }[] | null;
+};
+
+function relSymbol(rel: { symbol: string } | { symbol: string }[] | null): string {
+  const r = Array.isArray(rel) ? rel[0] : rel;
+  return r?.symbol ?? "";
+}
+
 export default async function OptionsPage() {
   const supabase = await createClient();
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
 
-  const [{ data: optRows }, { data: posRows }, { data: pfList }, { data: ledgerRows }, notifPrefs] = await Promise.all([
+  const [{ data: optRows }, { data: posRows }, { data: pfList }, { data: ledgerRows }, { data: optTxnRows }, notifPrefs] = await Promise.all([
     supabase.from("option_positions").select("*").order("expiration"),
     supabase.from("positions").select(
       "symbol, currency, shares, avg_cost, last_price, price_as_of, div_paid, option_premium, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
     ),
     supabase.from("portfolios").select("id, name").order("created_at"),
     supabase.from("transactions").select("type, quantity, price, fees, currency, executed_at, instruments(symbol)"),
+    supabase.from("option_transactions").select("action, option_type, strike, expiration, contracts, premium, fee, currency, trade_date, instruments(symbol)"),
     getNotificationPrefs(),
   ]);
 
@@ -66,6 +87,7 @@ export default async function OptionsPage() {
   const positions = (posRows ?? []) as PositionLite[];
   const portfolios = (pfList ?? []) as { id: string; name: string }[];
   const ledger = (ledgerRows ?? []) as LedgerRow[];
+  const optTxns = (optTxnRows ?? []) as OptTxnRow[];
 
   // FX across every currency in play (options + equity positions).
   const currencies = [...rawOptions.map((o) => o.currency), ...positions.map((p) => p.currency)];
@@ -163,6 +185,52 @@ export default async function OptionsPage() {
     });
   }
   const wheels: WheelRow[] = computeWheels(computed, wheelPositions, realizedBySymbol, fx, today);
+
+  // Per-ticker wheel history — every option leg since inception, plus the linked share
+  // assignments and dividends, one chronological list per underlying. Feeds the expandable
+  // rows in the Wheel cycles table. Only names that have option activity get a history.
+  const historyBySymbol: Record<string, WheelEvent[]> = {};
+  const pushEvent = (symbol: string, e: WheelEvent) => {
+    if (!symbol) return;
+    (historyBySymbol[symbol] ??= []).push(e);
+  };
+  for (const o of optTxns) {
+    const symbol = relSymbol(o.instruments);
+    const ccy = o.currency || base;
+    const gross = (o.premium ?? 0) * (o.contracts ?? 0) * 100;
+    const fee = o.fee ?? 0;
+    const isPut = o.option_type === "put";
+    let title: string, amount: number;
+    if (o.action === "sell_to_open") { title = `Sold ${isPut ? "put" : "call"}`; amount = gross - fee; }
+    else if (o.action === "buy_to_close") { title = "Bought to close"; amount = -gross - fee; }
+    else if (o.action === "rolled") { title = "Rolled"; amount = -gross - fee; }
+    else if (o.action === "assigned") { title = "Assigned"; amount = -fee; }
+    else { title = "Expired"; amount = -fee; }
+    pushEvent(symbol, {
+      date: o.trade_date, kind: "option", currency: ccy, amount,
+      title,
+      detail: `${o.contracts}× ${money(o.strike, ccy)} strike · exp ${o.expiration} · ${money(o.premium, ccy)}/sh`,
+    });
+  }
+  // Equity + dividend legs, but only for names that already have option activity (keeps this an
+  // options view — a wheel — rather than a full portfolio ledger).
+  for (const t of ledger) {
+    const symbol = relSymbol(t.instruments);
+    if (!symbol || !historyBySymbol[symbol]) continue;
+    const ccy = t.currency || base;
+    const fees = t.fees ?? 0;
+    if (t.type === "buy") {
+      pushEvent(symbol, { date: t.executed_at, kind: "buy", currency: ccy, amount: -(t.quantity * t.price + fees), title: "Bought shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${fees ? ` · ${money(fees, ccy)} fee` : ""}` });
+    } else if (t.type === "sell") {
+      pushEvent(symbol, { date: t.executed_at, kind: "sell", currency: ccy, amount: t.quantity * t.price - fees, title: "Sold shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${fees ? ` · ${money(fees, ccy)} fee` : ""}` });
+    } else if (t.type === "dividend") {
+      pushEvent(symbol, { date: t.executed_at, kind: "dividend", currency: ccy, amount: t.quantity * t.price, title: "Dividend received", detail: `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}` });
+    }
+  }
+  for (const sym of Object.keys(historyBySymbol)) {
+    historyBySymbol[sym].sort((a, b) => b.date.localeCompare(a.date));
+  }
+
   const closed = computed
     .filter((o) => !o.isOpen)
     .sort((a, b) => b.last_action_at.localeCompare(a.last_action_at));
@@ -343,50 +411,9 @@ export default async function OptionsPage() {
             <p className="mb-4 text-xs text-slate-400">
               Each name&apos;s whole wheel in one line — premium, dividends, and realized stock P/L rolled
               together, with its current phase and a blended return annualized over the capital it tied up.
+              Click a ticker to expand its full history since inception.
             </p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-left text-[11px] uppercase tracking-wide text-slate-400">
-                  <tr>
-                    <th className="pb-2 pr-2">Underlying</th>
-                    <th className="px-2 pb-2">Phase</th>
-                    <th className="px-2 pb-2 text-right">Premium</th>
-                    <th className="px-2 pb-2 text-right">Dividends</th>
-                    <th className="px-2 pb-2 text-right">Realized stock</th>
-                    <th className="px-2 pb-2 text-right">Total profit</th>
-                    <th className="px-2 pb-2 text-right">Ann. return</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {wheels.map((w) => (
-                    <tr key={w.symbol} className="border-t border-slate-100">
-                      <td className="py-2.5 pr-2">
-                        <div className="font-medium text-slate-900">{w.symbol}</div>
-                        <div className="mt-0.5 text-[11px] text-slate-400">
-                          {w.shares > 0 ? `${num(w.shares, 0)} sh` : "no shares"}
-                          {w.openPuts > 0 ? ` · ${w.openPuts}P` : ""}
-                          {w.openCalls > 0 ? ` · ${w.openCalls}C` : ""}
-                        </div>
-                      </td>
-                      <td className="px-2 py-2.5"><PhaseBadge phase={w.phase} /></td>
-                      <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-emerald-600">{money(w.premium, base)}</td>
-                      <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">{money(w.dividends, base)}</td>
-                      <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums ${w.realizedStock >= 0 ? "text-slate-500" : "text-rose-600"}`}>
-                        {w.realizedStock !== 0 ? money(w.realizedStock, base) : "—"}
-                      </td>
-                      <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-semibold ${w.totalProfit >= 0 ? "text-slate-900" : "text-rose-600"}`}>{money(w.totalProfit, base)}</td>
-                      <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">
-                        {w.annualizedReturn != null ? (
-                          <span className={w.annualizedReturn >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(w.annualizedReturn)}</span>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <WheelCycles wheels={wheels} history={historyBySymbol} base={base} />
             <p className="mt-3 text-xs text-slate-400">
               Annualized return is total profit ÷ capital at risk × 365 ÷ days active — a rough blended
               yardstick across the whole cycle, not a projection. Informational only.
@@ -426,16 +453,6 @@ function Badge({ kind }: { kind: "covered" | "naked" | "secured" }) {
   } as const;
   const b = map[kind];
   return <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${b.cls}`}>{b.text}</span>;
-}
-
-function PhaseBadge({ phase }: { phase: WheelRow["phase"] }) {
-  const map = {
-    selling_puts: "bg-sky-50 text-sky-700",
-    covered_call: "bg-violet-50 text-violet-700",
-    holding: "bg-emerald-50 text-emerald-700",
-    idle: "bg-slate-100 text-slate-500",
-  } as const;
-  return <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${map[phase]}`}>{wheelPhaseLabel(phase)}</span>;
 }
 
 function StatusPill({ status }: { status: ComputedOption["status"] }) {
