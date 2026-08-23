@@ -118,6 +118,23 @@ export default async function PerformancePage() {
 
   const today = todayIso();
 
+  // Recorded daily value snapshots (portfolio_value_history) — an immutable, drift-proof record of
+  // each account's value, written by the nightly sync for every account whether or not it traded.
+  // These supersede the trade-based reconstruction for the dates they cover (the go-forward source of
+  // truth); reconstruction still fills everything before the first snapshot. Summed across accounts.
+  type Snap = { d: string; market_value: number | null };
+  const snapRows = await fetchAll<Snap>((from, to) =>
+    supabase
+      .from("portfolio_value_history")
+      .select("d, market_value")
+      .order("d", { ascending: true })
+      .range(from, to),
+  );
+  const snapValueByDate = new Map<string, number>();
+  for (const s of snapRows) snapValueByDate.set(s.d, (snapValueByDate.get(s.d) ?? 0) + (s.market_value ?? 0));
+  const snapDates = [...snapValueByDate.keys()].sort();
+  const firstSnapDate = snapDates[0] ?? null;
+
   // We only have REAL trade history if some buy/sell predates today. Broker holdings arrive as a
   // single "today" snapshot (the broker sends current positions, not each purchase date), which
   // can't reconstruct a true value-over-time. In that case we show an honest "growth of your current
@@ -144,6 +161,21 @@ export default async function PerformancePage() {
     // Flat cost-basis reference line alongside the value line.
     chartData = bt.points.map((p) => ({ date: p.date, value: Math.round(p.value), invested: Math.round(cost) }));
     hasData = bt.points.length >= 2 && mv > 0;
+  }
+
+  // Overlay the recorded daily snapshots for the dates they cover — exact and immutable, they replace
+  // the reconstruction there. Net invested is held flat across the snapshot region (it only changes on
+  // a trade), so the "invested" line stays continuous instead of jumping to a different definition.
+  if (firstSnapDate) {
+    const snapPoints = snapDates.map((d) => ({
+      date: d,
+      value: Math.round(snapValueByDate.get(d) ?? 0),
+      invested: Math.round(endInvested),
+    }));
+    chartData = [...chartData.filter((p) => p.date < firstSnapDate), ...snapPoints].sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
+    hasData = chartData.length >= 2 && chartData[chartData.length - 1].value > 0;
   }
 
   return (

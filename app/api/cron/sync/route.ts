@@ -10,6 +10,7 @@ import { searchInstrument } from "@/lib/marketdata";
 import { FINDER_UNIVERSE } from "@/lib/options/finder-universe";
 import { runBrokerSyncForUser } from "@/app/dashboard/broker/actions";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
+import { snapshotPortfolioValues } from "@/lib/snapshots";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -115,5 +116,12 @@ export async function GET(request: Request) {
     );
   }
 
-  return Response.json({ synced: ok, failed, total: held.length, ivCaptured: ivOk, brokerOptionLegs: brokerSynced });
+  // Record today's value for every account (after fresh prices), building the permanent
+  // value-over-time history. Runs regardless of trading activity; isolated so it never aborts sync.
+  let valueSnapshots = 0;
+  try {
+    valueSnapshots = await snapshotPortfolioValues(admin);
+  } catch { /* isolate — a snapshot failure must not fail the whole sync */ }
+
+  return Response.json({ synced: ok, failed, total: held.length, ivCaptured: ivOk, brokerOptionLegs: brokerSynced, valueSnapshots });
 }
