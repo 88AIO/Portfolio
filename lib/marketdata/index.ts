@@ -95,17 +95,43 @@ export function getOptionQuote(
     : Promise.resolve(null);
 }
 
-// Get conversion rates for a set of currencies into the base currency (rates fall back to 1).
+// Approximate <currency>→USD rates, used ONLY when the live FX lookup fails. Returning a silent 1.0
+// for e.g. HKD (really ~0.128) would treat a Hong Kong holding as if it were US dollars — an ~8×
+// overstatement. A rough-but-right fallback is far more honest than 1:1; it's the safety net, not the
+// source (the nightly/live rate is preferred whenever it resolves).
+const FALLBACK_USD_RATE: Record<string, number> = {
+  HKD: 0.1282, SGD: 0.78, TWD: 0.0322, MYR: 0.212, CNH: 0.14, CNY: 0.14,
+  JPY: 0.0067, KRW: 0.00072, INR: 0.0116, THB: 0.028, GBP: 1.27, EUR: 1.08,
+  CAD: 0.73, AUD: 0.66, CHF: 1.12, HUF: 0.0028,
+};
+
+// Get conversion rates for a set of currencies into the base currency. Live rate first; on failure
+// (provider returned 1 for a non-base currency, i.e. it couldn't resolve the pair) fall back to a
+// known approximate rather than a catastrophic 1:1. Fallbacks are USD-based, so they only apply when
+// the base is USD (the app default).
 export async function getRates(
   currencies: string[],
   base: string
 ): Promise<Record<string, number>> {
   const provider = getProvider();
   const uniq = [...new Set(currencies.filter(Boolean))];
+  const baseUpper = (base || "USD").toUpperCase();
   const out: Record<string, number> = {};
   await Promise.all(
     uniq.map(async (c) => {
-      out[c] = await provider.getFxRate(c, base);
+      let rate = 1;
+      try {
+        rate = await provider.getFxRate(c, base);
+      } catch {
+        rate = 1;
+      }
+      const cu = c.toUpperCase();
+      // A rate of exactly 1 for a different currency means the live lookup didn't resolve — use the
+      // approximate fallback when we have one (USD base only).
+      if ((!rate || rate === 1) && cu !== baseUpper && baseUpper === "USD" && FALLBACK_USD_RATE[cu]) {
+        rate = FALLBACK_USD_RATE[cu];
+      }
+      out[c] = rate && rate > 0 ? rate : 1;
     })
   );
   return out;

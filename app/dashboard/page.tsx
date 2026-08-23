@@ -73,9 +73,12 @@ export default async function Dashboard({
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   let marketValue = 0, costBasis = 0, dayPL = 0, annualDivs = 0, dividendsReceived = 0;
+  const mvByPortfolio = new Map<string, number>(); // holdings market value per account, in base currency
   for (const p of rows) {
     const r = fx(p.currency);
-    marketValue += (p.last_price ?? 0) * p.shares * r;
+    const v = (p.last_price ?? 0) * p.shares * r;
+    marketValue += v;
+    mvByPortfolio.set(p.portfolio_id, (mvByPortfolio.get(p.portfolio_id) ?? 0) + v);
     costBasis += p.avg_cost * p.shares * r;
     annualDivs += (p.year_total_divs ?? 0) * r;
     dividendsReceived += (p.div_paid ?? 0) * r;
@@ -89,16 +92,21 @@ export default async function Dashboard({
     optionPremium += (o.premium_net ?? 0) * fx(o.currency ?? base);
   }
 
-  // Cash per account (base currency) + total, from the broker balances.
+  // Free cash per account, in base currency. IMPORTANT: SnapTrade's balance.total is the account's
+  // TOTAL value (holdings + cash), NOT free cash — so free cash = total − holdings market value.
+  // Adding the raw total on top of holdings would count every account almost twice (a $269k E*TRADE
+  // would read $552k). Deriving cash this way makes holdings + cash equal the broker's own total, and
+  // is self-correcting: even if a price or FX is momentarily off, the holdings term cancels out.
   const cashByPortfolio = new Map<string, number>();
   let totalCash = 0;
   for (const b of (brokerAccts ?? []) as { portfolio_id: string | null; cash_balance: number | null; currency: string | null }[]) {
     if (!b.portfolio_id || b.cash_balance == null) continue;
-    const c = b.cash_balance * fx(b.currency ?? base);
-    cashByPortfolio.set(b.portfolio_id, (cashByPortfolio.get(b.portfolio_id) ?? 0) + c);
-    totalCash += c;
+    const total = b.cash_balance * fx(b.currency ?? base);
+    const cash = total - (mvByPortfolio.get(b.portfolio_id) ?? 0);
+    cashByPortfolio.set(b.portfolio_id, (cashByPortfolio.get(b.portfolio_id) ?? 0) + cash);
+    totalCash += cash;
   }
-  const totalValue = marketValue + totalCash; // holdings + cash = what the accounts are actually worth
+  const totalValue = marketValue + totalCash; // holdings + free cash = the broker's own account total
   const yieldOnValue = marketValue > 0 ? (annualDivs / marketValue) * 100 : 0;
   const totalPL = marketValue - costBasis; // pure share appreciation (premium NOT baked in)
   const totalPLpct = costBasis > 0 ? (totalPL / costBasis) * 100 : 0;

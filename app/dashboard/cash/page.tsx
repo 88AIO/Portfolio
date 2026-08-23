@@ -47,9 +47,12 @@ export default async function CashPage() {
   const entries = (ledger ?? []) as LedgerRow[];
   const pfName = new Map(portfolios.map((p) => [p.id, p.name] as [string, string]));
 
-  // Cash accounts = anything flagged as cash/deposit or carrying a reported balance.
+  // Cash accounts = bank/deposit accounts ONLY (Chase checking/savings, etc.). Investment accounts
+  // (E*TRADE, IBKR…) also carry a reported balance, but SnapTrade reports it as the account's TOTAL
+  // value (holdings + cash), not free cash — listing that here would show a $282k brokerage as "cash".
+  // Their uninvested cash is folded into "Worth now" on the dashboard (total − holdings) instead.
   const cashAccounts = accounts
-    .filter((a) => a.is_cash || a.cash_balance != null)
+    .filter((a) => a.is_cash)
     .sort((a, b) => (b.cash_balance ?? 0) - (a.cash_balance ?? 0));
 
   const currencies = [
