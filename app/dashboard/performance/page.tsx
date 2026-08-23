@@ -11,8 +11,11 @@ import {
 } from "@/lib/performance/series";
 import PerformanceChart from "@/components/PerformanceChart";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
+import BackfillButton from "@/components/BackfillButton";
+import { isBrokerSyncOwner } from "@/lib/brokersync";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300; // the one-time history backfill fetches several years of weekly closes
 
 type Tx = {
   instrument_id: string;
@@ -43,6 +46,8 @@ export default async function PerformancePage() {
   const supabase = await createClient();
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
+  const { data: { user } } = await supabase.auth.getUser();
+  const isOwner = isBrokerSyncOwner(user?.email);
 
   const [{ data: txData }, { data: posData }] = await Promise.all([
     supabase
@@ -138,7 +143,8 @@ export default async function PerformancePage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-6 py-8">
-        <div className="mb-2 flex justify-end">
+        <div className="mb-2 flex items-start justify-between gap-3">
+          {isOwner ? <BackfillButton /> : <span />}
           <PricesAsOf asOf={oldestPriceAsOf(positions)} />
         </div>
         <div className="mb-4">
