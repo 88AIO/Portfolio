@@ -190,7 +190,8 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     portfolioId: string,
     txns: BrokerEquityTxn[],
     heldByInst: Map<string, { shares: number; avgCost: number; currency: string; symbol: string }>,
-    heldTickers: Map<string, string> // ticker → instrument_id from the position snapshot (authoritative exchange)
+    heldTickers: Map<string, string>, // ticker → instrument_id from the position snapshot (authoritative exchange)
+    brokerIsCrypto: boolean // Coinbase et al: activity tickers are crypto, priced as SYMBOL-USD not US equity
   ): Promise<{ count: number; error?: string }> {
     type Row = {
       portfolio_id: string; instrument_id: string; type: string; quantity: number; price: number;
@@ -207,15 +208,27 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     for (const tx of txns) {
       // Skip anything numerically unsound — one bad row would otherwise reject the whole batch.
       if (!Number.isFinite(tx.quantity) || !Number.isFinite(tx.price) || tx.quantity <= 0) continue;
+      // On a crypto broker (Coinbase), normalize the activity ticker the SAME way positions do
+      // (strip the -USD pair suffix, force the CRYPTO market) so an activity-only coin — one not in
+      // the current positions snapshot, e.g. a fully-sold ARB — resolves to the real crypto
+      // instrument instead of spawning a US-equity phantom with a wrong "stock" price.
+      let sym = tx.symbol;
+      let ex = tx.exchange;
+      let instType = "stock";
+      if (brokerIsCrypto) {
+        sym = (sym.replace(/[-/]?(USD|USDC|USDT)$/i, "") || sym).toUpperCase();
+        ex = "CRYPTO";
+        instType = "crypto";
+      }
       // Prefer the instrument the POSITION snapshot already established for this ticker. The activity
       // feed sometimes reports a wrong/US exchange for an intl holding; without this, that would spawn
       // a PHANTOM duplicate (e.g. "1810 US" alongside the real "1810 HK"), doubling the value.
-      let instId = heldTickers.get(tx.symbol);
+      let instId = heldTickers.get(sym);
       if (!instId) {
-        const k = `${tx.symbol}|${tx.exchange}`;
+        const k = `${sym}|${ex}`;
         let inst = instBySymbol.get(k);
         if (!inst) {
-          const resolved = await resolveInstrument(admin, tx.symbol, tx.exchange, tx.currency, "stock", tx.name);
+          const resolved = await resolveInstrument(admin, sym, ex, tx.currency, instType, tx.name);
           if (!resolved) continue;
           inst = resolved;
           instBySymbol.set(k, inst);
@@ -407,7 +420,7 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
       // Real dated equity history (buys/sells/dividends) + reconciliation to the broker snapshot.
       equityFromActivities = act.equityRows > 0;
       if (equityFromActivities) {
-        const eq = await importEquityHistory(portfolioId, act.equityTxns, heldByInst, heldTickers);
+        const eq = await importEquityHistory(portfolioId, act.equityTxns, heldByInst, heldTickers, brokerIsCrypto);
         holdings += eq.count;
         if (eq.error) {
           // Don't lose the account's holdings on an import error — surface it and fall back to the snapshot.
