@@ -317,13 +317,28 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     const brokerIsCrypto = /coinbase/i.test(account.brokerageName);
     const acctLabel = account.label || account.brokerageName || account.id.slice(0, 6);
 
+    // Dedupe the broker's positions by ticker: the feed can report one international holding TWICE —
+    // its real market plus a mislabeled "US" — which would otherwise create a duplicate listing with
+    // double the value. Keep the real (non-US) market when a ticker conflicts.
+    const posByTicker = new Map<string, BrokerPosition>();
+    for (const pos of positions) {
+      if (!pos.symbol) continue;
+      const t = pos.symbol.toUpperCase();
+      const existing = posByTicker.get(t);
+      if (!existing) { posByTicker.set(t, pos); continue; }
+      const exNew = (pos.exchange || "US").toUpperCase();
+      const exOld = (existing.exchange || "US").toUpperCase();
+      if (exOld === "US" && exNew !== "US") posByTicker.set(t, pos); // prefer the non-US (real) market
+    }
+    const dedupedPositions = [...posByTicker.values()];
+
     // Resolve instruments for the CURRENT positions, cache the broker's last price, and record what
     // the broker says you hold now (instrument_id → shares, avg cost). This feeds both the equity
     // snapshot fallback and the real-history reconciliation.
     const heldByInst = new Map<string, { shares: number; avgCost: number; currency: string; symbol: string }>();
     const heldTickers = new Map<string, string>(); // ticker → instrument_id (authoritative exchange from the broker's positions)
     const priceRows: { instrument_id: string; price: number; currency: string; as_of: string }[] = [];
-    for (const pos of positions) {
+    for (const pos of dedupedPositions) {
       if (!pos.symbol || !pos.units || pos.units <= 0) continue;
       const isCrypto = pos.isCrypto || brokerIsCrypto;
       let symbol = pos.symbol.toUpperCase();
