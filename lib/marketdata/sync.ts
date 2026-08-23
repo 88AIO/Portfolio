@@ -55,20 +55,24 @@ export async function syncIvSample(
   return true;
 }
 
-// Backfill ~13 months of weekly closes for an instrument, so the performance chart can draw
-// value-over-time from cached data.
+// Backfill weekly closes for an instrument, so the performance chart can draw value-over-time from
+// cached data. Defaults to ~13 months (the nightly window); pass a larger fromDays for a one-time
+// deep backfill (e.g. to a portfolio's inception). Upsert is idempotent on (instrument_id, d).
 export async function syncInstrumentPriceHistory(
   admin: Admin,
   instrumentId: string,
   symbol: string,
-  exchange: string
+  exchange: string,
+  fromDays = 400
 ) {
-  const history = await getPriceHistory(symbol, exchange, 400);
+  const history = await getPriceHistory(symbol, exchange, fromDays);
   if (!history.length) return;
-  await admin.from("price_history").upsert(
-    history.map((h) => ({ instrument_id: instrumentId, d: h.date, close: h.close })),
-    { onConflict: "instrument_id,d" }
-  );
+  for (let i = 0; i < history.length; i += 500) {
+    await admin.from("price_history").upsert(
+      history.slice(i, i + 500).map((h) => ({ instrument_id: instrumentId, d: h.date, close: h.close })),
+      { onConflict: "instrument_id,d" }
+    );
+  }
 }
 
 // Infer payout frequency from the spacing between recent ex-dates, snapped to a standard cadence —
