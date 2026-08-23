@@ -6,7 +6,7 @@ import { timeAgo } from "@/lib/format";
 import BrokerConnect from "@/components/BrokerConnect";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300; // the full trade-history import is heavy; give the sync room
 
 type BrokerAccountRow = {
   id: string;

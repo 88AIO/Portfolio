@@ -116,10 +116,17 @@ export async function syncBrokerAccounts(): Promise<BrokerSyncResult> {
 // the owner-gate (the action checks the session; the cron only passes owner user IDs).
 export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncResult> {
   const provider = getBrokerProvider();
-  if (!provider.isConfigured()) return { ok: false, message: "Broker sync isn't configured." };
+  if (!provider.isConfigured()) { console.error("[brokersync] not configured"); return { ok: false, message: "Broker sync isn't configured." }; }
 
   const admin = createAdminClient();
-  const accounts = await provider.listAccounts();
+  let accounts: BrokerAccount[];
+  try {
+    accounts = await provider.listAccounts();
+  } catch (e) {
+    console.error("[brokersync] listAccounts threw:", String((e as { message?: string })?.message ?? e));
+    return { ok: false, message: "Couldn't list brokerage accounts — try again." };
+  }
+  console.error(`[brokersync] START v4 · accounts=${accounts.length}`);
   const today = todayIso();
   const now = new Date().toISOString();
   const instBySymbol = new Map<string, { id: string; currency: string }>();
@@ -447,13 +454,24 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
   let optionLegs = 0;
   const ACCOUNT_BATCH = 4;
   for (let i = 0; i < accounts.length; i += ACCOUNT_BATCH) {
-    const settled = await Promise.all(accounts.slice(i, i + ACCOUNT_BATCH).map(processAccount));
+    // Fault-isolate each account: one throwing account must never abort the whole sync (which would
+    // leave every account unwritten). Log the stack so the culprit is visible in runtime logs.
+    const settled = await Promise.all(accounts.slice(i, i + ACCOUNT_BATCH).map(async (a) => {
+      try {
+        return await processAccount(a);
+      } catch (e) {
+        const msg = String((e as { stack?: string; message?: string })?.stack ?? (e as { message?: string })?.message ?? e).slice(0, 600);
+        console.error(`[brokersync] account "${a.label || a.brokerageName}" threw: ${msg}`);
+        return { holdings: 0, optionLegs: 0, debug: [`${a.label || a.brokerageName}: sync error — ${msg.slice(0, 120)}`] };
+      }
+    }));
     for (const r of settled) {
       holdings += r.holdings;
       optionLegs += r.optionLegs;
       optionDebug.push(...r.debug);
     }
   }
+  console.error(`[brokersync] DONE · holdings=${holdings} options=${optionLegs}`);
 
   // Enrich sector/country for the synced instruments (only those still missing it), in a small
   // dedicated batched pass so the calls aren't rate-limited like they are inside the price refresh.
