@@ -41,6 +41,22 @@ async function resolveInstrument(
     }
     return { id: e.id, currency: e.currency };
   }
+  // PHANTOM GUARD: never let a US-labeled equity shadow an existing REAL foreign listing of the
+  // same ticker. The broker feeds intermittently mislabel an international holding (e.g. "1810 HK",
+  // "D05 SI") as US — on the sync that does so, a US phantom instrument is spawned beside the real
+  // one and reconciled to the full share count, doubling the holding's value. If a non-US,
+  // non-crypto instrument already exists for this ticker, THAT is the real security — use it, and
+  // never create the US twin. (Crypto is excluded: it has its own CRYPTO-market resolution, and a
+  // US ticker must not be pulled onto a coin that happens to share its symbol.)
+  if ((exchange || "US").toUpperCase() === "US" && type !== "crypto") {
+    const { data: foreign } = await admin
+      .from("instruments").select("id, currency")
+      .eq("symbol", symbol).not("exchange", "in", "(US,CRYPTO)").limit(1).maybeSingle();
+    if (foreign) {
+      const f = foreign as { id: string; currency: string };
+      return { id: f.id, currency: f.currency };
+    }
+  }
   // Use the broker's description as the name when present, so intl tickers show a company name
   // immediately instead of a bare code. Falls back to the symbol; "Refresh prices" enriches later.
   // Upsert (not insert) on the (symbol, exchange) unique key so concurrent account syncs resolving
