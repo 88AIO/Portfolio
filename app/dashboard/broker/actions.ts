@@ -332,6 +332,21 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     }
     const dedupedPositions = [...posByTicker.values()];
 
+    // DIAGNOSTIC (sync-v3): show any ticker the feed returned under more than one exchange — the
+    // root of the duplicate listings — so we can see whether the dedupe is engaging.
+    if (positions.length !== dedupedPositions.length) {
+      const seen = new Map<string, string[]>();
+      for (const pos of positions) {
+        if (!pos.symbol) continue;
+        const t = pos.symbol.toUpperCase();
+        (seen.get(t) ?? seen.set(t, []).get(t)!).push((pos.exchange || "US").toUpperCase());
+      }
+      const dups = [...seen.entries()].filter(([, ex]) => ex.length > 1).map(([t, ex]) => `${t}[${ex.join("/")}]`);
+      debug.push(`${acctLabel} raw-pos ${positions.length}→${dedupedPositions.length} deduped${dups.length ? ` · dup: ${dups.slice(0, 10).join(" ")}` : ""}`);
+    } else if (/interactive|ibkr/i.test(account.brokerageName)) {
+      debug.push(`${acctLabel} raw-pos ${positions.length} (no ticker dupes seen — feed uses distinct symbols)`);
+    }
+
     // Resolve instruments for the CURRENT positions, cache the broker's last price, and record what
     // the broker says you hold now (instrument_id → shares, avg cost). This feeds both the equity
     // snapshot fallback and the real-history reconciliation.
