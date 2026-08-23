@@ -182,77 +182,91 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
   async function importEquityHistory(
     portfolioId: string,
     txns: BrokerEquityTxn[],
-    heldByInst: Map<string, { shares: number; avgCost: number; currency: string; symbol: string }>
+    heldByInst: Map<string, { shares: number; avgCost: number; currency: string; symbol: string }>,
+    heldTickers: Map<string, string> // ticker → instrument_id from the position snapshot (authoritative exchange)
   ): Promise<{ count: number; error?: string }> {
     type Row = {
       portfolio_id: string; instrument_id: string; type: string; quantity: number; price: number;
       fees: number; currency: string; executed_at: string; dedupe_key: string; note?: string;
     };
     // Dedupe rows by dedupe_key: SnapTrade can emit several legs sharing one reference id, and a
-    // single INSERT … ON CONFLICT cannot touch the same key twice — one dup would fail the whole
-    // batch. Keep the first occurrence.
+    // single INSERT … ON CONFLICT cannot touch the same key twice — one dup would fail the whole batch.
     const byKey = new Map<string, Row>();
     const computedByInst = new Map<string, number>();
     const earliestByInst = new Map<string, string>();
+    const metaByInst = new Map<string, { firstPrice: number; currency: string }>();
     let earliestOverall: string | null = null;
 
     for (const tx of txns) {
       // Skip anything numerically unsound — one bad row would otherwise reject the whole batch.
       if (!Number.isFinite(tx.quantity) || !Number.isFinite(tx.price) || tx.quantity <= 0) continue;
-      const key = `${tx.symbol}|${tx.exchange}`;
-      let inst = instBySymbol.get(key);
-      if (!inst) {
-        const resolved = await resolveInstrument(admin, tx.symbol, tx.exchange, tx.currency, "stock", tx.name);
-        if (!resolved) continue;
-        inst = resolved;
-        instBySymbol.set(key, inst);
+      // Prefer the instrument the POSITION snapshot already established for this ticker. The activity
+      // feed sometimes reports a wrong/US exchange for an intl holding; without this, that would spawn
+      // a PHANTOM duplicate (e.g. "1810 US" alongside the real "1810 HK"), doubling the value.
+      let instId = heldTickers.get(tx.symbol);
+      if (!instId) {
+        const k = `${tx.symbol}|${tx.exchange}`;
+        let inst = instBySymbol.get(k);
+        if (!inst) {
+          const resolved = await resolveInstrument(admin, tx.symbol, tx.exchange, tx.currency, "stock", tx.name);
+          if (!resolved) continue;
+          inst = resolved;
+          instBySymbol.set(k, inst);
+        }
+        instId = inst.id;
       }
       const dk = `ref:snaptrade-act:${tx.ref}`;
-      if (!byKey.has(dk)) {
-        byKey.set(dk, {
-          portfolio_id: portfolioId, instrument_id: inst.id, type: tx.txnType,
-          quantity: tx.quantity, price: tx.price, fees: Number.isFinite(tx.fee) ? tx.fee : 0,
-          currency: tx.currency, executed_at: tx.tradeDate, dedupe_key: dk,
-        });
-        if (tx.txnType === "buy") computedByInst.set(inst.id, (computedByInst.get(inst.id) ?? 0) + tx.quantity);
-        else if (tx.txnType === "sell") computedByInst.set(inst.id, (computedByInst.get(inst.id) ?? 0) - tx.quantity);
-        if (tx.txnType !== "dividend") {
-          const cur = earliestByInst.get(inst.id);
-          if (!cur || tx.tradeDate < cur) earliestByInst.set(inst.id, tx.tradeDate);
-          if (!earliestOverall || tx.tradeDate < earliestOverall) earliestOverall = tx.tradeDate;
+      if (byKey.has(dk)) continue;
+      byKey.set(dk, {
+        portfolio_id: portfolioId, instrument_id: instId, type: tx.txnType,
+        quantity: tx.quantity, price: tx.price, fees: Number.isFinite(tx.fee) ? tx.fee : 0,
+        currency: tx.currency, executed_at: tx.tradeDate, dedupe_key: dk,
+      });
+      if (tx.txnType === "buy") computedByInst.set(instId, (computedByInst.get(instId) ?? 0) + tx.quantity);
+      else if (tx.txnType === "sell") computedByInst.set(instId, (computedByInst.get(instId) ?? 0) - tx.quantity);
+      if (tx.txnType !== "dividend") {
+        if (!earliestByInst.has(instId) || tx.tradeDate < earliestByInst.get(instId)!) {
+          earliestByInst.set(instId, tx.tradeDate);
+          metaByInst.set(instId, { firstPrice: tx.price, currency: tx.currency });
         }
+        if (!earliestOverall || tx.tradeDate < earliestOverall) earliestOverall = tx.tradeDate;
       }
     }
     const rows = [...byKey.values()];
     if (!rows.length) return { count: 0 };
 
-    // Only NOW do we touch the DB. Drop the legacy today-snapshot and prior reconciling lots (both
-    // recomputed here); the accumulated real trades (ref:snaptrade-act:*) are left untouched.
+    // Only NOW touch the DB. Drop the legacy today-snapshot and prior reconciling lots (both recomputed
+    // here); the accumulated real trades (ref:snaptrade-act:*) are left untouched.
     const delPos = await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-pos:%");
     if (delPos.error) return { count: 0, error: `del pos: ${delPos.error.message}` };
     await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-recon:%");
 
-    // Accumulate in chunks — ignoreDuplicates so already-imported trades are never re-counted. Any
-    // error is RETURNED (Supabase never throws), so it can be surfaced instead of failing silently.
     for (let i = 0; i < rows.length; i += 500) {
       const { error } = await admin.from("transactions")
         .upsert(rows.slice(i, i + 500), { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true });
       if (error) return { count: 0, error: `equity upsert: ${error.message}` };
     }
 
-    // Reconcile computed shares to the broker's current holdings.
+    // Reconcile EVERY instrument the trades touched (held + activity-only) to the broker's current
+    // shares: held → broker shares; activity-only (fully exited, or a phantom from a wrong exchange)
+    // → 0. This clears both negative "sold pre-window" balances and any duplicate phantom.
+    const targetIds = new Set<string>([...heldByInst.keys(), ...computedByInst.keys()]);
     const reconRows: Row[] = [];
-    for (const [instId, held] of heldByInst) {
+    for (const instId of targetIds) {
+      const held = heldByInst.get(instId);
+      const target = held?.shares ?? 0;
       const computed = computedByInst.get(instId) ?? 0;
-      const diff = held.shares - computed;
+      const diff = target - computed;
       if (Math.abs(diff) < 1e-6) continue;
+      const meta = metaByInst.get(instId);
       reconRows.push({
         portfolio_id: portfolioId, instrument_id: instId,
         type: diff > 0 ? "buy" : "sell", quantity: Math.abs(diff),
-        price: Number.isFinite(held.avgCost) ? held.avgCost : 0, fees: 0, currency: held.currency,
+        price: held ? (Number.isFinite(held.avgCost) ? held.avgCost : 0) : (meta?.firstPrice ?? 0),
+        fees: 0, currency: held?.currency ?? meta?.currency ?? "USD",
         executed_at: earliestByInst.get(instId) ?? earliestOverall ?? today,
         dedupe_key: `ref:snaptrade-recon:${instId}`,
-        note: "Opening balance (reconciled to broker)",
+        note: held ? "Opening balance (reconciled to broker)" : "Adjustment (no longer held)",
       });
     }
     if (reconRows.length) {
@@ -307,6 +321,7 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     // the broker says you hold now (instrument_id → shares, avg cost). This feeds both the equity
     // snapshot fallback and the real-history reconciliation.
     const heldByInst = new Map<string, { shares: number; avgCost: number; currency: string; symbol: string }>();
+    const heldTickers = new Map<string, string>(); // ticker → instrument_id (authoritative exchange from the broker's positions)
     const priceRows: { instrument_id: string; price: number; currency: string; as_of: string }[] = [];
     for (const pos of positions) {
       if (!pos.symbol || !pos.units || pos.units <= 0) continue;
@@ -331,6 +346,7 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
       }
       const currency = pos.currency || inst.currency || "USD";
       heldByInst.set(inst.id, { shares: pos.units, avgCost: pos.avgCost ?? pos.price ?? 0, currency, symbol });
+      heldTickers.set(symbol, inst.id);
       if (pos.price != null) priceRows.push({ instrument_id: inst.id, price: pos.price, currency, as_of: now });
     }
     if (priceRows.length) await admin.from("price_cache").upsert(priceRows);
@@ -354,7 +370,7 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
       // Real dated equity history (buys/sells/dividends) + reconciliation to the broker snapshot.
       equityFromActivities = act.equityRows > 0;
       if (equityFromActivities) {
-        const eq = await importEquityHistory(portfolioId, act.equityTxns, heldByInst);
+        const eq = await importEquityHistory(portfolioId, act.equityTxns, heldByInst, heldTickers);
         holdings += eq.count;
         if (eq.error) {
           // Don't lose the account's holdings on an import error — surface it and fall back to the snapshot.

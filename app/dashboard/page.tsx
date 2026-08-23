@@ -62,6 +62,10 @@ export default async function Dashboard({
     (pfList ?? []).map((p: { id: string; name: string }) => [p.id, p.name] as [string, string])
   );
 
+  // Uninvested cash sitting in each connected brokerage account (from the broker sync).
+  const { data: brokerAccts } = await supabase
+    .from("broker_accounts").select("portfolio_id, cash_balance, currency");
+
   // Convert every position into the base currency before summing (mixed US + intl total correctly).
   const base = portfolio.base_currency || "USD";
   const optionCurrencies = (optRows ?? []).map((o: { currency: string | null }) => o.currency ?? base);
@@ -84,6 +88,17 @@ export default async function Dashboard({
   for (const o of (optRows ?? []) as { premium_net: number | null; currency: string | null }[]) {
     optionPremium += (o.premium_net ?? 0) * fx(o.currency ?? base);
   }
+
+  // Cash per account (base currency) + total, from the broker balances.
+  const cashByPortfolio = new Map<string, number>();
+  let totalCash = 0;
+  for (const b of (brokerAccts ?? []) as { portfolio_id: string | null; cash_balance: number | null; currency: string | null }[]) {
+    if (!b.portfolio_id || b.cash_balance == null) continue;
+    const c = b.cash_balance * fx(b.currency ?? base);
+    cashByPortfolio.set(b.portfolio_id, (cashByPortfolio.get(b.portfolio_id) ?? 0) + c);
+    totalCash += c;
+  }
+  const totalValue = marketValue + totalCash; // holdings + cash = what the accounts are actually worth
   const yieldOnValue = marketValue > 0 ? (annualDivs / marketValue) * 100 : 0;
   const totalPL = marketValue - costBasis; // pure share appreciation (premium NOT baked in)
   const totalPLpct = costBasis > 0 ? (totalPL / costBasis) * 100 : 0;
@@ -107,9 +122,10 @@ export default async function Dashboard({
         mv += v;
         pl += v - p.avg_cost * p.shares * r;
       }
-      return { pid, name: pfName.get(pid) ?? "Portfolio", rows: prows, mv, pl };
+      const cash = cashByPortfolio.get(pid) ?? 0;
+      return { pid, name: pfName.get(pid) ?? "Portfolio", rows: prows, mv, pl, cash };
     })
-    .sort((a, b) => b.mv - a.mv);
+    .sort((a, b) => b.mv + b.cash - (a.mv + a.cash));
   const showGroups = groups.length > 1;
 
   // Roll the same instrument up across accounts into one line (the "no duplicates" view).
@@ -238,8 +254,10 @@ export default async function Dashboard({
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           <Tile
             label="Worth now"
-            hint="What all your holdings are worth right now, in your base currency."
-            value={money(marketValue, base)}
+            hint="Your holdings plus uninvested cash in your connected accounts, in your base currency."
+            value={money(totalValue, base)}
+            sub={totalCash > 0 ? `incl. ${money(totalCash, base)} cash` : undefined}
+            neutral
             accent
           />
           <Tile
@@ -327,10 +345,11 @@ export default async function Dashboard({
                                   {g.name}
                                   <span className="ml-2 text-xs font-normal text-slate-400">
                                     {g.rows.length} holding{g.rows.length === 1 ? "" : "s"}
+                                    {g.cash > 0 ? ` · ${money(g.cash, base)} cash` : ""}
                                   </span>
                                 </span>
                                 <span className="text-sm">
-                                  <span className="font-semibold">{money(g.mv, base)}</span>
+                                  <span className="font-semibold">{money(g.mv + g.cash, base)}</span>
                                   <span className={`ml-3 font-medium ${g.pl >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                                     {g.pl >= 0 ? "+" : ""}
                                     {money(g.pl, base)}
