@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
+import { fetchAll } from "@/lib/supabase/paginate";
 import { getRates } from "@/lib/marketdata";
 import { money, pct, num } from "@/lib/format";
 import {
@@ -72,13 +73,21 @@ export default async function OptionsPage() {
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
 
-  const [{ data: optRows }, { data: posRows }, { data: pfList }, { data: ledgerRows }, { data: optTxnRows }, notifPrefs] = await Promise.all([
+  const [{ data: optRows }, { data: posRows }, { data: pfList }, ledger, { data: optTxnRows }, notifPrefs] = await Promise.all([
     supabase.from("option_positions").select("*").order("expiration"),
     supabase.from("positions").select(
       "symbol, currency, shares, avg_cost, last_price, price_as_of, div_paid, option_premium, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
     ),
     supabase.from("portfolios").select("id, name").order("created_at"),
-    supabase.from("transactions").select("type, quantity, price, fees, currency, executed_at, instruments(symbol)"),
+    // Page past the ~1000-row cap so per-ticker stock gains see the full trade ledger.
+    fetchAll<LedgerRow>((from, to) =>
+      supabase
+        .from("transactions")
+        .select("type, quantity, price, fees, currency, executed_at, instruments(symbol)")
+        .order("executed_at", { ascending: true })
+        .order("instrument_id", { ascending: true })
+        .range(from, to),
+    ),
     supabase.from("option_transactions").select("action, option_type, strike, expiration, contracts, premium, fee, currency, trade_date, instruments(symbol)"),
     getNotificationPrefs(),
   ]);
@@ -86,7 +95,6 @@ export default async function OptionsPage() {
   const rawOptions = (optRows ?? []) as OptionPositionRow[];
   const positions = (posRows ?? []) as PositionLite[];
   const portfolios = (pfList ?? []) as { id: string; name: string }[];
-  const ledger = (ledgerRows ?? []) as LedgerRow[];
   const optTxns = (optTxnRows ?? []) as OptTxnRow[];
 
   // FX across every currency in play (options + equity positions).

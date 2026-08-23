@@ -13,6 +13,7 @@ import PerformanceChart from "@/components/PerformanceChart";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 import BackfillButton from "@/components/BackfillButton";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
+import { fetchAll } from "@/lib/supabase/paginate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // the one-time history backfill fetches several years of weekly closes
@@ -49,27 +50,44 @@ export default async function PerformancePage() {
   const { data: { user } } = await supabase.auth.getUser();
   const isOwner = isBrokerSyncOwner(user?.email);
 
-  const [{ data: txData }, { data: posData }] = await Promise.all([
+  // Transactions can exceed Supabase's ~1000-row response cap (years of trades + dividends), which
+  // would silently drop the newest rows and corrupt the share timeline. Page through them all.
+  const txs = await fetchAll<Tx>((from, to) =>
     supabase
       .from("transactions")
       .select("instrument_id, type, quantity, price, fees, currency, executed_at")
-      .order("executed_at", { ascending: true }),
-    supabase.from("positions").select("instrument_id, currency, shares, avg_cost, last_price, price_as_of"),
-  ]);
-
-  const txs = (txData ?? []) as Tx[];
+      .order("executed_at", { ascending: true })
+      .order("instrument_id", { ascending: true })
+      .range(from, to),
+  );
+  const { data: posData } = await supabase
+    .from("positions")
+    .select("instrument_id, currency, shares, avg_cost, last_price, price_as_of");
   const positions = (posData ?? []) as Pos[];
 
-  // Weekly closes for every instrument that appears in the ledger.
+  // Weekly closes for every instrument that appears in the ledger, from the first trade onward.
+  // NOTE: Supabase caps a single response at ~1000 rows. With years of weekly history across many
+  // holdings that's far exceeded, and taking only the first 1000 (oldest) rows would silently drop
+  // everything after — leaving the chart with no points inside the trading window. Page through the
+  // full range explicitly, and skip closes predating the first trade (the series never uses them).
   const instrumentIds = [...new Set(txs.map((t) => t.instrument_id))];
+  const firstTradeDate = txs.reduce<string | null>(
+    (min, t) => (t.type === "buy" || t.type === "sell") && (!min || t.executed_at < min) ? t.executed_at : min,
+    null,
+  );
   let history: Hist[] = [];
   if (instrumentIds.length) {
-    const { data: histData } = await supabase
-      .from("price_history")
-      .select("instrument_id, d, close")
-      .in("instrument_id", instrumentIds)
-      .order("d", { ascending: true });
-    history = (histData ?? []) as Hist[];
+    history = await fetchAll<Hist>((from, to) => {
+      let q = supabase
+        .from("price_history")
+        .select("instrument_id, d, close")
+        .in("instrument_id", instrumentIds);
+      if (firstTradeDate) q = q.gte("d", firstTradeDate);
+      return q
+        .order("d", { ascending: true })
+        .order("instrument_id", { ascending: true })
+        .range(from, to);
+    });
   }
 
   // FX for every currency we touch (transactions + current positions).

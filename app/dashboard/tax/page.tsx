@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
+import { fetchAll } from "@/lib/supabase/paginate";
 import { getRates } from "@/lib/marketdata";
 import { money } from "@/lib/format";
 import {
@@ -56,15 +57,20 @@ export default async function TaxPage({
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
 
-  const [{ data: txData }, { data: optData }] = await Promise.all([
-    supabase
-      .from("transactions")
-      .select("type, quantity, price, fees, currency, executed_at, instruments(symbol)")
-      .order("executed_at", { ascending: true }),
+  // Transactions can exceed Supabase's ~1000-row cap; page through them so FIFO realized-gain
+  // matching sees the whole ledger (a truncated read would drop recent sells and misstate gains).
+  const [txRows, { data: optData }] = await Promise.all([
+    fetchAll<TxRow>((from, to) =>
+      supabase
+        .from("transactions")
+        .select("type, quantity, price, fees, currency, executed_at, instruments(symbol)")
+        .order("executed_at", { ascending: true })
+        .order("instrument_id", { ascending: true })
+        .range(from, to),
+    ),
     supabase.from("option_transactions").select("action, premium, contracts, fee, currency, trade_date"),
   ]);
 
-  const txRows = (txData ?? []) as TxRow[];
   const optRows = (optData ?? []) as OptRow[];
 
   // Build the ledger for FIFO matching (buys/sells only need a symbol).
