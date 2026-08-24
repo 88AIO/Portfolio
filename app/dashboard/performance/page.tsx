@@ -1,7 +1,6 @@
-import Link from "next/link";
-import BrandMark from "@/components/BrandMark";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
+import DashboardNav from "@/components/DashboardNav";
 import { getCachedRates } from "@/lib/fx";
 import { money, pct } from "@/lib/format";
 import {
@@ -225,17 +224,7 @@ export default async function PerformancePage() {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-800">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <BrandMark className="h-7 w-7" />
-            <span className="text-lg font-semibold">Performance</span>
-          </div>
-          <Link href="/dashboard" className="text-sm text-indigo-600 hover:underline">
-            ← Back to dashboard
-          </Link>
-        </div>
-      </header>
+      <DashboardNav active="performance" email={user?.email} />
 
       <div className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-2 flex items-start justify-between gap-3">

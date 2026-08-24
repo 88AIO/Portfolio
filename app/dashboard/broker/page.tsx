@@ -1,7 +1,6 @@
-import Link from "next/link";
-import BrandMark from "@/components/BrandMark";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
+import DashboardNav from "@/components/DashboardNav";
 import { isBrokerSyncConfigured, isBrokerSyncOwner } from "@/lib/brokersync";
 import { timeAgo } from "@/lib/format";
 import BrokerConnect from "@/components/BrokerConnect";
@@ -58,17 +57,7 @@ export default async function BrokerPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-800">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <BrandMark className="h-7 w-7" />
-            <span className="text-lg font-semibold">Brokerages</span>
-          </div>
-          <Link href="/dashboard" className="text-sm text-indigo-600 hover:underline">
-            ← Back to dashboard
-          </Link>
-        </div>
-      </header>
+      <DashboardNav active="broker" email={user?.email} />
 
       <div className="mx-auto max-w-3xl px-6 py-8 space-y-6">
         {/* Intro / what this does */}
