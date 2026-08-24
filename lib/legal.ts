@@ -3,7 +3,7 @@
 // legal notices go here. GOVERNING_LAW/COMPANY should match your actual entity once formed.
 export const APP_NAME = "Snowfolio";
 export const COMPANY = "Snowfolio"; // replace with your legal entity name once formed (e.g. "Snowfolio LLC")
-export const CONTACT_EMAIL = "support@snowfolio.app"; // TODO: set to a real, monitored address
+export const CONTACT_EMAIL = "support@snowfolio.app"; // create/forward this inbox when the domain is set up
 export const GOVERNING_LAW = "the State of California, United States";
 export const MIN_AGE = 18;
 export const LAST_UPDATED = "August 24, 2026";
