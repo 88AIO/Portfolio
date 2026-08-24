@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
 import { getCachedRates } from "@/lib/fx";
+import { fetchAll } from "@/lib/supabase/paginate";
 import { money, pct } from "@/lib/format";
 import { dividendSafety, type DividendSafety } from "@/lib/dividends/safety";
 import { buildDividendCalendar } from "@/lib/dividends/calendar";
@@ -94,12 +95,18 @@ export default async function DividendsPage() {
   let recent: { date: string; symbol: string; perShare: number; total: number; currency: string }[] = [];
   const historyById = new Map<string, { exDate: string; amount: number }[]>();
   if (ids.length) {
-    const { data: divs } = await supabase
-      .from("dividends")
-      .select("instrument_id, ex_date, amount, currency")
-      .in("instrument_id", ids)
-      .order("ex_date", { ascending: false });
-    const all = (divs ?? []) as DivRow[];
+    // Full synced history feeds the safety scores, so it must NOT be truncated at Supabase's
+    // ~1000-row response cap (years of payouts across many holdings exceed it). Page through it all.
+    // Stable total ordering (ex_date desc, then instrument_id) keeps pages from overlapping.
+    const all = await fetchAll<DivRow>((from, to) =>
+      supabase
+        .from("dividends")
+        .select("instrument_id, ex_date, amount, currency")
+        .in("instrument_id", ids)
+        .order("ex_date", { ascending: false })
+        .order("instrument_id", { ascending: true })
+        .range(from, to),
+    );
     for (const d of all) {
       if (!d.ex_date || d.amount == null) continue;
       const arr = historyById.get(d.instrument_id) ?? [];
