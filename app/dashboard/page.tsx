@@ -10,6 +10,7 @@ import AddHoldingForm from "@/components/AddHoldingForm";
 import AllocationChart from "@/components/AllocationChart";
 import ImportTransactionsForm from "@/components/ImportTransactionsForm";
 import SubmitButton from "@/components/SubmitButton";
+import { CHART_CATEGORICAL } from "@/lib/chartColors";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // "Refresh prices" enriches many holdings; give it room.
@@ -619,10 +620,6 @@ function AllocBars({
   items: { name: string; value: number; pct: number }[];
   base: string;
 }) {
-  const colors = [
-    "bg-indigo-500", "bg-sky-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500",
-    "bg-violet-500", "bg-teal-500", "bg-fuchsia-500", "bg-cyan-500", "bg-lime-500",
-  ];
   if (items.length === 0) {
     return <p className="py-6 text-center text-sm text-slate-400">No data yet.</p>;
   }
@@ -638,8 +635,8 @@ function AllocBars({
           </div>
           <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
             <div
-              className={`h-full rounded-full ${colors[i % colors.length]}`}
-              style={{ width: `${Math.max(it.pct, 0.5)}%` }}
+              className="h-full rounded-full"
+              style={{ width: `${Math.max(it.pct, 0.5)}%`, background: CHART_CATEGORICAL[i % CHART_CATEGORICAL.length] }}
             />
           </div>
         </li>

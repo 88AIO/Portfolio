@@ -1,6 +1,7 @@
 "use client";
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, Cell } from "recharts";
+import { CHART } from "@/lib/chartColors";
 
 type Point = { month: string; premium: number };
 
@@ -18,18 +19,18 @@ export default function MonthlyPremiumChart({ data, currency = "USD" }: { data: 
     <div className="h-56 w-full">
       <ResponsiveContainer>
         <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" vertical={false} />
-          <XAxis dataKey="month" tickFormatter={label} tickLine={false} axisLine={false} fontSize={11} stroke="#94a3b8" minTickGap={24} />
-          <YAxis tickFormatter={money} tickLine={false} axisLine={false} fontSize={11} stroke="#94a3b8" width={64} />
+          <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} vertical={false} />
+          <XAxis dataKey="month" tickFormatter={label} tickLine={false} axisLine={false} fontSize={11} stroke={CHART.axis} minTickGap={24} />
+          <YAxis tickFormatter={money} tickLine={false} axisLine={false} fontSize={11} stroke={CHART.axis} width={64} />
           <Tooltip
             formatter={(v) => [money(Number(v)), "Premium"]}
             labelFormatter={(m) => label(String(m))}
-            contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }}
-            cursor={{ fill: "rgba(148,163,184,0.08)" }}
+            contentStyle={{ borderRadius: 12, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 12 }}
+            cursor={{ fill: "rgba(32,93,74,0.06)" }}
           />
           <Bar dataKey="premium" radius={[3, 3, 0, 0]} isAnimationActive={false}>
             {data.map((d, i) => (
-              <Cell key={i} fill={d.premium >= 0 ? "#10b981" : "#f43f5e"} />
+              <Cell key={i} fill={d.premium >= 0 ? CHART.gain : CHART.loss} />
             ))}
           </Bar>
         </BarChart>

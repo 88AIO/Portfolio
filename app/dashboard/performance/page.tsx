@@ -300,7 +300,7 @@ export default async function PerformancePage() {
               </span>
               {benchReturnPct != null && (
                 <span className="flex items-center gap-1.5">
-                  <span className="h-0.5 w-4 border-t-2 border-emerald-500" /> S&amp;P 500
+                  <span className="h-0.5 w-4 border-t-2 border-[#b98a34]" /> S&amp;P 500
                 </span>
               )}
             </div>

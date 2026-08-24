@@ -203,7 +203,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
                   {openOptions.map((o) => (
                     <tr key={o.id} className="border-t border-slate-100">
                       <td className="py-2.5 pr-2">
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${o.option_type === "put" ? "bg-sky-50 text-sky-700" : "bg-violet-50 text-violet-700"}`}>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${o.option_type === "put" ? "bg-[#edf3ee] text-[#205d4a]" : "bg-[#f6ecd8] text-[#8a6a1f]"}`}>
                           {o.option_type === "put" ? "Cash-secured put" : "Covered call"}
                         </span>
                       </td>
@@ -255,7 +255,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
 }
 
 function dot(kind: TimelineItem["kind"]): string {
-  return kind === "buy" ? "bg-indigo-400" : kind === "sell" ? "bg-slate-400" : kind === "dividend" ? "bg-emerald-400" : "bg-violet-400";
+  return kind === "buy" ? "bg-[#4f9580]" : kind === "sell" ? "bg-slate-400" : kind === "dividend" ? "bg-emerald-500" : "bg-[#b98a34]";
 }
 
 function Card({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "up" | "down" }) {

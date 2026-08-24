@@ -142,18 +142,19 @@ function FragmentRow({
   );
 }
 
-// Green premium credits stand out; a share purchase (assignment) is amber; dividends emerald.
+// Option premium is brass (the signature income); a share purchase (assignment) is amber;
+// a sale is a quiet gray; dividends are money-green.
 function dot(e: WheelEvent): string {
-  if (e.kind === "option") return "bg-violet-400";
+  if (e.kind === "option") return "bg-[#b98a34]";
   if (e.kind === "buy") return "bg-amber-400";
   if (e.kind === "sell") return "bg-slate-400";
-  return "bg-emerald-400";
+  return "bg-emerald-500";
 }
 
 function PhaseBadge({ phase }: { phase: WheelRow["phase"] }) {
   const map = {
-    selling_puts: "bg-sky-50 text-sky-700",
-    covered_call: "bg-violet-50 text-violet-700",
+    selling_puts: "bg-[#edf3ee] text-[#205d4a]",
+    covered_call: "bg-[#f6ecd8] text-[#8a6a1f]",
     holding: "bg-emerald-50 text-emerald-700",
     idle: "bg-slate-100 text-slate-500",
   } as const;

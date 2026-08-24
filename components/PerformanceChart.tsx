@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
+import { CHART } from "@/lib/chartColors";
 
 type Point = { date: string; value: number; invested: number; benchmark?: number };
 
@@ -37,18 +38,18 @@ export default function PerformanceChart({
         <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <defs>
             <linearGradient id="perfValue" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
-              <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+              <stop offset="0%" stopColor={CHART.value} stopOpacity={0.28} />
+              <stop offset="100%" stopColor={CHART.value} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} vertical={false} />
           <XAxis
             dataKey="date"
             tickFormatter={shortDate}
             tickLine={false}
             axisLine={false}
             fontSize={11}
-            stroke="#94a3b8"
+            stroke={CHART.axis}
             minTickGap={40}
           />
           <YAxis
@@ -56,18 +57,18 @@ export default function PerformanceChart({
             tickLine={false}
             axisLine={false}
             fontSize={11}
-            stroke="#94a3b8"
+            stroke={CHART.axis}
             width={68}
           />
           <Tooltip
             formatter={(v, name) => [money(Number(v)), seriesLabel(name)]}
             labelFormatter={(d) => shortDate(String(d))}
-            contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }}
+            contentStyle={{ borderRadius: 12, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 12 }}
           />
           <Area
             type="monotone"
             dataKey="value"
-            stroke="#6366f1"
+            stroke={CHART.value}
             strokeWidth={2}
             fill="url(#perfValue)"
             name="value"
@@ -76,7 +77,7 @@ export default function PerformanceChart({
           <Line
             type="monotone"
             dataKey="invested"
-            stroke="#94a3b8"
+            stroke={CHART.invested}
             strokeWidth={1.5}
             strokeDasharray="4 4"
             dot={false}
@@ -87,7 +88,7 @@ export default function PerformanceChart({
             <Line
               type="monotone"
               dataKey="benchmark"
-              stroke="#10b981"
+              stroke={CHART.benchmark}
               strokeWidth={2}
               dot={false}
               name="benchmark"

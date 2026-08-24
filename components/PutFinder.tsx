@@ -31,8 +31,8 @@ export default function PutFinder() {
     r == null ? "text-slate-300" : r >= 66 ? "text-emerald-600" : r >= 33 ? "text-amber-600" : "text-slate-500";
 
   const safetyClass = (band: string) =>
-    band === "very-safe" ? "bg-emerald-50 text-emerald-700"
-      : band === "safe" ? "bg-sky-50 text-sky-700"
+    band === "very-safe" ? "bg-[#edf3ee] text-[#184c3e]"
+      : band === "safe" ? "bg-emerald-50 text-emerald-700"
       : band === "watch" ? "bg-amber-50 text-amber-700"
       : band === "at-risk" ? "bg-rose-50 text-rose-700"
       : "bg-slate-100 text-slate-400";
