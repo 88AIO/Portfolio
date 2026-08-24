@@ -27,9 +27,15 @@ export default function LoginPage() {
     setMsg(null);
     const supabase = createClient();
     if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) setMsg(error.message);
-      else setMsg("Account created. If email confirmation is on, check your inbox, then sign in.");
+      else if (data.session) {
+        // Confirmation is off: they're signed in already, so glide straight into the app.
+        router.push("/dashboard");
+        router.refresh();
+      } else {
+        setMsg("Almost there. We sent a confirmation link to your email. Open it and you're in.");
+      }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setMsg(error.message);

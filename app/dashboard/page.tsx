@@ -10,6 +10,7 @@ import AddHoldingForm from "@/components/AddHoldingForm";
 import AllocationChart from "@/components/AllocationChart";
 import ImportTransactionsForm from "@/components/ImportTransactionsForm";
 import SubmitButton from "@/components/SubmitButton";
+import FirstRun from "@/components/FirstRun";
 import { CHART_CATEGORICAL } from "@/lib/chartColors";
 
 export const dynamic = "force-dynamic";
@@ -210,6 +211,9 @@ export default async function Dashboard({
   const regionAlloc = toAlloc(byRegion);
   const intlPct = marketValue > 0 ? ((byRegion.get("International") ?? 0) / marketValue) * 100 : 0;
 
+  // A brand-new account has no holdings yet: show a warm, guided first-run instead of empty $0 tiles.
+  const isFirstRun = rows.length === 0;
+
   const asOfTimes = rows
     .filter((p) => p.last_price != null && p.price_as_of)
     .map((p) => new Date(p.price_as_of as string).getTime())
@@ -262,6 +266,10 @@ export default async function Dashboard({
           <p className="mt-1.5 text-sm text-slate-500">Everything you own, and what it&apos;s earned you.</p>
         </div>
 
+        {isFirstRun ? (
+          <FirstRun canBrokerSync={canBrokerSync} />
+        ) : (
+        <>
         {/* Summary tiles */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           <Tile
@@ -492,6 +500,8 @@ export default async function Dashboard({
             </div>
           </section>
         </div>
+        </>
+        )}
 
         {rows.length > 0 && (
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
