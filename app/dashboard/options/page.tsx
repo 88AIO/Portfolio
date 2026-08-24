@@ -170,7 +170,7 @@ export default async function OptionsPage() {
     if (o.status === "may_be_assigned") {
       attention.push({
         kind: "assignment", symbol: o.symbol, severity: "warn", date: o.expiration,
-        detail: `${o.symbol} ${money(o.strike, o.currency)} ${o.option_type} is in-the-money with ${o.dte}d left — may be assigned`,
+        detail: `${o.symbol} ${money(o.strike, o.currency)} ${o.option_type} is in-the-money with ${o.dte}d left, may be assigned`,
       });
     } else if (o.dte >= 0 && o.dte <= 7) {
       attention.push({
@@ -310,8 +310,8 @@ export default async function OptionsPage() {
         <div className="mb-4">
           <h1 className="text-xl font-bold tracking-tight text-slate-900">Your options income</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Every option you&apos;ve sold, the income it&apos;s earned, and anything that needs your eye —
-            all in plain numbers.
+            Every option you&apos;ve sold, the income it&apos;s earned, and anything that needs your eye,
+            in plain numbers.
           </p>
         </div>
 
@@ -326,26 +326,26 @@ export default async function OptionsPage() {
           />
           <Tile
             label="Premium earned"
-            hint="Cash you kept from selling options. Green the moment you sell — it's yours to keep."
+            hint="Cash you kept from selling options. Green the moment you sell. It's yours to keep."
             value={money(totals.premiumIncome, base)}
             sub={`${money(totals.openPremium, base)} from still-open trades`}
           />
           <Tile
             label="Return per year"
-            hint="Your average annualized return on the cash tied up as collateral — a yardstick, not a promise."
-            value={totals.avgAnnualizedRoC != null ? pct(totals.avgAnnualizedRoC) : "—"}
+            hint="Your average annualized return on the cash tied up as collateral. A yardstick, not a promise."
+            value={totals.avgAnnualizedRoC != null ? pct(totals.avgAnnualizedRoC) : "-"}
             sub={`on ${money(totals.totalCollateral, base)} set aside`}
           />
           <Tile
             label="Expiring soon"
-            hint="Open options expiring within 7 days — the ones most likely to need action."
+            hint="Open options expiring within 7 days, the ones most likely to need action."
             value={String(totals.expiringCount)}
             sub={`next 7 days · ${money(totals.expiringPremium, base)} premium${totals.nakedCount ? ` · ${totals.nakedCount} uncovered` : ""}`}
           />
         </div>
 
         <p className="mt-3 text-xs text-slate-400">
-          For tracking only — Snowfolio never tells you what to trade. Premium is counted once, as income.
+          For tracking only. Snowfolio never tells you what to trade. Premium is counted once, as income.
           {costBasisReduction > 0 && (
             <> If you think of it as lowering your cost, the {money(costBasisReduction, base)} of premium on
             shares you still hold has effectively shaved that much off what those shares cost you.</>
@@ -374,7 +374,7 @@ export default async function OptionsPage() {
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
           <h2 className="mb-1 text-base font-semibold">Notifications</h2>
           <p className="mb-4 text-xs text-slate-400">
-            Optional emails — assignment/expiry/ex-dividend heads-ups, and a weekly income digest.
+            Optional emails: assignment, expiry, and ex-dividend heads-ups, plus a weekly income digest.
           </p>
           <NotificationSettings initial={notifPrefs} />
         </section>
@@ -386,7 +386,7 @@ export default async function OptionsPage() {
             <p className="mb-4 text-xs text-slate-400">Options you&apos;ve sold that haven&apos;t expired or been closed yet.</p>
             {open.length === 0 ? (
               <p className="py-10 text-center text-sm text-slate-400">
-                No open options right now. Sell a put or covered call and it&apos;ll appear here — or log one on the right →
+                No open options right now. Sell a put or covered call and it&apos;ll appear here, or log one on the right →
               </p>
             ) : (
               <>
@@ -397,8 +397,8 @@ export default async function OptionsPage() {
                       <th className="pb-2 pr-2">Contract</th>
                       <th className="px-2 pb-2 text-right" title="How many contracts (1 contract = 100 shares).">Contracts</th>
                       <th className="px-2 pb-2 text-right" title="Cash you kept for selling this option.">Income</th>
-                      <th className="px-2 pb-2 text-right" title="Cash set aside to back this trade — the strike × 100 for a put, or the shares' value for a covered call.">Cash set aside</th>
-                      <th className="px-2 pb-2 text-right" title="Annualized return on the cash set aside — a yardstick, not a promise.">Return / yr</th>
+                      <th className="px-2 pb-2 text-right" title="Cash set aside to back this trade: the strike × 100 for a put, or the shares' value for a covered call.">Cash set aside</th>
+                      <th className="px-2 pb-2 text-right" title="Annualized return on the cash set aside. A yardstick, not a promise.">Return / yr</th>
                       <th className="px-2 pb-2 text-right" title="Days until the option expires.">Days left</th>
                       <th className="px-2 pb-2 text-right" title="Cushion: how far today's price sits from the strike. More cushion = less likely to be assigned.">Cushion</th>
                       <th className="px-2 pb-2 text-right">Status</th>
@@ -419,10 +419,10 @@ export default async function OptionsPage() {
                         <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{o.contracts}</td>
                         <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium text-emerald-600">{money(o.premiumCollected, o.currency)}</td>
                         <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">{money(o.collateral, o.currency)}</td>
-                        <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{o.annualizedRoC != null ? pct(o.annualizedRoC) : "—"}</td>
+                        <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{o.annualizedRoC != null ? pct(o.annualizedRoC) : "-"}</td>
                         <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{o.dte}d</td>
                         <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">
-                          {o.distanceToStrikePct != null ? pct(o.distanceToStrikePct) : "—"}
+                          {o.distanceToStrikePct != null ? pct(o.distanceToStrikePct) : "-"}
                         </td>
                         <td className="py-2.5 pl-2 text-right">
                           <StatusPill status={o.status} />
@@ -443,7 +443,7 @@ export default async function OptionsPage() {
             {closed.length > 0 && (
               <>
                 <h3 className="mb-1 mt-8 text-sm font-semibold text-slate-500">Finished trades</h3>
-                <p className="mb-2 text-xs text-slate-400">Closed, expired, or assigned — with the income each one kept.</p>
+                <p className="mb-2 text-xs text-slate-400">Closed, expired, or assigned, with the income each one kept.</p>
                 <ul className="divide-y divide-slate-100 text-sm">
                   {closed.slice(0, 12).map((o) => (
                     <li key={`${o.instrument_id}-${o.option_type}-${o.strike}-${o.expiration}`} className="flex items-center justify-between py-2">
@@ -472,9 +472,9 @@ export default async function OptionsPage() {
             <div className="rounded-2xl border border-slate-200 bg-white p-5 text-xs text-slate-500 shadow-sm">
               <h3 className="mb-2 text-sm font-semibold text-slate-700">Good to know</h3>
               <ul className="space-y-1.5">
-                <li>• The <strong>premium</strong> is yours to keep the moment you sell — it counts as income right away.</li>
+                <li>• The <strong>premium</strong> is yours to keep the moment you sell. It counts as income right away.</li>
                 <li>• <strong>Return / yr</strong> scales that income up to a yearly rate, so short and long trades compare fairly.</li>
-                <li>• A call is <strong>Covered</strong> when you own the 100 shares behind each contract — otherwise it&apos;s <strong>uncovered</strong>.</li>
+                <li>• A call is <strong>Covered</strong> when you own the 100 shares behind each contract, otherwise it&apos;s <strong>uncovered</strong>.</li>
                 <li>• If a put gets <strong>assigned</strong>, we add the share purchase for you automatically.</li>
               </ul>
             </div>
@@ -513,12 +513,12 @@ export default async function OptionsPage() {
           <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold">By stock</h2>
             <p className="mb-4 text-xs text-slate-400">
-              Everything you&apos;ve earned on each stock — option premium, dividends, and stock gains — added up
+              Everything you&apos;ve earned on each stock (option premium, dividends, and stock gains) added up
               into one total, with a rough yearly return. <strong>Click any row</strong> to see its full history.
             </p>
             <WheelCycles wheels={wheels} history={historyBySymbol} base={base} />
             <p className="mt-3 text-xs text-slate-400">
-              Return per year is a rough yardstick (total earned ÷ cash tied up, scaled to a year) — for
+              Return per year is a rough yardstick (total earned ÷ cash tied up, scaled to a year), for
               tracking, not a projection.
             </p>
           </section>
@@ -558,7 +558,7 @@ function Tile({
 function Badge({ kind }: { kind: "covered" | "naked" | "secured" }) {
   const map = {
     covered: { text: "Covered", cls: "bg-emerald-50 text-emerald-700", hint: "You own the 100 shares per contract behind this call." },
-    naked: { text: "Uncovered", cls: "bg-amber-50 text-amber-700", hint: "You don't own the shares behind this call — higher risk if it's assigned." },
+    naked: { text: "Uncovered", cls: "bg-amber-50 text-amber-700", hint: "You don't own the shares behind this call, so higher risk if it's assigned." },
     secured: { text: "Cash-backed", cls: "bg-slate-100 text-slate-600", hint: "Backed by the cash to buy the shares if the put is assigned." },
   } as const;
   const b = map[kind];

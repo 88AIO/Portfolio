@@ -110,7 +110,7 @@ export default async function DividendsPage() {
       const p = byId.get(d.instrument_id);
       const perShare = d.amount ?? 0;
       return {
-        date: d.ex_date ?? "—",
+        date: d.ex_date ?? "-",
         symbol: p?.symbol ?? "?",
         perShare,
         total: perShare * (p?.shares ?? 0),
@@ -247,7 +247,7 @@ export default async function DividendsPage() {
                       <div className="text-xs text-slate-400">{date}</div>
                     </div>
                     <div className="text-right">
-                      {amount != null ? money(amount, p.currency) : <span className="text-slate-300">—</span>}
+                      {amount != null ? money(amount, p.currency) : <span className="text-slate-300">-</span>}
                     </div>
                   </li>
                 ))}
@@ -289,10 +289,10 @@ export default async function DividendsPage() {
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
           <div className="mb-1 flex items-center justify-between gap-2">
             <h2 className="font-semibold">Dividend safety</h2>
-            <span className="text-xs text-slate-400">0–100 · higher is steadier</span>
+            <span className="text-xs text-slate-400">0 to 100 · higher is steadier</span>
           </div>
           <p className="mb-4 max-w-2xl text-xs text-slate-400">
-            A calm read on how dependable each payout looks, from its own history — past cuts,
+            A calm read on how dependable each payout looks, from its own history: past cuts,
             years paid, growth, and yield sanity. It informs, it doesn&apos;t advise. Holdings with
             little history stay unrated rather than guess.
           </p>
@@ -331,7 +331,7 @@ export default async function DividendsPage() {
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase text-slate-400">
                   <tr>
-                    <th className="pb-2" title="Ex-dividend date — you had to own the stock before this day to receive the payout.">Ex-date</th>
+                    <th className="pb-2" title="Ex-dividend date: you had to own the stock before this day to receive the payout.">Ex-date</th>
                     <th className="pb-2">Stock</th>
                     <th className="pb-2 text-right" title="The dividend paid for each share.">Per share</th>
                     <th className="pb-2 text-right" title="Per-share amount × the shares you hold today.">Your total</th>

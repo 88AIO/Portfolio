@@ -292,7 +292,7 @@ export default async function PerformancePage() {
               <>Reconstructed from your transactions and weekly closing prices. The gap between the two
               lines is your gain; dividends are counted separately on the Dividends page.</>
             ) : (
-              <>Your broker sends your <em>current</em> holdings, not the date of each purchase — so this
+              <>Your broker sends your <em>current</em> holdings, not the date of each purchase, so this
               shows the stocks you hold <strong>today</strong>, valued back through the past year. It&apos;s a
               what-if to see how your basket has moved, not your exact day-by-day history.</>
             )}
@@ -304,7 +304,7 @@ export default async function PerformancePage() {
             <div className="py-16 text-center text-sm text-slate-400">
               <p className="mb-2">Not enough price history to chart yet.</p>
               <p>
-                Price history builds automatically each night — check back tomorrow, or add a few
+                Price history builds automatically each night. Check back tomorrow, or add a few
                 dividend-paying or long-held names and it&apos;ll fill in.
               </p>
             </div>
@@ -312,7 +312,7 @@ export default async function PerformancePage() {
         </section>
 
         <p className="mt-4 text-center text-xs text-slate-400">
-          A simple return on the money you put in — not a time-weighted or money-weighted (XIRR) figure.
+          A simple return on the money you put in, not a time-weighted or money-weighted (XIRR) figure.
           We&apos;d rather show a number we can stand behind than a confident wrong one.
         </p>
       </div>

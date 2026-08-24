@@ -36,7 +36,7 @@ export function buildAlerts(options: ComputedOption[], positions: PositionLite[]
         dedupeKey: `assign:${o.symbol}:${o.strike}:${o.expiration}`,
         severity: "warn",
         date: o.expiration,
-        text: `${o.symbol} ${money(o.strike, o.currency)} ${o.option_type} is in the money with ${o.dte}d left — may be assigned.`,
+        text: `${o.symbol} ${money(o.strike, o.currency)} ${o.option_type} is in the money with ${o.dte}d left, may be assigned.`,
       });
     } else if (o.dte >= 0 && o.dte <= 2) {
       items.push({
@@ -91,7 +91,7 @@ export function digestEmailHtml(d: DigestData): string {
       <div style="font-size:20px;font-weight:700;margin-top:2px">${value}</div></div>`;
   const upcoming = d.upcomingExDiv.length
     ? `<h2 style="font-size:14px;margin:20px 0 8px">Upcoming ex-dividends</h2><ul style="margin:0;padding-left:18px;color:#334155;font-size:14px">${d.upcomingExDiv
-        .map((u) => `<li>${u.symbol} — ${u.date}${u.est != null ? ` (~${money(u.est, u.currency)})` : ""}</li>`)
+        .map((u) => `<li>${u.symbol}: ${u.date}${u.est != null ? ` (~${money(u.est, u.currency)})` : ""}</li>`)
         .join("")}</ul>`
     : "";
   const expiring = d.expiringOptions.length
@@ -99,7 +99,7 @@ export function digestEmailHtml(d: DigestData): string {
         .map((e) => `<li>${e.text}</li>`)
         .join("")}</ul>`
     : "";
-  return `<p style="margin:0 0 16px;color:#475569;font-size:14px">Here's your income for the past week:</p>
+  return `<p style="margin:0 0 16px;color:#475569;font-size:14px">Your income for the past week:</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       ${stat(`Total income (${d.base})`, money(d.totalWeek, d.base))}
       ${stat("Option premium", money(d.premiumWeek, d.base))}

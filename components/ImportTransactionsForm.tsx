@@ -71,7 +71,7 @@ export default function ImportTransactionsForm() {
       <p className="text-[11px] leading-relaxed text-slate-400">
         Columns: <span className="font-mono">symbol, exchange, type, quantity, price, fees, date, note, ref</span>.
         Only <span className="font-mono">symbol</span> &amp; <span className="font-mono">quantity</span> are
-        required. Re-importing the same file is safe — duplicates are skipped.
+        required. Re-importing the same file is safe: duplicates are skipped.
       </p>
     </form>
   );

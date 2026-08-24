@@ -18,7 +18,7 @@ export default function BrokerConnect() {
       setResult(res);
       setDebug(res.debug ?? null);
     } catch {
-      setResult({ ok: false, message: "Something went wrong — please try again." });
+      setResult({ ok: false, message: "Something went wrong. Please try again." });
     } finally {
       setBusy(false);
     }
@@ -72,7 +72,7 @@ export default function BrokerConnect() {
 
       {result && !result.ok && (
         <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-3.5 text-sm text-rose-700">
-          {result.message ?? "Sync failed — please try again."}
+          {result.message ?? "Sync failed. Please try again."}
         </div>
       )}
 

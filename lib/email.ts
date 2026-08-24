@@ -34,7 +34,7 @@ export function emailShell(title: string, bodyHtml: string): string {
       ${bodyHtml}
     </div>
     <div style="padding:16px 24px;border-top:1px solid #eef2f7;font-size:12px;color:#94a3b8">
-      You're getting this because you turned on notifications in Snowfolio. Informational only — never advice.
+      You're getting this because you turned on notifications in Snowfolio. Informational only, never advice.
     </div>
   </div>
 </body></html>`;

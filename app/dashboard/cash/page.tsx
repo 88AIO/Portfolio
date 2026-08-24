@@ -121,7 +121,7 @@ export default async function CashPage() {
                         </div>
                       </div>
                       <div className="text-right font-medium tabular-nums">
-                        {a.cash_balance != null ? money(a.cash_balance, a.currency ?? base) : <span className="text-slate-300">—</span>}
+                        {a.cash_balance != null ? money(a.cash_balance, a.currency ?? base) : <span className="text-slate-300">-</span>}
                       </div>
                     </li>
                   ))}
@@ -133,7 +133,7 @@ export default async function CashPage() {
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="mb-1 text-base font-semibold">Ledger</h2>
               <p className="mb-4 text-xs text-slate-400">
-                Manual cash movements you record — deposits, withdrawals, interest, fees.
+                Manual cash movements you record: deposits, withdrawals, interest, fees.
               </p>
               {entries.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-400">No entries yet. Add one on the right →</p>
@@ -153,7 +153,7 @@ export default async function CashPage() {
                       {entries.map((e) => (
                         <tr key={e.id} className="border-t border-slate-100">
                           <td className="py-2.5 text-slate-500">{e.entry_date}</td>
-                          <td className="py-2.5">{pfName.get(e.portfolio_id) ?? "—"}</td>
+                          <td className="py-2.5">{pfName.get(e.portfolio_id) ?? "-"}</td>
                           <td className="py-2.5 text-slate-600">{e.description ?? ""}</td>
                           <td className={`py-2.5 text-right tabular-nums font-medium ${e.amount >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                             {money(e.amount, e.currency)}

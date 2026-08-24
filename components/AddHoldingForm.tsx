@@ -18,7 +18,7 @@ export default function AddHoldingForm() {
           await addTransaction(fd);
           ref.current?.reset();
         } catch {
-          setError("Couldn't add that — check the symbol and try again.");
+          setError("Couldn't add that. Check the symbol and try again.");
         } finally {
           setPending(false);
         }

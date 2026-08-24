@@ -65,7 +65,7 @@ export default function PutFinder() {
           </p>
           {res.rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-400">
-              No liquid puts came back — the market may be closed or quotes are thin right now. Try again later.
+              No liquid puts came back. The market may be closed or quotes are thin right now. Try again later.
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -99,17 +99,17 @@ export default function PutFinder() {
                       <td className="py-2.5 text-right tabular-nums text-emerald-600">{money(r.premium)}</td>
                       <td className="py-2.5 text-right tabular-nums font-semibold">{pct(r.annualizedRoC)}</td>
                       <td className={`py-2.5 text-right tabular-nums ${ivClass(r.iv)}`}>
-                        {r.iv != null ? `${r.iv.toFixed(0)}%` : "—"}
+                        {r.iv != null ? `${r.iv.toFixed(0)}%` : "-"}
                       </td>
                       <td className={`py-2.5 text-right tabular-nums ${rankClass(r.ivRank)}`}>
                         {r.ivRank != null ? (
                           r.ivRank.toFixed(0)
                         ) : (
-                          <span className="text-[11px] text-slate-400">{r.ivBuilding ? "building" : "—"}</span>
+                          <span className="text-[11px] text-slate-400">{r.ivBuilding ? "building" : "-"}</span>
                         )}
                       </td>
                       <td className="py-2.5 text-right tabular-nums text-slate-500">
-                        {r.divYield != null ? `${r.divYield.toFixed(2)}%` : "—"}
+                        {r.divYield != null ? `${r.divYield.toFixed(2)}%` : "-"}
                       </td>
                       <td className="py-2.5 text-right">
                         {r.safetyScore != null ? (
@@ -117,7 +117,7 @@ export default function PutFinder() {
                             {r.safetyScore}
                           </span>
                         ) : (
-                          <span className="text-[11px] text-slate-400">—</span>
+                          <span className="text-[11px] text-slate-400">-</span>
                         )}
                       </td>
                     </tr>
@@ -126,9 +126,9 @@ export default function PutFinder() {
               </table>
               <p className="mt-3 text-xs text-slate-400">
                 <strong>IV rank</strong> shows where today&apos;s implied volatility sits in this name&apos;s own
-                trailing range (0 = calmest, 100 = richest premium vs. its history) — it reads
+                trailing range (0 = calmest, 100 = richest premium vs. its history). It reads
                 &ldquo;building&rdquo; until we&apos;ve gathered enough samples to be honest. <strong>Div safety</strong> is
-                a 0–100 read from the payout record. Informational only, never advice.
+                a 0 to 100 read from the payout record. Informational only, never advice.
               </p>
             </div>
           )}

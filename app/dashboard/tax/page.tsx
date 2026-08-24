@@ -176,7 +176,7 @@ export default async function TaxPage({
 
         {/* Realized lots */}
         <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="mb-4 font-semibold">Realized sales — {year} (FIFO)</h2>
+          <h2 className="mb-4 font-semibold">Realized sales, {year} (FIFO)</h2>
           {yearLots.length === 0 ? (
             <p className="py-10 text-center text-sm text-slate-400">
               No realized sales in {year}. Sell a holding and it shows up here with its cost basis and gain.
@@ -225,7 +225,7 @@ export default async function TaxPage({
           Informational, not tax advice. Gains are matched <strong>FIFO</strong> (first shares bought
           are the first sold), with the long-term line drawn at a one-year hold. This does not model
           wash sales, alternate lot-relief methods, return-of-capital adjustments, or the special tax
-          treatment of options — option premium is shown on a simple cash basis. Confirm figures
+          treatment of options. Option premium is shown on a simple cash basis. Confirm figures
           against your broker&apos;s 1099 before filing.
         </p>
       </div>

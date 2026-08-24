@@ -25,7 +25,7 @@ export default function AddOptionForm({ portfolios }: { portfolios: PortfolioOpt
           ref.current?.reset();
           setAction("sell_to_open");
         } catch {
-          setError("Couldn't log that option — check the fields and try again.");
+          setError("Couldn't log that option. Check the fields and try again.");
         } finally {
           setPending(false);
         }
@@ -79,7 +79,7 @@ export default function AddOptionForm({ portfolios }: { portfolios: PortfolioOpt
       </button>
       {error && <p className="text-xs text-rose-600">{error}</p>}
       <p className="text-xs text-slate-400">
-        Premium is <strong>per share</strong> — one contract at $1.56 = $156.
+        Premium is <strong>per share</strong>. One contract at $1.56 = $156.
       </p>
     </form>
   );

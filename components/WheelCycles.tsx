@@ -94,14 +94,14 @@ function FragmentRow({
         <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-emerald-600">{money(w.premium, base)}</td>
         <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">{money(w.dividends, base)}</td>
         <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums ${w.realizedStock >= 0 ? "text-slate-500" : "text-rose-600"}`}>
-          {w.realizedStock !== 0 ? money(w.realizedStock, base) : "—"}
+          {w.realizedStock !== 0 ? money(w.realizedStock, base) : "-"}
         </td>
         <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-semibold ${w.totalProfit >= 0 ? "text-slate-900" : "text-rose-600"}`}>{money(w.totalProfit, base)}</td>
         <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">
           {w.annualizedReturn != null ? (
             <span className={w.annualizedReturn >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(w.annualizedReturn)}</span>
           ) : (
-            <span className="text-slate-300">—</span>
+            <span className="text-slate-300">-</span>
           )}
         </td>
         <td className="py-2.5 pl-2 text-right text-[11px] text-slate-400">
@@ -112,7 +112,7 @@ function FragmentRow({
         <tr className="bg-slate-50/60">
           <td colSpan={8} className="px-4 py-3">
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              {w.symbol} — full history ({events.length} event{events.length === 1 ? "" : "s"})
+              {w.symbol} full history ({events.length} event{events.length === 1 ? "" : "s"})
             </div>
             <ul className="space-y-1">
               {events.map((e, i) => (

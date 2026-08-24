@@ -77,7 +77,7 @@ export default async function BrokerPage() {
               <h1 className="text-lg font-semibold">Connected brokerages</h1>
               <p className="mt-1 text-sm text-slate-500">
                 Snowfolio reads your holdings and option trades directly from your brokerages, so your
-                dashboard stays current on its own. It&apos;s <strong>read-only</strong> — your login never
+                dashboard stays current on its own. It&apos;s <strong>read-only</strong>. Your login never
                 touches Snowfolio, and nothing can trade on your behalf.
               </p>
             </div>
@@ -119,7 +119,7 @@ export default async function BrokerPage() {
               <div>
                 <h2 className="font-semibold">Update now</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  It refreshes automatically each night — tap below only if you want the latest right away.
+                  It refreshes automatically each night. Tap below only if you want the latest right away.
                   New brokerages are added in your{" "}
                   <a href="https://dashboard.snaptrade.com/home" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
                     SnapTrade dashboard ↗
