@@ -16,6 +16,7 @@ import { computeWheels, type WheelPosition, type WheelRow, type WheelEvent } fro
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
 import AddOptionForm from "@/components/AddOptionForm";
 import WheelCycles from "@/components/WheelCycles";
+import MonthlyPremiumChart from "@/components/MonthlyPremiumChart";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 import NotificationSettings from "@/components/NotificationSettings";
 import { getNotificationPrefs } from "./actions";
@@ -124,6 +125,46 @@ export default async function OptionsPage() {
   const in14 = new Date(new Date(`${today}T00:00:00Z`).getTime() + 14 * 86400000)
     .toISOString()
     .slice(0, 10);
+
+  // --- Premium income over time: every option leg aggregated by trade month ---
+  // Canonical sign: credit on open (sell_to_open), debit on close/roll, fee always a cost.
+  const legPrem = (o: OptTxnRow): number => {
+    const gross = (o.premium ?? 0) * (o.contracts ?? 0) * 100;
+    const fee = o.fee ?? 0;
+    if (o.action === "sell_to_open") return gross - fee;
+    if (o.action === "buy_to_close" || o.action === "rolled") return -gross - fee;
+    return -fee;
+  };
+  const premByMonth = new Map<string, number>();
+  let premYtd = 0;
+  let premAllTime = 0;
+  const curYear = today.slice(0, 4);
+  for (const o of optTxns) {
+    if (!o.trade_date) continue;
+    const net = legPrem(o) * fx(o.currency);
+    const m = o.trade_date.slice(0, 7);
+    premByMonth.set(m, (premByMonth.get(m) ?? 0) + net);
+    premAllTime += net;
+    if (o.trade_date.slice(0, 4) === curYear) premYtd += net;
+  }
+  // Continuous month axis (fill empty months with 0 so the income rhythm reads honestly).
+  const monthKeys = [...premByMonth.keys()].sort();
+  const premiumSeries: { month: string; premium: number }[] = [];
+  if (monthKeys.length) {
+    const [sy, sm] = monthKeys[0].split("-").map(Number);
+    const [ey, em] = monthKeys[monthKeys.length - 1].split("-").map(Number);
+    let y = sy;
+    let mo = sm;
+    while (y < ey || (y === ey && mo <= em)) {
+      const key = `${y}-${String(mo).padStart(2, "0")}`;
+      premiumSeries.push({ month: key, premium: Math.round(premByMonth.get(key) ?? 0) });
+      mo += 1;
+      if (mo > 12) { mo = 1; y += 1; }
+    }
+  }
+  const activeMonths = premiumSeries.filter((p) => p.premium !== 0).length;
+  const avgPerMonth = activeMonths ? premAllTime / activeMonths : 0;
+
   const attention: AttentionItem[] = [];
   for (const o of open) {
     if (o.status === "may_be_assigned") {
@@ -439,6 +480,34 @@ export default async function OptionsPage() {
             </div>
           </section>
         </div>
+
+        {premiumSeries.length > 0 && (
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold">Premium income over time</h2>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  Net option premium you collected each month (credits from selling, minus buy-to-close and rolls).
+                </p>
+              </div>
+              <div className="flex gap-5 text-right">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400">This year</div>
+                  <div className="text-lg font-bold tabular-nums text-emerald-600">{money(premYtd, base)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400">All-time</div>
+                  <div className="text-lg font-bold tabular-nums text-slate-900">{money(premAllTime, base)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400">Avg / month</div>
+                  <div className="text-lg font-bold tabular-nums text-slate-900">{money(avgPerMonth, base)}</div>
+                </div>
+              </div>
+            </div>
+            <MonthlyPremiumChart data={premiumSeries} currency={base} />
+          </section>
+        )}
 
         {wheels.length > 0 && (
           <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
