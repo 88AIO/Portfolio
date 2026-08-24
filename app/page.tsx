@@ -16,10 +16,11 @@ export default function Home() {
 
       <section className="mx-auto max-w-3xl px-6 py-24 text-center">
         <h1 className="text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
-          Track your portfolio and dividends across every market.
+          Your whole portfolio, in one honest view.
         </h1>
         <p className="mx-auto mt-5 max-w-xl text-lg text-slate-500">
-          Consolidate US and Asian holdings, see live performance, and forecast your dividend income — all in one place.
+          US and international holdings together, with the dividend and option income you&rsquo;re
+          actually earning. Calm by default, honest about its data.
         </p>
         <Link href="/login" className="mt-8 inline-block rounded-xl bg-indigo-600 px-6 py-3 font-medium text-white hover:bg-indigo-700">
           Get started free

@@ -257,7 +257,7 @@ export default async function Dashboard({
         {/* Page intro */}
         <div className="mb-4">
           <h1 className="text-xl font-bold tracking-tight text-slate-900">Your portfolio</h1>
-          <p className="mt-1 text-sm text-slate-500">Everything you own and what it&apos;s earned, at a glance.</p>
+          <p className="mt-1 text-sm text-slate-500">Everything you own, and what it&apos;s earned you.</p>
         </div>
 
         {/* Summary tiles */}
@@ -272,7 +272,7 @@ export default async function Dashboard({
           />
           <Tile
             label="Total earned"
-            hint="Everything you've made: share price gains + dividends received + option premium — counted once each."
+            hint="Everything you've made: price gains, dividends, and option premium, counted once each."
             value={money(totalReturn, base)}
             sub={optionPremium !== 0 ? "gains + dividends + premium" : `${pct(totalReturnPct)} incl. dividends`}
             positive={totalReturn >= 0}
@@ -340,7 +340,7 @@ export default async function Dashboard({
                       <th className="px-2 pb-2 text-right" title="The latest market price per share.">Price</th>
                       <th className="px-2 pb-2 text-right" title="How much the price moved so far today.">Today</th>
                       <th className="px-2 pb-2 text-right" title="What this holding is worth now (shares × price).">Value</th>
-                      <th className="px-2 pb-2 text-right" title="Dividend yield — annual dividend as a % of today's price.">Yield</th>
+                      <th className="px-2 pb-2 text-right" title="Dividend yield: annual dividend as a % of today's price.">Yield</th>
                       <th className="px-2 pb-2 text-right" title="Gain or loss: what it's worth now minus what you paid.">Gain / loss</th>
                     </tr>
                   </thead>
