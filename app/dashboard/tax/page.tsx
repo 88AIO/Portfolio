@@ -138,6 +138,11 @@ export default async function TaxPage({
       </header>
 
       <div className="mx-auto max-w-6xl px-6 py-8">
+        <div className="mb-5">
+          <h1 className="font-display text-3xl font-medium tracking-tight text-slate-900">Realized gains &amp; tax</h1>
+          <p className="mt-1.5 text-sm text-slate-500">What you locked in this year, ready for filing season.</p>
+        </div>
+
         {/* Year picker */}
         <div className="mb-6 flex flex-wrap items-center gap-2">
           <span className="text-sm text-slate-500">Tax year</span>
@@ -170,14 +175,14 @@ export default async function TaxPage({
         </div>
         <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
           <Card label="Option premium (cash)" value={money(optionPremiumYear, base)} tone={optionPremiumYear >= 0 ? "up" : "down"} />
-          <Card label={`Taxable income ${year}`} value={money(totalIncome, base)} sub="gains + dividends + premium" />
+          <Card label={`Taxable income ${year}`} value={money(totalIncome, base)} sub="gains + dividends + premium" accent />
           <Card label="Proceeds" value={money(summary.proceeds, base)} />
           <Card label="Cost basis" value={money(summary.costBasis, base)} />
         </div>
 
         {/* Realized lots */}
-        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="mb-4 font-semibold">Realized sales, {year} (FIFO)</h2>
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+          <h2 className="mb-4 text-base font-semibold">Realized sales, {year} (FIFO)</h2>
           {yearLots.length === 0 ? (
             <p className="py-10 text-center text-sm text-slate-400">
               No realized sales in {year}. Sell a holding and it shows up here with its cost basis and gain.
@@ -185,33 +190,33 @@ export default async function TaxPage({
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left text-xs uppercase text-slate-400">
+                <thead className="text-left text-[11px] uppercase tracking-[0.08em] text-slate-400">
                   <tr>
-                    <th className="pb-2">Symbol</th>
-                    <th className="pb-2 text-right">Qty</th>
-                    <th className="pb-2">Acquired</th>
-                    <th className="pb-2">Sold</th>
-                    <th className="pb-2">Term</th>
-                    <th className="pb-2 text-right">Proceeds</th>
-                    <th className="pb-2 text-right">Cost basis</th>
-                    <th className="pb-2 text-right">Gain / loss</th>
+                    <th className="pb-2.5 font-medium">Symbol</th>
+                    <th className="pb-2.5 text-right font-medium">Qty</th>
+                    <th className="pb-2.5 font-medium">Acquired</th>
+                    <th className="pb-2.5 font-medium">Sold</th>
+                    <th className="pb-2.5 font-medium">Term</th>
+                    <th className="pb-2.5 text-right font-medium">Proceeds</th>
+                    <th className="pb-2.5 text-right font-medium">Cost basis</th>
+                    <th className="pb-2.5 text-right font-medium">Gain / loss</th>
                   </tr>
                 </thead>
                 <tbody>
                   {yearLots.map((l, i) => (
-                    <tr key={i} className="border-t border-slate-100">
-                      <td className="py-2.5 font-medium">{l.symbol}</td>
-                      <td className="py-2.5 text-right tabular-nums">{l.quantity}</td>
-                      <td className="py-2.5 text-slate-500">{l.openDate}</td>
-                      <td className="py-2.5 text-slate-500">{l.closeDate}</td>
-                      <td className="py-2.5">
+                    <tr key={i} className="border-t border-slate-100 hover:bg-slate-50/70">
+                      <td className="py-3 font-medium">{l.symbol}</td>
+                      <td className="py-3 text-right tabular-nums">{l.quantity}</td>
+                      <td className="py-3 text-slate-500">{l.openDate}</td>
+                      <td className="py-3 text-slate-500">{l.closeDate}</td>
+                      <td className="py-3">
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${l.longTerm ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                           {l.longTerm ? "Long" : "Short"}
                         </span>
                       </td>
-                      <td className="py-2.5 text-right tabular-nums">{money(l.proceeds, l.currency)}</td>
-                      <td className="py-2.5 text-right tabular-nums">{money(l.costBasis, l.currency)}</td>
-                      <td className={`py-2.5 text-right tabular-nums font-medium ${l.gain >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                      <td className="py-3 text-right tabular-nums">{money(l.proceeds, l.currency)}</td>
+                      <td className="py-3 text-right tabular-nums">{money(l.costBasis, l.currency)}</td>
+                      <td className={`py-3 text-right tabular-nums font-medium ${l.gain >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                         {money(l.gain, l.currency)}
                       </td>
                     </tr>
@@ -239,17 +244,29 @@ function Card({
   value,
   sub,
   tone,
+  accent,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: "up" | "down";
+  accent?: boolean;
 }) {
   const toneClass = tone === "up" ? "text-emerald-600" : tone === "down" ? "text-rose-600" : "text-slate-900";
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <div className="text-xs uppercase tracking-wide text-slate-400">{label}</div>
-      <div className={`mt-1 text-xl font-semibold ${toneClass}`}>{value}</div>
+    <div
+      className={`rounded-2xl border p-4 shadow-soft ${
+        accent ? "border-[#205d4a]/25 bg-gradient-to-br from-[#edf3ee] to-white" : "border-slate-200 bg-white"
+      }`}
+    >
+      <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">{label}</div>
+      <div
+        className={`mt-1 tracking-tight tabular-nums ${
+          accent ? "font-display text-[1.7rem] font-medium leading-tight text-slate-900" : `text-xl font-semibold ${toneClass}`
+        }`}
+      >
+        {value}
+      </div>
       {sub && <div className="mt-0.5 text-xs text-slate-400">{sub}</div>}
     </div>
   );

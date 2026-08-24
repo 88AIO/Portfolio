@@ -72,10 +72,10 @@ export default async function BrokerPage() {
 
       <div className="mx-auto max-w-3xl px-6 py-8 space-y-6">
         {/* Intro / what this does */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-soft">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-lg font-semibold">Connected brokerages</h1>
+              <h1 className="font-display text-2xl font-medium tracking-tight text-slate-900">Connected brokerages</h1>
               <p className="mt-1 text-sm text-slate-500">
                 Snowfolio reads your holdings and option trades directly from your brokerages, so your
                 dashboard stays current on its own. It&apos;s <strong>read-only</strong>. Your login never
@@ -108,7 +108,7 @@ export default async function BrokerPage() {
         </section>
 
         {/* Sync / setup card */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-soft">
           {configured && !isOwner ? (
             <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
               Brokerage auto-sync isn&apos;t available on your account yet. It currently connects a
@@ -140,7 +140,7 @@ export default async function BrokerPage() {
 
         {/* Account list */}
         {rows.length > 0 && (
-          <section className="rounded-2xl border border-slate-200 bg-white p-6">
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-soft">
             <h2 className="mb-1 font-semibold">Your accounts</h2>
             <p className="mb-4 text-xs text-slate-400">{rows.length} connected · each becomes its own portfolio.</p>
             <ul className="divide-y divide-slate-100">
@@ -148,7 +148,7 @@ export default async function BrokerPage() {
                 const name = a.brokerage_name ?? "Brokerage";
                 return (
                   <li key={a.id} className="flex items-center gap-3 py-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#edf3ee] text-xs font-bold text-[#205d4a]">
                       {initials(name)}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -182,8 +182,8 @@ export default async function BrokerPage() {
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 text-center">
-      <div className="text-xl font-bold tracking-tight text-slate-900">{value.toLocaleString()}</div>
-      <div className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="font-display text-2xl font-medium tracking-tight text-slate-900 tabular-nums">{value.toLocaleString()}</div>
+      <div className="mt-0.5 text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">{label}</div>
     </div>
   );
 }

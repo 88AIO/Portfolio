@@ -92,6 +92,11 @@ export default async function CashPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-6 py-8">
+        <div className="mb-5">
+          <h1 className="font-display text-3xl font-medium tracking-tight text-slate-900">Cash &amp; ledger</h1>
+          <p className="mt-1.5 text-sm text-slate-500">Uninvested cash and the deposits, withdrawals, and interest you record.</p>
+        </div>
+
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
           <Tile label={`Synced cash (${base})`} value={money(syncedCash, base)} accent />
           <Tile label="Manual ledger net" value={money(manualNet, base)} />
@@ -141,25 +146,25 @@ export default async function CashPage() {
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                    <thead className="text-left text-[11px] uppercase tracking-[0.08em] text-slate-400">
                       <tr>
-                        <th className="pb-2">Date</th>
-                        <th className="pb-2">Account</th>
-                        <th className="pb-2">Description</th>
-                        <th className="pb-2 text-right">Amount</th>
-                        <th className="pb-2"></th>
+                        <th className="pb-2.5 font-medium">Date</th>
+                        <th className="pb-2.5 font-medium">Account</th>
+                        <th className="pb-2.5 font-medium">Description</th>
+                        <th className="pb-2.5 text-right font-medium">Amount</th>
+                        <th className="pb-2.5"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {entries.map((e) => (
-                        <tr key={e.id} className="border-t border-slate-100">
-                          <td className="py-2.5 text-slate-500">{e.entry_date}</td>
-                          <td className="py-2.5">{pfName.get(e.portfolio_id) ?? "-"}</td>
-                          <td className="py-2.5 text-slate-600">{e.description ?? ""}</td>
-                          <td className={`py-2.5 text-right tabular-nums font-medium ${e.amount >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                        <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50/70">
+                          <td className="py-3 text-slate-500">{e.entry_date}</td>
+                          <td className="py-3">{pfName.get(e.portfolio_id) ?? "-"}</td>
+                          <td className="py-3 text-slate-600">{e.description ?? ""}</td>
+                          <td className={`py-3 text-right tabular-nums font-medium ${e.amount >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                             {money(e.amount, e.currency)}
                           </td>
-                          <td className="py-2.5 text-right">
+                          <td className="py-3 text-right">
                             <form action={deleteCashEntry}>
                               <input type="hidden" name="id" value={e.id} />
                               <button aria-label="Delete entry" className="text-xs text-slate-300 hover:text-rose-500" title="Delete">✕</button>
@@ -192,9 +197,15 @@ export default async function CashPage() {
 
 function Tile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className={`rounded-2xl border p-4 shadow-soft ${accent ? "border-indigo-200 bg-gradient-to-br from-indigo-50 to-white" : "border-slate-200 bg-white"}`}>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
-      <div className="mt-1.5 text-2xl font-bold tracking-tight text-slate-900">{value}</div>
+    <div className={`rounded-2xl border p-4 shadow-soft ${accent ? "border-[#205d4a]/25 bg-gradient-to-br from-[#edf3ee] to-white" : "border-slate-200 bg-white"}`}>
+      <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">{label}</div>
+      <div
+        className={`mt-1.5 tracking-tight tabular-nums text-slate-900 ${
+          accent ? "font-display text-[1.7rem] font-medium leading-tight" : "text-2xl font-bold"
+        }`}
+      >
+        {value}
+      </div>
     </div>
   );
 }
