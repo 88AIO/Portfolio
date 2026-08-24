@@ -263,7 +263,10 @@ from agg a
 join public.instruments i on i.id = a.instrument_id
 left join public.price_cache pc on pc.instrument_id = i.id
 left join opt o on o.portfolio_id = a.portfolio_id and o.instrument_id = a.instrument_id
-where a.shares <> 0;
+-- Exclude fully-closed positions. A round-tripped holding can net to floating-point dust
+-- (e.g. 3e-15 shares) rather than exactly 0, which would otherwise show as a junk "0.0000 · $0"
+-- row in the by-account view. 1e-9 is far below any real holding, including satoshi-level crypto.
+where abs(a.shares) > 1e-9;
 
 -- PORTFOLIO TOTALS view --------------------------------------
 drop view if exists public.portfolio_totals;
