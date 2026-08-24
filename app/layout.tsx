@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Manrope, Fraunces } from "next/font/google";
+import { SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 // Geometric sans for the interface; a warm optical serif for headline moments.
@@ -12,13 +13,29 @@ const display = Fraunces({
   style: ["normal", "italic"],
 });
 
+const title = "Snowfolio — Portfolio, Dividends & Options Income";
+const description =
+  "A calm tracker for portfolio performance and income: dividends plus option premium, built for options sellers. Honest data, US-first.";
+
 export const metadata: Metadata = {
-  title: "Snowfolio — Portfolio, Dividends & Options Income",
-  description:
-    "A calm tracker for portfolio performance and income — dividends plus option premium — built for options sellers. Honest data, US-first.",
+  metadataBase: new URL(SITE_URL),
+  title,
+  description,
   manifest: "/manifest.webmanifest",
   applicationName: "Snowfolio",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "Snowfolio" },
+  openGraph: {
+    type: "website",
+    siteName: "Snowfolio",
+    url: SITE_URL,
+    title,
+    description,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+  },
   icons: {
     icon: [
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },

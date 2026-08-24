@@ -249,6 +249,9 @@ export default async function Dashboard({
             <Link href="/dashboard/broker" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
               Brokers
             </Link>
+            <Link href="/dashboard/settings" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
+              Settings
+            </Link>
             <span className="ml-2 hidden text-slate-400 md:inline">{user?.email}</span>
             <form action={signOut}>
               <button className="ml-1 rounded-lg border border-slate-700 px-3 py-1.5 text-slate-200 hover:bg-white/10">

@@ -17,6 +17,25 @@ export default function LoginPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  async function sendReset() {
+    if (!email) {
+      setMsg("Enter your email above first, then tap Forgot password.");
+      return;
+    }
+    setLoading(true);
+    setMsg(null);
+    const supabase = createClient();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback?next=/auth/reset`,
+    });
+    setLoading(false);
+    setMsg(
+      error
+        ? error.message
+        : "Check your email for a link to reset your password.",
+    );
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (mode === "signup" && !agreed) {
@@ -109,6 +128,16 @@ export default function LoginPage() {
           >
             {loading ? "…" : mode === "signin" ? "Sign in" : "Sign up"}
           </button>
+          {mode === "signin" && (
+            <button
+              type="button"
+              onClick={sendReset}
+              disabled={loading}
+              className="w-full text-center text-xs text-slate-500 hover:text-slate-700 disabled:opacity-60"
+            >
+              Forgot password?
+            </button>
+          )}
         </form>
 
         {msg && <p className="mt-4 text-sm text-amber-600">{msg}</p>}
