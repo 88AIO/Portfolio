@@ -298,7 +298,7 @@ export default async function Dashboard({
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           {/* Holdings */}
-          <section className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h2 className="text-base font-semibold">Holdings</h2>
@@ -449,7 +449,7 @@ export default async function Dashboard({
 
           {/* Right column: allocation + add + import */}
           <section className="space-y-6">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="text-base font-semibold">What you hold</h2>
               <p className="mb-3 text-xs text-slate-400">How your money is split across holdings.</p>
               {alloc.length ? (
@@ -458,16 +458,16 @@ export default async function Dashboard({
                 <p className="py-6 text-center text-sm text-slate-400">Add holdings to see the breakdown.</p>
               )}
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="mb-3 text-base font-semibold">Add holding</h2>
               <AddHoldingForm />
               <p className="mt-3 text-xs text-slate-400">Symbol + exchange, e.g. AAPL / US, 0700 / HK.</p>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="mb-3 text-base font-semibold">Import CSV</h2>
               <ImportTransactionsForm />
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="mb-1 text-base font-semibold">Export</h2>
               <p className="mb-3 text-xs text-slate-400">
                 Your data, no lock-in. Transactions round-trip straight back into Import.
@@ -494,12 +494,12 @@ export default async function Dashboard({
 
         {rows.length > 0 && (
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="text-base font-semibold">By sector</h2>
               <p className="mb-4 text-xs text-slate-400">Which industries your money is spread across (funds counted by what they hold).</p>
               <AllocBars items={sectorAlloc} base={base} />
             </section>
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <div className="mb-1 flex items-center justify-between">
                 <h2 className="text-base font-semibold">By region</h2>
                 <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">
@@ -590,7 +590,7 @@ function Tile({
 }) {
   return (
     <div
-      className={`rounded-2xl border p-4 shadow-sm ${
+      className={`rounded-2xl border p-4 shadow-soft ${
         accent ? "border-[#205d4a]/25 bg-gradient-to-br from-[#edf3ee] to-white" : "border-slate-200 bg-white"
       }`}
     >

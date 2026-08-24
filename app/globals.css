@@ -64,6 +64,10 @@
   --color-rose-500: #c6533b;
   --color-rose-600: #b3442f;
   --color-rose-700: #952f1e;
+
+  /* Premium elevation — a hairline lift plus a soft, warm-tinted drop. */
+  --shadow-soft: 0 1px 0 rgba(20, 32, 27, 0.03), 0 16px 34px -22px rgba(23, 63, 51, 0.22);
+  --shadow-lift: 0 1px 0 rgba(20, 32, 27, 0.03), 0 28px 52px -28px rgba(23, 63, 51, 0.30);
 }
 
 /* Keep the paper ground in dark-OS contexts too — the app is a light, calm design. */

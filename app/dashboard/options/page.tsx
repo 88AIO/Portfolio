@@ -382,7 +382,7 @@ export default async function OptionsPage() {
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           {/* Open positions */}
-          <section className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
             <h2 className="mb-1 text-base font-semibold">Open trades</h2>
             <p className="mb-4 text-xs text-slate-400">Options you&apos;ve sold that haven&apos;t expired or been closed yet.</p>
             {open.length === 0 ? (
@@ -466,11 +466,11 @@ export default async function OptionsPage() {
 
           {/* Add option */}
           <section className="space-y-6">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="mb-3 text-base font-semibold">Log an option</h2>
               <AddOptionForm portfolios={portfolios} />
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 text-xs text-slate-500 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 text-xs text-slate-500 shadow-soft">
               <h3 className="mb-2 text-sm font-semibold text-slate-700">Good to know</h3>
               <ul className="space-y-1.5">
                 <li>• The <strong>premium</strong> is yours to keep the moment you sell. It counts as income right away.</li>
@@ -483,7 +483,7 @@ export default async function OptionsPage() {
         </div>
 
         {premiumSeries.length > 0 && (
-          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
             <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold">Premium income over time</h2>
@@ -511,7 +511,7 @@ export default async function OptionsPage() {
         )}
 
         {wheels.length > 0 && (
-          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
             <h2 className="text-base font-semibold">By stock</h2>
             <p className="mb-4 text-xs text-slate-400">
               Everything you&apos;ve earned on each stock (option premium, dividends, and stock gains) added up
@@ -543,7 +543,7 @@ function Tile({
   accent?: boolean;
 }) {
   return (
-    <div className={`rounded-2xl border p-4 shadow-sm ${accent ? "border-indigo-200 bg-gradient-to-br from-indigo-50 to-white" : "border-slate-200 bg-white"}`}>
+    <div className={`rounded-2xl border p-4 shadow-soft ${accent ? "border-indigo-200 bg-gradient-to-br from-indigo-50 to-white" : "border-slate-200 bg-white"}`}>
       <div className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">
         {label}
         {hint && (

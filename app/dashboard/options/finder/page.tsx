@@ -22,7 +22,7 @@ export default function PutFinderPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-6 py-8">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
           <h1 className="text-base font-semibold">Cash-secured put finder</h1>
           <p className="mt-1 text-sm text-slate-500">
             Scans your holdings plus a small set of liquid US names for out-of-the-money puts, ranked by

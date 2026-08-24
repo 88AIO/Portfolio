@@ -101,7 +101,7 @@ export default async function CashPage() {
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           <section className="lg:col-span-2 space-y-6">
             {/* Synced cash accounts */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="mb-4 text-base font-semibold">Cash accounts</h2>
               {cashAccounts.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-400">
@@ -131,7 +131,7 @@ export default async function CashPage() {
             </div>
 
             {/* Manual ledger */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="mb-1 text-base font-semibold">Ledger</h2>
               <p className="mb-4 text-xs text-slate-400">
                 Manual cash movements you record: deposits, withdrawals, interest, fees.
@@ -175,11 +175,11 @@ export default async function CashPage() {
           </section>
 
           <section className="space-y-6">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="mb-3 text-base font-semibold">Add ledger entry</h2>
               <AddCashEntryForm portfolios={ledgerPortfolios} />
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 text-xs text-slate-500 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 text-xs text-slate-500 shadow-soft">
               Bank &amp; deposit accounts (like Chase) are tracked here as cash, kept out of your stock holdings
               and allocation so they don’t distort performance. Synced balances refresh on each broker sync.
             </div>
@@ -192,7 +192,7 @@ export default async function CashPage() {
 
 function Tile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className={`rounded-2xl border p-4 shadow-sm ${accent ? "border-indigo-200 bg-gradient-to-br from-indigo-50 to-white" : "border-slate-200 bg-white"}`}>
+    <div className={`rounded-2xl border p-4 shadow-soft ${accent ? "border-indigo-200 bg-gradient-to-br from-indigo-50 to-white" : "border-slate-200 bg-white"}`}>
       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
       <div className="mt-1.5 text-2xl font-bold tracking-tight text-slate-900">{value}</div>
     </div>
