@@ -17,6 +17,9 @@ export default function MarketingNav() {
           <Link href="/pricing" className="hidden rounded-full px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:text-slate-900 sm:inline-block">
             Pricing
           </Link>
+          <Link href="/blog" className="hidden rounded-full px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:text-slate-900 sm:inline-block">
+            Blog
+          </Link>
           <Link href="/about" className="hidden rounded-full px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:text-slate-900 sm:inline-block">
             About
           </Link>
