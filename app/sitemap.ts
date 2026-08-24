@@ -3,7 +3,7 @@ import { SITE_URL } from "@/lib/site";
 
 // Public, indexable pages only. The dashboard and auth routes are private and excluded.
 export default function sitemap(): MetadataRoute.Sitemap {
-  const paths = ["", "/login", "/legal/disclaimer", "/legal/terms", "/legal/privacy"];
+  const paths = ["", "/pricing", "/about", "/login", "/legal/disclaimer", "/legal/terms", "/legal/privacy"];
   return paths.map((p) => ({
     url: `${SITE_URL}${p}`,
     changeFrequency: "monthly",
