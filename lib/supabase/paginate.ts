@@ -18,3 +18,20 @@ export async function fetchAll<T>(
   }
   return out;
 }
+
+// Like fetchAll, but when the total row count is already known, fetches every page CONCURRENTLY
+// instead of one-after-another. For large reads (e.g. years of weekly prices, ~20 pages) this turns
+// ~20 sequential round-trips into one count query plus one burst of parallel requests. Same stable
+// ordering requirement as fetchAll so pages don't overlap or skip at the boundaries.
+export async function fetchAllParallel<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+  total: number,
+  pageSize = 1000,
+): Promise<T[]> {
+  if (total <= 0) return [];
+  const pages = Math.ceil(total / pageSize);
+  const results = await Promise.all(
+    Array.from({ length: pages }, (_, i) => build(i * pageSize, i * pageSize + pageSize - 1)),
+  );
+  return results.flatMap((r) => r.data ?? []);
+}

@@ -14,7 +14,7 @@ import PerformanceChart from "@/components/PerformanceChart";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 import BackfillButton from "@/components/BackfillButton";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
-import { fetchAll } from "@/lib/supabase/paginate";
+import { fetchAll, fetchAllParallel } from "@/lib/supabase/paginate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // the one-time history backfill fetches several years of weekly closes
@@ -51,49 +51,73 @@ export default async function PerformancePage() {
   const { data: { user } } = await supabase.auth.getUser();
   const isOwner = isBrokerSyncOwner(user?.email);
 
-  // Transactions can exceed Supabase's ~1000-row response cap (years of trades + dividends), which
-  // would silently drop the newest rows and corrupt the share timeline. Page through them all.
-  const txs = await fetchAll<Tx>((from, to) =>
+  // Transactions, live positions, and recorded daily snapshots are independent reads — fire them
+  // together rather than one after another. Transactions can exceed Supabase's ~1000-row response cap
+  // (years of trades + dividends), which would silently drop the newest rows and corrupt the share
+  // timeline, so page through them all. Snapshots (portfolio_value_history) likewise grow unbounded.
+  type Snap = { d: string; market_value: number | null };
+  const [txs, { data: posData }, snapRows] = await Promise.all([
+    fetchAll<Tx>((from, to) =>
+      supabase
+        .from("transactions")
+        .select("instrument_id, type, quantity, price, fees, currency, executed_at")
+        .order("executed_at", { ascending: true })
+        .order("instrument_id", { ascending: true })
+        .range(from, to),
+    ),
     supabase
-      .from("transactions")
-      .select("instrument_id, type, quantity, price, fees, currency, executed_at")
-      .order("executed_at", { ascending: true })
-      .order("instrument_id", { ascending: true })
-      .range(from, to),
-  );
-  const { data: posData } = await supabase
-    .from("positions")
-    .select("instrument_id, currency, shares, avg_cost, last_price, price_as_of");
+      .from("positions")
+      .select("instrument_id, currency, shares, avg_cost, last_price, price_as_of"),
+    fetchAll<Snap>((from, to) =>
+      supabase
+        .from("portfolio_value_history")
+        .select("d, market_value")
+        .order("d", { ascending: true })
+        .range(from, to),
+    ),
+  ]);
   const positions = (posData ?? []) as Pos[];
 
   // Weekly closes for every instrument that appears in the ledger, from the first trade onward.
   // NOTE: Supabase caps a single response at ~1000 rows. With years of weekly history across many
   // holdings that's far exceeded, and taking only the first 1000 (oldest) rows would silently drop
-  // everything after — leaving the chart with no points inside the trading window. Page through the
-  // full range explicitly, and skip closes predating the first trade (the series never uses them).
+  // everything after — leaving the chart with no points inside the trading window. Count the range
+  // once, then fetch every page CONCURRENTLY (fetchAllParallel). Skip closes predating the first
+  // trade (the series never uses them).
   const instrumentIds = [...new Set(txs.map((t) => t.instrument_id))];
   const firstTradeDate = txs.reduce<string | null>(
     (min, t) => (t.type === "buy" || t.type === "sell") && (!min || t.executed_at < min) ? t.executed_at : min,
     null,
   );
-  let history: Hist[] = [];
-  if (instrumentIds.length) {
-    history = await fetchAll<Hist>((from, to) => {
-      let q = supabase
-        .from("price_history")
-        .select("instrument_id, d, close")
-        .in("instrument_id", instrumentIds);
-      if (firstTradeDate) q = q.gte("d", firstTradeDate);
-      return q
-        .order("d", { ascending: true })
-        .order("instrument_id", { ascending: true })
-        .range(from, to);
-    });
-  }
+  const priceHistoryPage = (from: number, to: number) => {
+    let q = supabase
+      .from("price_history")
+      .select("instrument_id, d, close")
+      .in("instrument_id", instrumentIds);
+    if (firstTradeDate) q = q.gte("d", firstTradeDate);
+    return q
+      .order("d", { ascending: true })
+      .order("instrument_id", { ascending: true })
+      .range(from, to);
+  };
 
-  // FX for every currency we touch (transactions + current positions).
+  // Count the price-history range and read the FX cache concurrently; both feed the series build.
   const currencies = [...txs.map((t) => t.currency), ...positions.map((p) => p.currency)];
-  const rates = await getCachedRates(supabase, currencies, base);
+  const [histCount, rates] = await Promise.all([
+    instrumentIds.length
+      ? (async () => {
+          let q = supabase
+            .from("price_history")
+            .select("*", { count: "exact", head: true })
+            .in("instrument_id", instrumentIds);
+          if (firstTradeDate) q = q.gte("d", firstTradeDate);
+          const { count } = await q;
+          return count ?? 0;
+        })()
+      : Promise.resolve(0),
+    getCachedRates(supabase, currencies, base),
+  ]);
+  const history: Hist[] = histCount > 0 ? await fetchAllParallel<Hist>(priceHistoryPage, histCount) : [];
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   // Group closes by instrument (ascending).
@@ -119,18 +143,11 @@ export default async function PerformancePage() {
 
   const today = todayIso();
 
-  // Recorded daily value snapshots (portfolio_value_history) — an immutable, drift-proof record of
-  // each account's value, written by the nightly sync for every account whether or not it traded.
-  // These supersede the trade-based reconstruction for the dates they cover (the go-forward source of
-  // truth); reconstruction still fills everything before the first snapshot. Summed across accounts.
-  type Snap = { d: string; market_value: number | null };
-  const snapRows = await fetchAll<Snap>((from, to) =>
-    supabase
-      .from("portfolio_value_history")
-      .select("d, market_value")
-      .order("d", { ascending: true })
-      .range(from, to),
-  );
+  // Recorded daily value snapshots (portfolio_value_history, fetched above) — an immutable, drift-proof
+  // record of each account's value, written by the nightly sync for every account whether or not it
+  // traded. These supersede the trade-based reconstruction for the dates they cover (the go-forward
+  // source of truth); reconstruction still fills everything before the first snapshot. Summed across
+  // accounts.
   const snapValueByDate = new Map<string, number>();
   for (const s of snapRows) snapValueByDate.set(s.d, (snapValueByDate.get(s.d) ?? 0) + (s.market_value ?? 0));
   const snapDates = [...snapValueByDate.keys()].sort();
