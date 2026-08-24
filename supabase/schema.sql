@@ -317,7 +317,11 @@ select
 from legs l
 join public.instruments i on i.id = l.instrument_id
 left join public.price_cache pc on pc.instrument_id = l.instrument_id
-left join public.positions pos on pos.portfolio_id = l.portfolio_id and pos.instrument_id = l.instrument_id;
+left join public.positions pos on pos.portfolio_id = l.portfolio_id and pos.instrument_id = l.instrument_id
+-- A real leg must have an opening trade in our records. Broker/CSV imports sometimes carry a lone
+-- expiry/assignment for an option whose sell_to_open was never imported, which nets to negative
+-- contracts and would surface as a phantom "$0 finished trade". Require sold_contracts > 0.
+where l.sold_contracts > 0;
 
 -- ============================================================
 -- ROW LEVEL SECURITY
