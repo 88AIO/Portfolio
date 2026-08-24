@@ -1,8 +1,8 @@
 import { Fragment } from "react";
-import BrandMark from "@/components/BrandMark";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { ensurePortfolio, refreshPrices, signOut } from "./actions";
+import { ensurePortfolio, refreshPrices } from "./actions";
+import DashboardNav from "@/components/DashboardNav";
 import { getCachedRates } from "@/lib/fx";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { money, pct, num, timeAgo } from "@/lib/format";
@@ -222,45 +222,7 @@ export default async function Dashboard({
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
-      {/* Pro dark header */}
-      <header className="border-b border-slate-800 bg-slate-900 text-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <BrandMark className="h-8 w-8" />
-            <span className="text-lg font-semibold tracking-tight">Snowfolio</span>
-          </div>
-          <nav className="flex items-center gap-1 text-sm">
-            <span className="rounded-lg bg-white/10 px-3 py-1.5 font-medium">Overview</span>
-            <Link href="/dashboard/performance" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
-              Performance
-            </Link>
-            <Link href="/dashboard/dividends" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
-              Dividends
-            </Link>
-            <Link href="/dashboard/options" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
-              Options
-            </Link>
-            <Link href="/dashboard/tax" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
-              Tax
-            </Link>
-            <Link href="/dashboard/cash" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
-              Cash
-            </Link>
-            <Link href="/dashboard/broker" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
-              Brokers
-            </Link>
-            <Link href="/dashboard/settings" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">
-              Settings
-            </Link>
-            <span className="ml-2 hidden text-slate-400 md:inline">{user?.email}</span>
-            <form action={signOut}>
-              <button className="ml-1 rounded-lg border border-slate-700 px-3 py-1.5 text-slate-200 hover:bg-white/10">
-                Sign out
-              </button>
-            </form>
-          </nav>
-        </div>
-      </header>
+      <DashboardNav active="overview" email={user?.email} />
 
       <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Page intro */}

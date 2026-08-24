@@ -1,7 +1,6 @@
-import Link from "next/link";
-import BrandMark from "@/components/BrandMark";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
+import DashboardNav from "@/components/DashboardNav";
 import { getCachedRates } from "@/lib/fx";
 import { money, timeAgo } from "@/lib/format";
 import AddCashEntryForm from "@/components/AddCashEntryForm";
@@ -75,21 +74,7 @@ export default async function CashPage() {
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
-      <header className="border-b border-slate-800 bg-slate-900 text-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <BrandMark className="h-8 w-8" />
-            <span className="text-lg font-semibold tracking-tight">Cash &amp; ledger</span>
-          </div>
-          <nav className="flex items-center gap-1 text-sm">
-            <Link href="/dashboard" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Overview</Link>
-            <Link href="/dashboard/dividends" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Dividends</Link>
-            <Link href="/dashboard/options" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Options</Link>
-            <span className="rounded-lg bg-white/10 px-3 py-1.5 font-medium">Cash</span>
-            <Link href="/dashboard/broker" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Brokers</Link>
-          </nav>
-        </div>
-      </header>
+      <DashboardNav active="cash" />
 
       <div className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-5">

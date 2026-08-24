@@ -1,7 +1,7 @@
 import Link from "next/link";
-import BrandMark from "@/components/BrandMark";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
+import DashboardNav from "@/components/DashboardNav";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { getCachedRates } from "@/lib/fx";
 import { money, pct, num } from "@/lib/format";
@@ -287,24 +287,13 @@ export default async function OptionsPage() {
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
-      <header className="border-b border-slate-800 bg-slate-900 text-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <BrandMark className="h-8 w-8" />
-            <span className="text-lg font-semibold tracking-tight">Options income</span>
-          </div>
-          <nav className="flex items-center gap-1 text-sm">
-            <Link href="/dashboard" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Overview</Link>
-            <Link href="/dashboard/dividends" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Dividends</Link>
-            <span className="rounded-lg bg-white/10 px-3 py-1.5 font-medium">Options</span>
-            <Link href="/dashboard/options/finder" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Put finder</Link>
-            <Link href="/dashboard/broker" className="rounded-lg px-3 py-1.5 text-slate-300 hover:bg-white/10">Brokers</Link>
-          </nav>
-        </div>
-      </header>
+      <DashboardNav active="options" />
 
       <div className="mx-auto max-w-6xl px-6 py-8">
-        <div className="mb-2 flex justify-end">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <Link href="/dashboard/options/finder" className="text-sm font-medium text-indigo-600 hover:underline">
+            Put finder →
+          </Link>
           <PricesAsOf asOf={oldestPriceAsOf(positions)} />
         </div>
         {/* Page intro */}
