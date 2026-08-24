@@ -3,8 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote } from "@/lib/marketdata";
+import { getQuote, getRates } from "@/lib/marketdata";
 import { ensurePortfolio } from "../actions";
+import { computeOption, type OptionPositionRow } from "@/lib/options";
+import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
+import { sendEmail, emailShell } from "@/lib/email";
 
 function todayIso(): string {
   const d = new Date();
@@ -21,6 +24,68 @@ export async function getNotificationPrefs(): Promise<{ email_alerts: boolean; e
   const { data } = await supabase
     .from("notification_prefs").select("email_alerts, email_digest").eq("user_id", user.id).maybeSingle();
   return { email_alerts: !!data?.email_alerts, email_digest: !!data?.email_digest };
+}
+
+// Signed sign of one option leg's premium cash (credit on open, debit on close/roll; fee a cost).
+function legPremiumCash(o: { action: string; premium: number; contracts: number; fee: number | null }): number {
+  const gross = (o.premium ?? 0) * (o.contracts ?? 0) * 100;
+  const fee = o.fee ?? 0;
+  if (o.action === "sell_to_open") return gross - fee;
+  if (o.action === "buy_to_close" || o.action === "rolled") return -gross - fee;
+  return -fee;
+}
+
+// Send a test copy of the weekly income digest to the signed-in user's own email — built from their
+// real last-7-days data — so they can confirm delivery and see exactly what the digest looks like.
+export async function sendTestEmail(): Promise<{ ok: boolean; message: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.email) return { ok: false, message: "No email address is on your account." };
+  const portfolio = await ensurePortfolio();
+  const base = portfolio.base_currency || "USD";
+
+  const today = todayIso();
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+
+  const [{ data: posData }, { data: optPos }, { data: optTx }, { data: divTx }] = await Promise.all([
+    supabase.from("positions").select("symbol, currency, shares, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"),
+    supabase.from("option_positions").select("*"),
+    supabase.from("option_transactions").select("action, premium, contracts, fee, currency, trade_date").gte("trade_date", weekAgo),
+    supabase.from("transactions").select("quantity, price, currency, executed_at").eq("type", "dividend").gte("executed_at", weekAgo),
+  ]);
+
+  const positions = (posData ?? []) as PositionLite[];
+  const options = ((optPos ?? []) as OptionPositionRow[]).map(computeOption);
+  const oTx = (optTx ?? []) as { action: string; premium: number; contracts: number; fee: number | null; currency: string }[];
+  const dTx = (divTx ?? []) as { quantity: number; price: number; currency: string }[];
+
+  const rates = await getRates([...oTx.map((o) => o.currency), ...dTx.map((d) => d.currency), ...positions.map((p) => p.currency)], base);
+  const fx = (c: string) => rates[c] ?? 1;
+
+  const premiumWeek = oTx.reduce((s, o) => s + legPremiumCash(o) * fx(o.currency), 0);
+  const dividendsWeek = dTx.reduce((s, d) => s + d.quantity * d.price * fx(d.currency), 0);
+  const upcomingExDiv = positions
+    .filter((p) => p.shares > 0 && p.next_dividend_date && p.next_dividend_date >= today && p.next_dividend_date <= in7)
+    .map((p) => ({
+      symbol: p.symbol,
+      date: p.next_dividend_date as string,
+      est: p.next_dividend_per_share != null
+        ? p.next_dividend_per_share * p.shares
+        : (p.annual_div_per_share && p.div_frequency ? (p.annual_div_per_share / p.div_frequency) * p.shares : null),
+      currency: p.currency,
+    }));
+  const expiringOptions = options
+    .filter((o) => o.isOpen && o.dte >= 0 && o.dte <= 7)
+    .map((o) => ({ symbol: o.symbol, text: `${o.symbol} ${o.option_type} — ${o.dte}d left${o.status === "may_be_assigned" ? " (in the money)" : ""}` }));
+
+  const digest: DigestData = { premiumWeek, dividendsWeek, totalWeek: premiumWeek + dividendsWeek, upcomingExDiv, expiringOptions, base };
+  const intro = `<p style="margin:0 0 14px;color:#475569;font-size:14px">This is a <strong>test</strong> — your real weekly digest looks just like this. If it reached your inbox, email notifications are working.</p>`;
+  const res = await sendEmail(user.email, "Snowfolio — test email", emailShell("Test email", intro + digestEmailHtml(digest)));
+
+  if (res.sent) return { ok: true, message: `Sent to ${user.email}. Check your inbox (and spam folder).` };
+  if (res.skipped) return { ok: false, message: `Email isn't enabled on this instance yet (${res.skipped}). A RESEND_API_KEY needs to be set.` };
+  return { ok: false, message: `Couldn't send: ${res.error ?? "unknown error"}.` };
 }
 
 export async function updateNotificationPrefs(formData: FormData) {
