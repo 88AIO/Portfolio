@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio, refreshPrices, signOut } from "./actions";
 import { getRates } from "@/lib/marketdata";
+import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import AddHoldingForm from "@/components/AddHoldingForm";
 import AllocationChart from "@/components/AllocationChart";
@@ -43,6 +44,7 @@ export default async function Dashboard({
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const portfolio = await ensurePortfolio();
+  const canBrokerSync = isBrokerSyncOwner(user?.email); // per-user brokerage connect isn't available yet
 
   // Consolidate across ALL of the user's portfolios (default + broker-synced).
   // RLS on the positions view scopes this to the signed-in user automatically.
@@ -325,7 +327,7 @@ export default async function Dashboard({
 
             {rows.length === 0 ? (
               <p className="py-10 text-center text-sm text-slate-400">
-                No holdings yet. Add one on the right, import a CSV, or connect a brokerage →
+                No holdings yet. Add one on the right{canBrokerSync ? ", import a CSV, or connect a brokerage" : " or import a CSV"} →
               </p>
             ) : (
               <div className="overflow-x-auto">

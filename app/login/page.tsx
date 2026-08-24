@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { MIN_AGE } from "@/lib/legal";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,11 +12,16 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (mode === "signup" && !agreed) {
+      setMsg(`Please confirm you're ${MIN_AGE}+ and agree to the Terms and Privacy Policy.`);
+      return;
+    }
     setLoading(true);
     setMsg(null);
     const supabase = createClient();
@@ -69,6 +76,22 @@ export default function LoginPage() {
               {showPassword ? "Hide" : "Show"}
             </button>
           </div>
+          {mode === "signup" && (
+            <label className="flex items-start gap-2 pt-1 text-xs text-slate-500">
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"
+              />
+              <span>
+                I&rsquo;m {MIN_AGE} or older and agree to the{" "}
+                <Link href="/legal/terms" target="_blank" className="text-indigo-600 underline">Terms</Link>{" "}
+                and{" "}
+                <Link href="/legal/privacy" target="_blank" className="text-indigo-600 underline">Privacy Policy</Link>.
+              </span>
+            </label>
+          )}
           <button
             type="submit" disabled={loading}
             className="w-full rounded-lg bg-indigo-600 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
@@ -85,6 +108,12 @@ export default function LoginPage() {
         >
           {mode === "signin" ? "Need an account? Sign up" : "Have an account? Sign in"}
         </button>
+
+        <div className="mt-6 flex justify-center gap-4 border-t border-slate-100 pt-4 text-xs text-slate-400">
+          <Link href="/legal/disclaimer" className="hover:text-indigo-600">Disclaimer</Link>
+          <Link href="/legal/terms" className="hover:text-indigo-600">Terms</Link>
+          <Link href="/legal/privacy" className="hover:text-indigo-600">Privacy</Link>
+        </div>
       </div>
     </main>
   );

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { APP_NAME } from "@/lib/legal";
 
 export default function Home() {
   return (
@@ -24,7 +25,21 @@ export default function Home() {
           Get started free
         </Link>
         <p className="mt-3 text-sm text-slate-400">No credit card required.</p>
+        <p className="mx-auto mt-6 max-w-lg text-xs text-slate-400">
+          Snowfolio is an informational tool, not a financial adviser — nothing here is investment
+          advice. See our{" "}
+          <Link href="/legal/disclaimer" className="underline hover:text-slate-600">Disclaimer</Link>.
+        </p>
       </section>
+
+      <footer className="mx-auto max-w-6xl px-6 py-10">
+        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-slate-200 pt-6 text-sm text-slate-500">
+          <span className="text-slate-400">© {APP_NAME}</span>
+          <Link href="/legal/disclaimer" className="hover:text-indigo-600">Disclaimer</Link>
+          <Link href="/legal/terms" className="hover:text-indigo-600">Terms</Link>
+          <Link href="/legal/privacy" className="hover:text-indigo-600">Privacy</Link>
+        </div>
+      </footer>
     </main>
   );
 }
