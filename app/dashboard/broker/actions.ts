@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getBrokerProvider, isBrokerSyncOwner } from "@/lib/brokersync";
 import type { BrokerAccount, BrokerPosition, BrokerOptionLeg, BrokerEquityTxn } from "@/lib/brokersync";
 import { enrichInstrumentProfile } from "@/lib/enrich";
+import { snapshotPortfolioValues } from "@/lib/snapshots";
 
 type BrokerSyncResult = {
   ok: boolean;
@@ -515,9 +516,18 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     }
   }
 
+  // Record today's value for every account, so the permanent value-over-time history advances on a
+  // manual sync too (not only the nightly job). Idempotent per day; isolated so it never fails a sync.
+  try {
+    await snapshotPortfolioValues(admin);
+  } catch (e) {
+    console.error("[brokersync] snapshot failed:", String((e as { message?: string })?.message ?? e));
+  }
+
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/broker");
   revalidatePath("/dashboard/options");
+  revalidatePath("/dashboard/performance");
   return {
     ok: true, accounts: accounts.length, holdings, options: optionLegs,
     debug: optionDebug.length ? optionDebug.join(" · ") : undefined,
