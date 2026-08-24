@@ -20,7 +20,7 @@ export default function MarketingFooter() {
           </div>
 
           <FooterCol title="Product" links={[["Features", "/#features"], ["Pricing", "/pricing"], ["Sign in", "/login"]]} />
-          <FooterCol title="Company" links={[["About", "/about"], ["Get started", "/login"]]} />
+          <FooterCol title="Company" links={[["About", "/about"], ["Contact", "/contact"], ["Get started", "/login"]]} />
           <FooterCol
             title="Legal"
             links={[["Disclaimer", "/legal/disclaimer"], ["Terms", "/legal/terms"], ["Privacy", "/legal/privacy"]]}

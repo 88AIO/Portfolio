@@ -20,6 +20,9 @@ export default function MarketingNav() {
           <Link href="/about" className="hidden rounded-full px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:text-slate-900 sm:inline-block">
             About
           </Link>
+          <Link href="/contact" className="hidden rounded-full px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:text-slate-900 sm:inline-block">
+            Contact
+          </Link>
           <Link href="/login" className="rounded-full px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:text-slate-900">
             Sign in
           </Link>
