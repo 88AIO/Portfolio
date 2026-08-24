@@ -6,6 +6,7 @@ import { money, pct } from "@/lib/format";
 import {
   buildPerformanceSeries,
   buildHoldingsBacktest,
+  buildBenchmarkSeries,
   type PerfTransaction,
   type PerfClose,
 } from "@/lib/performance/series";
@@ -141,7 +142,7 @@ export default async function PerformancePage() {
   // holdings" backtest — the basket you hold today, valued back through the price history.
   const hasRealHistory = txs.some((t) => (t.type === "buy" || t.type === "sell") && t.executed_at < today);
 
-  let chartData: { date: string; value: number; invested: number }[];
+  let chartData: { date: string; value: number; invested: number; benchmark?: number }[];
   let endValue: number, endInvested: number, gain: number, gainPct: number, hasData: boolean;
 
   if (hasRealHistory) {
@@ -176,6 +177,32 @@ export default async function PerformancePage() {
       a.date.localeCompare(b.date),
     );
     hasData = chartData.length >= 2 && chartData[chartData.length - 1].value > 0;
+  }
+
+  // --- S&P 500 benchmark: the same cash you deployed, invested in SPY instead ---
+  // Only when there's real trade history (the backtest mode has no dated cash flows to mirror).
+  let benchReturnPct: number | null = null;
+  if (hasRealHistory && hasData) {
+    const { data: spyInst } = await supabase
+      .from("instruments").select("id").eq("symbol", "SPY").eq("exchange", "US").maybeSingle();
+    const spyId = (spyInst as { id: string } | null)?.id;
+    if (spyId) {
+      const spyRows = await fetchAll<{ d: string; close: number }>((from, to) =>
+        supabase
+          .from("price_history")
+          .select("d, close")
+          .eq("instrument_id", spyId)
+          .order("d", { ascending: true })
+          .range(from, to),
+      );
+      const benchCloses: PerfClose[] = spyRows.map((r) => ({ date: r.d, close: r.close }));
+      if (benchCloses.length) {
+        const benchByDate = buildBenchmarkSeries(txs as PerfTransaction[], benchCloses, fx, chartData.map((p) => p.date));
+        chartData = chartData.map((p) => ({ ...p, benchmark: Math.round(benchByDate.get(p.date) ?? 0) }));
+        const benchEnd = benchByDate.get(chartData[chartData.length - 1].date) ?? 0;
+        benchReturnPct = endInvested > 0 && benchEnd > 0 ? ((benchEnd - endInvested) / endInvested) * 100 : null;
+      }
+    }
   }
 
   return (
@@ -221,6 +248,28 @@ export default async function PerformancePage() {
           />
         </div>
 
+        {benchReturnPct != null && (
+          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+            <span className="font-medium text-slate-700">
+              vs. the S&amp;P 500 <span className="text-slate-400">(same money, same timing)</span>:
+            </span>
+            <span className="tabular-nums">
+              You <strong className={gainPct >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(gainPct)}</strong>
+            </span>
+            <span className="text-slate-300">·</span>
+            <span className="tabular-nums">
+              S&amp;P 500 <strong className={benchReturnPct >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(benchReturnPct)}</strong>
+            </span>
+            <span
+              className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                gainPct - benchReturnPct >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+              }`}
+            >
+              {gainPct - benchReturnPct >= 0 ? "Beating" : "Trailing"} the market by {pct(Math.abs(gainPct - benchReturnPct))}
+            </span>
+          </div>
+        )}
+
         <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
           <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-semibold">{hasRealHistory ? "Value over time" : "Growth of your holdings"}</h2>
@@ -231,6 +280,11 @@ export default async function PerformancePage() {
               <span className="flex items-center gap-1.5">
                 <span className="h-0.5 w-4 border-t border-dashed border-slate-400" /> {hasRealHistory ? "Net invested" : "What you paid"}
               </span>
+              {benchReturnPct != null && (
+                <span className="flex items-center gap-1.5">
+                  <span className="h-0.5 w-4 border-t-2 border-emerald-500" /> S&amp;P 500
+                </span>
+              )}
             </div>
           </div>
           <p className="mb-4 max-w-2xl text-xs text-slate-400">

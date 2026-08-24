@@ -11,7 +11,7 @@ import {
   Tooltip,
 } from "recharts";
 
-type Point = { date: string; value: number; invested: number };
+type Point = { date: string; value: number; invested: number; benchmark?: number };
 
 /** Value-over-time (filled) with net-invested as a reference line. Calm, two-series read. */
 export default function PerformanceChart({
@@ -23,6 +23,9 @@ export default function PerformanceChart({
 }) {
   const money = (v: number) =>
     Number(v).toLocaleString("en-US", { style: "currency", currency, maximumFractionDigits: 0 });
+  const hasBenchmark = data.some((d) => typeof d.benchmark === "number");
+  const seriesLabel = (name: unknown) =>
+    name === "value" ? "Value" : name === "benchmark" ? "S&P 500" : "Invested";
   const shortDate = (d: string) => {
     const [y, m] = d.split("-");
     return `${["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m)]} ${y.slice(2)}`;
@@ -57,7 +60,7 @@ export default function PerformanceChart({
             width={68}
           />
           <Tooltip
-            formatter={(v, name) => [money(Number(v)), name === "value" ? "Value" : "Invested"]}
+            formatter={(v, name) => [money(Number(v)), seriesLabel(name)]}
             labelFormatter={(d) => shortDate(String(d))}
             contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }}
           />
@@ -80,6 +83,17 @@ export default function PerformanceChart({
             name="invested"
             isAnimationActive={false}
           />
+          {hasBenchmark && (
+            <Line
+              type="monotone"
+              dataKey="benchmark"
+              stroke="#10b981"
+              strokeWidth={2}
+              dot={false}
+              name="benchmark"
+              isAnimationActive={false}
+            />
+          )}
         </AreaChart>
       </ResponsiveContainer>
     </div>

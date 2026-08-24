@@ -115,6 +115,48 @@ export function buildHoldingsBacktest(
 }
 
 /**
+ * Dollar-for-dollar S&P 500 benchmark: the same cash you actually deployed (each buy minus each
+ * sell, on the date it happened) invested into SPY instead. Answers "did my picks beat just buying
+ * the index with the same money at the same times?" Returns date → benchmark value (base currency).
+ * @param txs         your buys/sells (the cash flows); other types ignored
+ * @param benchCloses SPY weekly closes, ascending, in the base currency
+ * @param fx          currency → base multiplier (applied to your cash flows)
+ * @param dates       the dates to value the benchmark on (use the same grid as your value line)
+ */
+export function buildBenchmarkSeries(
+  txs: PerfTransaction[],
+  benchCloses: PerfClose[],
+  fx: (currency: string) => number,
+  dates: string[],
+): Map<string, number> {
+  const flows = txs
+    .filter((t) => t.type === "buy" || t.type === "sell")
+    .sort((a, b) => a.executed_at.localeCompare(b.executed_at));
+
+  // Accumulate equivalent SPY shares: a buy of $X buys X/price_SPY shares that day; a sell redeems.
+  const steps: ShareStep[] = [];
+  let spyShares = 0;
+  for (const t of flows) {
+    const close = closeAsOf(benchCloses, t.executed_at);
+    if (!close || close <= 0) continue; // no SPY price yet on/before this date
+    const r = fx(t.currency);
+    const cash = t.type === "buy" ? t.quantity * t.price + t.fees : t.quantity * t.price - t.fees;
+    spyShares += (t.type === "buy" ? 1 : -1) * (cash * r) / close;
+    const last = steps[steps.length - 1];
+    if (last && last.date === t.executed_at) last.shares = spyShares;
+    else steps.push({ date: t.executed_at, shares: spyShares });
+  }
+
+  const out = new Map<string, number>();
+  for (const date of dates) {
+    const shares = sharesAsOf(steps, date);
+    const close = closeAsOf(benchCloses, date);
+    out.set(date, shares > 0 && close ? shares * close : 0);
+  }
+  return out;
+}
+
+/**
  * Build the performance series.
  * @param txs           all of the user's transactions (any instrument)
  * @param historyById   instrument_id → ascending weekly closes
