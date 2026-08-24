@@ -8,7 +8,7 @@ import {
 import { enrichInstrumentProfile } from "@/lib/enrich";
 import { searchInstrument } from "@/lib/marketdata";
 import { FINDER_UNIVERSE } from "@/lib/options/finder-universe";
-import { runBrokerSyncForUser } from "@/app/dashboard/broker/actions";
+import { runBrokerSyncForUser } from "@/lib/brokersync/run";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { snapshotPortfolioValues } from "@/lib/snapshots";
 

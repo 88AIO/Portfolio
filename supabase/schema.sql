@@ -434,6 +434,24 @@ create policy "own cash_ledger" on public.cash_ledger for all using (
   exists (select 1 from public.portfolios p where p.id = cash_ledger.portfolio_id and p.user_id = auth.uid())
 );
 
+-- Immutable daily value record per account (base currency), written by the nightly sync + on manual
+-- sync for EVERY account, so a drift-proof value-over-time history accumulates going forward.
+create table if not exists public.portfolio_value_history (
+  portfolio_id uuid not null references public.portfolios(id) on delete cascade,
+  d date not null,
+  market_value numeric not null,   -- holdings market value, base currency
+  cost_basis numeric,              -- cost basis, base currency
+  currency text not null default 'USD',
+  created_at timestamptz not null default now(),
+  primary key (portfolio_id, d)
+);
+
+alter table public.portfolio_value_history enable row level security;
+drop policy if exists "read own portfolio value history" on public.portfolio_value_history;
+create policy "read own portfolio value history" on public.portfolio_value_history for select using (
+  exists (select 1 from public.portfolios p where p.id = portfolio_value_history.portfolio_id and p.user_id = auth.uid())
+);
+
 -- ============================================================
 -- 10. NOTIFICATIONS — options alerts + weekly income digest
 -- ============================================================

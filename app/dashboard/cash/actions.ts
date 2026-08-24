@@ -14,6 +14,8 @@ function todayIso(): string {
 // Record a manual cash movement (deposit / withdrawal / interest / fee) against an account.
 export async function addCashEntry(formData: FormData) {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return; // defense-in-depth; RLS also scopes every write below to the owner
 
   const portfolioIdRaw = String(formData.get("portfolio_id") || "").trim();
   const entry_date = String(formData.get("entry_date") || "") || todayIso();
@@ -39,6 +41,8 @@ export async function addCashEntry(formData: FormData) {
 
 export async function deleteCashEntry(formData: FormData) {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return; // defense-in-depth; RLS also limits the delete to the owner's own rows
   const id = String(formData.get("id") || "");
   if (id) await supabase.from("cash_ledger").delete().eq("id", id);
   revalidatePath("/dashboard/cash");

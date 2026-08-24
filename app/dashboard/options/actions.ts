@@ -8,6 +8,7 @@ import { ensurePortfolio } from "../actions";
 import { computeOption, type OptionPositionRow } from "@/lib/options";
 import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell } from "@/lib/email";
+import { isValidSymbol, isValidExchange } from "@/lib/import/csv";
 
 function todayIso(): string {
   const d = new Date();
@@ -124,6 +125,9 @@ export async function addOptionTransaction(formData: FormData) {
 
   const validActions = ["sell_to_open", "buy_to_close", "expired", "assigned", "rolled"];
   if (!symbol || !strike || !expiration || !validActions.includes(action)) return;
+  // Validate the ticker/exchange before any service-role write into the shared `instruments` table,
+  // so a malformed underlying can't create junk reference rows (matches addTransaction / CSV import).
+  if (!isValidSymbol(symbol) || !isValidExchange(exchange)) return;
 
   // Resolve the target portfolio (must belong to the signed-in user); default to the primary one.
   let portfolioId = "";
