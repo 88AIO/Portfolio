@@ -1,4 +1,5 @@
 import Link from "next/link";
+import BrandMark from "@/components/BrandMark";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
 import { fetchAll } from "@/lib/supabase/paginate";
@@ -289,7 +290,7 @@ export default async function OptionsPage() {
       <header className="border-b border-slate-800 bg-slate-900 text-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
           <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500" />
+            <BrandMark className="h-8 w-8" />
             <span className="text-lg font-semibold tracking-tight">Options income</span>
           </div>
           <nav className="flex items-center gap-1 text-sm">
@@ -308,7 +309,7 @@ export default async function OptionsPage() {
         </div>
         {/* Page intro */}
         <div className="mb-4">
-          <h1 className="text-xl font-bold tracking-tight text-slate-900">Your options income</h1>
+          <h1 className="font-display text-3xl font-medium tracking-tight text-slate-900">Your options income</h1>
           <p className="mt-1 text-sm text-slate-500">
             Every option you&apos;ve sold, the income it&apos;s earned, and anything that needs your eye,
             in plain numbers.

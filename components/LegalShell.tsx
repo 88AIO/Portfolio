@@ -1,4 +1,5 @@
 import Link from "next/link";
+import BrandMark from "@/components/BrandMark";
 import { APP_NAME, LAST_UPDATED } from "@/lib/legal";
 
 // Consistent frame for the legal pages: brand header, a clear not-advice banner, a readable prose
@@ -15,7 +16,7 @@ export default function LegalShell({
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
           <Link href="/" className="flex items-center gap-2">
-            <span className="h-7 w-7 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500" />
+            <BrandMark className="h-7 w-7" />
             <span className="text-lg font-semibold">{APP_NAME}</span>
           </Link>
           <Link href="/login" className="text-sm text-indigo-600 hover:underline">Sign in</Link>

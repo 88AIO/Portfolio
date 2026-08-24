@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import BrandMark from "@/components/BrandMark";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio, refreshPrices, signOut } from "./actions";
@@ -220,7 +221,7 @@ export default async function Dashboard({
       <header className="border-b border-slate-800 bg-slate-900 text-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
           <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500" />
+            <BrandMark className="h-8 w-8" />
             <span className="text-lg font-semibold tracking-tight">Snowfolio</span>
           </div>
           <nav className="flex items-center gap-1 text-sm">
@@ -255,9 +256,9 @@ export default async function Dashboard({
 
       <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Page intro */}
-        <div className="mb-4">
-          <h1 className="text-xl font-bold tracking-tight text-slate-900">Your portfolio</h1>
-          <p className="mt-1 text-sm text-slate-500">Everything you own, and what it&apos;s earned you.</p>
+        <div className="mb-5">
+          <h1 className="font-display text-3xl font-medium tracking-tight text-slate-900">Your portfolio</h1>
+          <p className="mt-1.5 text-sm text-slate-500">Everything you own, and what it&apos;s earned you.</p>
         </div>
 
         {/* Summary tiles */}
@@ -590,14 +591,16 @@ function Tile({
   return (
     <div
       className={`rounded-2xl border p-4 shadow-sm ${
-        accent ? "border-indigo-200 bg-gradient-to-br from-indigo-50 to-white" : "border-slate-200 bg-white"
+        accent ? "border-[#205d4a]/25 bg-gradient-to-br from-[#edf3ee] to-white" : "border-slate-200 bg-white"
       }`}
     >
-      <div className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">
+      <div className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
         {label}
         {hint && <span title={hint} aria-label={hint} className="cursor-help text-slate-300">ⓘ</span>}
       </div>
-      <div className={`mt-1.5 text-2xl font-bold tracking-tight ${muted ? "text-slate-500" : "text-slate-900"}`}>
+      <div
+        className={`mt-1.5 tracking-tight tabular-nums ${accent ? "font-display text-[1.7rem] font-medium leading-tight" : "text-2xl font-bold"} ${muted ? "text-slate-500" : "text-slate-900"}`}
+      >
         {value}
       </div>
       {sub && (

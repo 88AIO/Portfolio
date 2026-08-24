@@ -1,21 +1,76 @@
 @import "tailwindcss";
 
+/*
+  Snowfolio design system — "quiet ledger".
+  Warm ivory paper, deep forest ink, one restrained brass-green accent, a serif
+  display face for headline moments. Deliberately not the default sky/indigo look.
+  Palette is expressed by overriding Tailwind's slate (neutral) and indigo/sky
+  (accent) scales so the whole app retints from one place; emerald/rose stay
+  semantic for gain/loss but are warmed to sit in the same family.
+*/
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f4ec; /* warm ivory paper */
+  --foreground: #1b1a14; /* warm near-black ink */
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-display: var(--font-fraunces), Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-manrope), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Neutral ramp — warm stone / ink (replaces cold slate everywhere) */
+  --color-slate-50: #f6f3ea;
+  --color-slate-100: #eee9dc;
+  --color-slate-200: #e2ddce;
+  --color-slate-300: #cec7b4;
+  --color-slate-400: #9c968a;
+  --color-slate-500: #6f6a5d;
+  --color-slate-600: #565144;
+  --color-slate-700: #3f3b31;
+  --color-slate-800: #29261f;
+  --color-slate-900: #1b1914;
+  --color-slate-950: #110f0a;
+
+  /* Accent ramp — deep forest / brass-green (replaces indigo) */
+  --color-indigo-50: #edf3ee;
+  --color-indigo-100: #d6e6dd;
+  --color-indigo-200: #accebf;
+  --color-indigo-300: #7fb49f;
+  --color-indigo-400: #509580;
+  --color-indigo-500: #2f755f;
+  --color-indigo-600: #205d4a;
+  --color-indigo-700: #1a4b3c;
+  --color-indigo-800: #163d31;
+  --color-indigo-900: #123228;
+  --color-indigo-950: #0b2019;
+
+  /* Sky is used for logo/dot accents — fold it into the same green family */
+  --color-sky-300: #7fb49f;
+  --color-sky-400: #4f9580;
+  --color-sky-500: #2f755f;
+
+  /* Gain — a steady money-green */
+  --color-emerald-50: #e9f3ec;
+  --color-emerald-500: #1f8a5e;
+  --color-emerald-600: #157a52;
+  --color-emerald-700: #0f6142;
+
+  /* Loss — warm clay instead of a harsh red */
+  --color-rose-50: #fbeee9;
+  --color-rose-500: #c6533b;
+  --color-rose-600: #b3442f;
+  --color-rose-700: #952f1e;
 }
 
+/* Keep the paper ground in dark-OS contexts too — the app is a light, calm design. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #f7f4ec;
+    --foreground: #1b1a14;
   }
 }
 
@@ -23,4 +78,28 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Display face carries its own tighter rhythm; body stays neutral. */
+.font-display {
+  font-optical-sizing: auto;
+  letter-spacing: -0.015em;
+}
+
+/* Headline scale gets a hair of negative tracking for that set-by-hand feel. */
+h1,
+h2 {
+  letter-spacing: -0.018em;
+}
+
+::selection {
+  background: #cce3d8;
+  color: #123228;
+}
+
+/* Tabular figures wherever numbers line up in columns. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }

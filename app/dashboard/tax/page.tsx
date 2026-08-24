@@ -1,4 +1,5 @@
 import Link from "next/link";
+import BrandMark from "@/components/BrandMark";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
 import { fetchAll } from "@/lib/supabase/paginate";
@@ -127,7 +128,7 @@ export default async function TaxPage({
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-2">
-            <div className="h-7 w-7 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500" />
+            <BrandMark className="h-7 w-7" />
             <span className="text-lg font-semibold">Realized &amp; tax</span>
           </div>
           <Link href="/dashboard" className="text-sm text-indigo-600 hover:underline">

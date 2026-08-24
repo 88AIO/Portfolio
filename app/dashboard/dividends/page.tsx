@@ -1,4 +1,5 @@
 import Link from "next/link";
+import BrandMark from "@/components/BrandMark";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
 import { getCachedRates } from "@/lib/fx";
@@ -143,7 +144,7 @@ export default async function DividendsPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-2">
-            <div className="h-7 w-7 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500" />
+            <BrandMark className="h-7 w-7" />
             <span className="text-lg font-semibold">Dividends</span>
           </div>
           <Link href="/dashboard" className="text-sm text-indigo-600 hover:underline">
@@ -158,7 +159,7 @@ export default async function DividendsPage() {
           <PricesAsOf asOf={oldestPriceAsOf(rows)} />
         </div>
         <div className="mb-4">
-          <h1 className="text-xl font-bold tracking-tight text-slate-900">Your dividend income</h1>
+          <h1 className="font-display text-3xl font-medium tracking-tight text-slate-900">Your dividend income</h1>
           <p className="mt-1 text-sm text-slate-500">What your holdings pay you, what&apos;s coming up, and how dependable it looks.</p>
         </div>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3">

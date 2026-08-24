@@ -1,5 +1,16 @@
 import type { Metadata, Viewport } from "next";
+import { Manrope, Fraunces } from "next/font/google";
 import "./globals.css";
+
+// Geometric sans for the interface; a warm optical serif for headline moments.
+const sans = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
+const display = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-fraunces",
+  display: "swap",
+  weight: ["400", "500", "600"],
+  style: ["normal", "italic"],
+});
 
 export const metadata: Metadata = {
   title: "Snowfolio — Portfolio, Dividends & Options Income",
@@ -20,8 +31,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
-    { media: "(prefers-color-scheme: dark)", color: "#0f172a" },
+    { media: "(prefers-color-scheme: light)", color: "#f7f4ec" },
+    { media: "(prefers-color-scheme: dark)", color: "#1b1914" },
   ],
 };
 
@@ -31,7 +42,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="en" className={`${sans.variable} ${display.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col font-sans">{children}</body>
     </html>
   );

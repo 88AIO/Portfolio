@@ -1,4 +1,5 @@
 import Link from "next/link";
+import BrandMark from "@/components/BrandMark";
 import PutFinder from "@/components/PutFinder";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,7 @@ export default function PutFinderPage() {
       <header className="border-b border-slate-800 bg-slate-900 text-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
           <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500" />
+            <BrandMark className="h-8 w-8" />
             <span className="text-lg font-semibold tracking-tight">Put finder</span>
           </div>
           <nav className="flex items-center gap-1 text-sm">

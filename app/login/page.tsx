@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import BrandMark from "@/components/BrandMark";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -41,23 +42,27 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="mb-6 flex items-center gap-2">
-          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500" />
-          <span className="text-xl font-semibold text-slate-800">Snowfolio</span>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f7f4ec] px-4">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-[-16rem] h-[34rem] bg-[radial-gradient(52rem_32rem_at_50%_0%,rgba(32,93,74,0.10),transparent_70%)]"
+      />
+      <div className="relative w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-8 shadow-[0_1px_0_rgba(0,0,0,0.02),0_24px_48px_-28px_rgba(23,63,51,0.30)]">
+        <div className="mb-7 flex items-center gap-2.5">
+          <BrandMark className="h-8 w-8" />
+          <span className="text-lg font-semibold tracking-tight text-slate-900">Snowfolio</span>
         </div>
-        <h1 className="mb-1 text-lg font-semibold text-slate-800">
+        <h1 className="font-display mb-1.5 text-2xl font-medium tracking-tight text-slate-900">
           {mode === "signin" ? "Welcome back" : "Create your account"}
         </h1>
-        <p className="mb-6 text-sm text-slate-500">Track your portfolio and dividends.</p>
+        <p className="mb-6 text-sm text-slate-500">Track your portfolio, dividends, and option income.</p>
 
         <form onSubmit={submit} className="space-y-3">
           <input
             type="email" required placeholder="you@email.com" value={email}
             autoComplete="email"
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+            className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
           />
           <div className="relative">
             <input
@@ -65,7 +70,7 @@ export default function LoginPage() {
               required placeholder="Password" value={password} minLength={6}
               autoComplete={mode === "signin" ? "current-password" : "new-password"}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 pr-16 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 pr-16 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
             />
             <button
               type="button"
@@ -94,7 +99,7 @@ export default function LoginPage() {
           )}
           <button
             type="submit" disabled={loading}
-            className="w-full rounded-lg bg-indigo-600 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+            className="w-full rounded-xl bg-slate-900 py-2.5 text-sm font-medium text-[#f7f4ec] shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
           >
             {loading ? "…" : mode === "signin" ? "Sign in" : "Sign up"}
           </button>
