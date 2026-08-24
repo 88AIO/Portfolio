@@ -4,7 +4,7 @@
 // the trade-based reconstruction (whose reconciliation lots are recomputed each sync), a recorded
 // snapshot is immutable once written.
 import type { createAdminClient } from "@/lib/supabase/admin";
-import { getRates } from "@/lib/marketdata";
+import { getCachedRates } from "@/lib/fx";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -31,7 +31,7 @@ export async function snapshotPortfolioValues(admin: Admin, base = "USD"): Promi
   const rows = (data ?? []) as PosRow[];
   if (!rows.length) return 0;
 
-  const rates = await getRates(rows.map((r) => r.currency ?? base), base);
+  const rates = await getCachedRates(admin, rows.map((r) => r.currency ?? base), base);
   const fx = (c: string | null) => rates[c ?? base] ?? 1;
 
   const byPortfolio = new Map<string, { mv: number; cost: number }>();

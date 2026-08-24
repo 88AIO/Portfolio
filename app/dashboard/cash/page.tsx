@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
-import { getRates } from "@/lib/marketdata";
+import { getCachedRates } from "@/lib/fx";
 import { money, timeAgo } from "@/lib/format";
 import AddCashEntryForm from "@/components/AddCashEntryForm";
 import { deleteCashEntry } from "./actions";
@@ -59,7 +59,7 @@ export default async function CashPage() {
     ...cashAccounts.map((a) => a.currency ?? "USD"),
     ...entries.map((e) => e.currency),
   ];
-  const rates = await getRates(currencies, base);
+  const rates = await getCachedRates(supabase, currencies, base);
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   const syncedCash = cashAccounts.reduce((s, a) => s + (a.cash_balance ?? 0) * fx(a.currency ?? "USD"), 0);

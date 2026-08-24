@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
-import { getRates } from "@/lib/marketdata";
+import { getCachedRates } from "@/lib/fx";
 import { money, pct } from "@/lib/format";
 import {
   buildPerformanceSeries,
@@ -93,7 +93,7 @@ export default async function PerformancePage() {
 
   // FX for every currency we touch (transactions + current positions).
   const currencies = [...txs.map((t) => t.currency), ...positions.map((p) => p.currency)];
-  const rates = await getRates(currencies, base);
+  const rates = await getCachedRates(supabase, currencies, base);
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   // Group closes by instrument (ascending).

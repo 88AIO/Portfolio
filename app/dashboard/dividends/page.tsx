@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
-import { getRates } from "@/lib/marketdata";
+import { getCachedRates } from "@/lib/fx";
 import { money, pct } from "@/lib/format";
 import { dividendSafety, type DividendSafety } from "@/lib/dividends/safety";
 import { buildDividendCalendar } from "@/lib/dividends/calendar";
@@ -45,7 +45,7 @@ export default async function DividendsPage() {
 
   const rows = (positions ?? []) as Position[];
   const base = portfolio.base_currency || "USD";
-  const rates = await getRates(rows.map((p) => p.currency), base);
+  const rates = await getCachedRates(supabase, rows.map((p) => p.currency), base);
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   // Forward income forecast: annual dividend per share × shares, per holding + total.

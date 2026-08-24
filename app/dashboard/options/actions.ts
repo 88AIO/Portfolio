@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote, getRates } from "@/lib/marketdata";
+import { getQuote } from "@/lib/marketdata";
+import { getCachedRates } from "@/lib/fx";
 import { ensurePortfolio } from "../actions";
 import { computeOption, type OptionPositionRow } from "@/lib/options";
 import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
@@ -61,7 +62,7 @@ export async function sendTestEmail(): Promise<{ ok: boolean; message: string }>
   const oTx = (optTx ?? []) as { action: string; premium: number; contracts: number; fee: number | null; currency: string }[];
   const dTx = (divTx ?? []) as { quantity: number; price: number; currency: string }[];
 
-  const rates = await getRates([...oTx.map((o) => o.currency), ...dTx.map((d) => d.currency), ...positions.map((p) => p.currency)], base);
+  const rates = await getCachedRates(supabase, [...oTx.map((o) => o.currency), ...dTx.map((d) => d.currency), ...positions.map((p) => p.currency)], base);
   const fx = (c: string) => rates[c] ?? 1;
 
   const premiumWeek = oTx.reduce((s, o) => s + legPremiumCash(o) * fx(o.currency), 0);

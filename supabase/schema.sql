@@ -363,6 +363,17 @@ drop policy if exists "read prices" on public.price_cache;
 create policy "read prices" on public.price_cache for select using (auth.role() = 'authenticated');
 drop policy if exists "read price_history" on public.price_history;
 create policy "read price_history" on public.price_history for select using (auth.role() = 'authenticated');
+
+-- Cached FX (usd_rate = value of 1 unit of `quote` in USD), refreshed by the nightly sync so pages
+-- never call a live FX provider at render time. Authenticated read only; service role writes.
+create table if not exists public.fx_rates (
+  quote text primary key,
+  usd_rate numeric not null,
+  as_of timestamptz not null default now()
+);
+alter table public.fx_rates enable row level security;
+drop policy if exists "read fx_rates" on public.fx_rates;
+create policy "read fx_rates" on public.fx_rates for select using (auth.role() = 'authenticated');
 drop policy if exists "read dividends" on public.dividends;
 create policy "read dividends" on public.dividends for select using (auth.role() = 'authenticated');
 

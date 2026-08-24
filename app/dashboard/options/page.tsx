@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
 import { fetchAll } from "@/lib/supabase/paginate";
-import { getRates } from "@/lib/marketdata";
+import { getCachedRates } from "@/lib/fx";
 import { money, pct, num } from "@/lib/format";
 import {
   computeOption,
@@ -100,7 +100,7 @@ export default async function OptionsPage() {
 
   // FX across every currency in play (options + equity positions).
   const currencies = [...rawOptions.map((o) => o.currency), ...positions.map((p) => p.currency)];
-  const rates = await getRates(currencies, base);
+  const rates = await getCachedRates(supabase, currencies, base);
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   const computed: ComputedOption[] = rawOptions.map(computeOption);

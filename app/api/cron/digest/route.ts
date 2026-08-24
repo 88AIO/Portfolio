@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getRates } from "@/lib/marketdata";
+import { getCachedRates } from "@/lib/fx";
 import { computeOption, type OptionPositionRow } from "@/lib/options";
 import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell } from "@/lib/email";
@@ -83,7 +83,7 @@ export async function GET(request: Request) {
     const options = (optPosByUser.get(uid) ?? []).map(computeOption);
 
     const currencies = [...optTx.map((o) => o.currency), ...divTx.map((d) => d.currency), ...positions.map((p) => p.currency)];
-    const rates = await getRates(currencies, base);
+    const rates = await getCachedRates(admin, currencies, base);
     const fx = (c: string) => rates[c] ?? 1;
 
     const premiumWeek = optTx.reduce((s, o) => s + legPremium(o) * fx(o.currency), 0);

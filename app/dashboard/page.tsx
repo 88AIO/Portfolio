@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio, refreshPrices, signOut } from "./actions";
-import { getRates } from "@/lib/marketdata";
+import { getCachedRates } from "@/lib/fx";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import AddHoldingForm from "@/components/AddHoldingForm";
@@ -71,7 +71,7 @@ export default async function Dashboard({
   // Convert every position into the base currency before summing (mixed US + intl total correctly).
   const base = portfolio.base_currency || "USD";
   const optionCurrencies = (optRows ?? []).map((o: { currency: string | null }) => o.currency ?? base);
-  const rates = await getRates([...rows.map((p) => p.currency), ...optionCurrencies], base);
+  const rates = await getCachedRates(supabase, [...rows.map((p) => p.currency), ...optionCurrencies], base);
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   let marketValue = 0, costBasis = 0, dayPL = 0, annualDivs = 0, dividendsReceived = 0;

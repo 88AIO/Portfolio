@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
 import { fetchAll } from "@/lib/supabase/paginate";
-import { getRates } from "@/lib/marketdata";
+import { getCachedRates } from "@/lib/fx";
 import { money } from "@/lib/format";
 import {
   computeRealizedLots,
@@ -100,7 +100,7 @@ export default async function TaxPage({
     ...txRows.map((t) => t.currency ?? base),
     ...optRows.map((o) => o.currency ?? base),
   ];
-  const rates = await getRates(currencies, base);
+  const rates = await getCachedRates(supabase, currencies, base);
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   const summary = summarizeRealized(yearLots, fx);

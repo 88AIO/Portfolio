@@ -11,6 +11,7 @@ import { FINDER_UNIVERSE } from "@/lib/options/finder-universe";
 import { runBrokerSyncForUser } from "@/lib/brokersync/run";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { snapshotPortfolioValues } from "@/lib/snapshots";
+import { syncFxRates } from "@/lib/fx";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -116,12 +117,18 @@ export async function GET(request: Request) {
     );
   }
 
-  // Record today's value for every account (after fresh prices), building the permanent
+  // Refresh the FX cache from the live provider so pages never call it at render time. Isolated.
+  let fxUpdated = 0;
+  try {
+    fxUpdated = await syncFxRates(admin);
+  } catch { /* keep prior cached rates on failure */ }
+
+  // Record today's value for every account (after fresh prices + FX), building the permanent
   // value-over-time history. Runs regardless of trading activity; isolated so it never aborts sync.
   let valueSnapshots = 0;
   try {
     valueSnapshots = await snapshotPortfolioValues(admin);
   } catch { /* isolate — a snapshot failure must not fail the whole sync */ }
 
-  return Response.json({ synced: ok, failed, total: held.length, ivCaptured: ivOk, brokerOptionLegs: brokerSynced, valueSnapshots });
+  return Response.json({ synced: ok, failed, total: held.length, ivCaptured: ivOk, brokerOptionLegs: brokerSynced, valueSnapshots, fxUpdated });
 }
