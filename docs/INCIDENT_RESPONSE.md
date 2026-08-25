@@ -52,7 +52,7 @@ When unsure between two levels, pick the higher one.
 
 ## 4. Notification clocks — start the moment access is confirmed or can't be ruled out
 
-Confirm each against counsel; these are the defaults to plan around (verified 2026-08-25, see docs/… risk review §5).
+Confirm each against counsel; these are the defaults to plan around (verified 2026-08-25, see `docs/LAUNCH_RISK_REVIEW.md` §5).
 
 | Who | Trigger | Deadline (confirm w/ counsel) |
 |---|---|---|

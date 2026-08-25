@@ -72,6 +72,7 @@ LATER — advanced analytics (opt-in), corporate actions, rebalancing, US tax re
 - FEATURES_borrowed-best.md ...... features to steal from rivals (alerts, income goal, attribution, Income Health digest…)
 - SPEC_options-selling.md ........ the options-selling PRD (O1/O2/O3)
 - INCIDENT_RESPONSE.md ........... breach/incident one-pager (severity, containment by stack, notification clocks)
+- LAUNCH_RISK_REVIEW.md .......... B2C pre-launch risk review (verified anchors, gated launch decision, MVL stack) — issue-spotting, not legal advice
 
 ## Setup
 See `README.md` for Supabase + EODHD + Vercel setup and env vars.
