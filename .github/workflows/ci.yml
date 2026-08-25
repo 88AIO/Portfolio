@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+        env:
+          # Public placeholders so `next build` can compile without real secrets.
+          # These are dummy values, never used to reach a real project at build time.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+
+  rls-isolation:
+    # The cross-tenant RLS test — Snowfolio's #1 security guarantee. It runs against a
+    # real Supabase instance when the three secrets below are configured, and SKIPS
+    # cleanly (still green) when they're not, so forks without secrets aren't blocked.
+    # Set these repo secrets to a STAGING Supabase project to enable it:
+    #   SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:rls
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
