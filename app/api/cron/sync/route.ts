@@ -12,6 +12,7 @@ import { runBrokerSyncForUser } from "@/lib/brokersync/run";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { snapshotPortfolioValues } from "@/lib/snapshots";
 import { syncFxRates } from "@/lib/fx";
+import { fetchAll } from "@/lib/supabase/paginate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -59,14 +60,20 @@ export async function GET(request: Request) {
   } catch { /* isolate — market-data sync still runs */ }
 
   // The positions view is security_invoker; the service-role client bypasses RLS, so this returns
-  // every held position across all users. Dedupe to one row per instrument.
-  const { data, error } = await admin
-    .from("positions")
-    .select("instrument_id, symbol, exchange, currency, name, sector, sector_weights, type");
-  if (error) return new Response(error.message, { status: 500 });
+  // every held position across all users. Page past the ~1000-row cap — once total held rows exceed
+  // it (a few dozen active users), a single read would silently skip every instrument beyond the
+  // first page and leave their prices/dividends stale indefinitely. Dedupe to one row per instrument.
+  const data = await fetchAll<Held>((from, to) =>
+    admin
+      .from("positions")
+      .select("instrument_id, symbol, exchange, currency, name, sector, sector_weights, type")
+      .order("instrument_id", { ascending: true })
+      .order("portfolio_id", { ascending: true })
+      .range(from, to),
+  );
 
   const byId = new Map<string, Held>();
-  for (const p of (data ?? []) as Held[]) {
+  for (const p of data as Held[]) {
     if (!byId.has(p.instrument_id)) byId.set(p.instrument_id, p);
   }
   const held = [...byId.values()];

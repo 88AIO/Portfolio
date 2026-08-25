@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { toCsv, csvResponse, exportFilename, type CsvValue } from "@/lib/export/csv";
 import { computeRealizedLots, lotsInYear, type LedgerTx } from "@/lib/tax/realized";
+import { fetchAll } from "@/lib/supabase/paginate";
 
 export const dynamic = "force-dynamic";
 
@@ -37,13 +38,19 @@ export async function GET(request: Request) {
   const yearParam = Number(new URL(request.url).searchParams.get("year"));
   const year = Number.isFinite(yearParam) && yearParam > 1990 ? yearParam : Number(new Date().toISOString().slice(0, 4));
 
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("type, quantity, price, fees, currency, executed_at, instruments(symbol)")
-    .order("executed_at", { ascending: true });
-  if (error) return new Response(error.message, { status: 500 });
+  // Transactions can exceed Supabase's ~1000-row cap; page through the whole ledger so FIFO
+  // matching isn't run on a truncated read (which would drop recent sells and misstate the
+  // proceeds/cost-basis/gain a user files against their 1099).
+  const data = await fetchAll<TxRow>((from, to) =>
+    supabase
+      .from("transactions")
+      .select("type, quantity, price, fees, currency, executed_at, instruments(symbol)")
+      .order("executed_at", { ascending: true })
+      .order("instrument_id", { ascending: true })
+      .range(from, to),
+  );
 
-  const ledger: LedgerTx[] = ((data ?? []) as TxRow[])
+  const ledger: LedgerTx[] = (data as TxRow[])
     .map((t) => ({
       symbol: symbolOf(t.instruments) ?? "",
       currency: t.currency ?? "USD",

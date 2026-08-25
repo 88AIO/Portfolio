@@ -78,16 +78,22 @@ export default async function Dashboard({
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   let marketValue = 0, costBasis = 0, dayPL = 0, annualDivs = 0, dividendsReceived = 0;
+  let unpricedCount = 0; // holdings with no quote yet — excluded from value/cost so P/L isn't distorted
   const mvByPortfolio = new Map<string, number>(); // holdings market value per account, in base currency
   for (const p of rows) {
     const r = fx(p.currency);
-    const v = (p.last_price ?? 0) * p.shares * r;
+    // Dividends are real regardless of whether we have a live price, so they always count.
+    annualDivs += (p.year_total_divs ?? 0) * r;
+    dividendsReceived += (p.div_paid ?? 0) * r;
+    // No quote yet (obscure/intl ticker, or a fetch that hasn't landed): counting its full cost
+    // basis against a $0 market value would show the holding as a fabricated ~100% loss. Exclude it
+    // from BOTH sides of the capital P/L until a price arrives; the row itself still shows "—".
+    if (p.last_price == null) { unpricedCount++; continue; }
+    const v = p.last_price * p.shares * r;
     marketValue += v;
     mvByPortfolio.set(p.portfolio_id, (mvByPortfolio.get(p.portfolio_id) ?? 0) + v);
     costBasis += p.avg_cost * p.shares * r;
-    annualDivs += (p.year_total_divs ?? 0) * r;
-    dividendsReceived += (p.div_paid ?? 0) * r;
-    if (p.day_change_pct != null && p.last_price != null && 1 + p.day_change_pct / 100 > 0) {
+    if (p.day_change_pct != null && 1 + p.day_change_pct / 100 > 0) {
       const prev = p.last_price / (1 + p.day_change_pct / 100);
       dayPL += (p.last_price - prev) * p.shares * r;
     }
@@ -130,8 +136,9 @@ export default async function Dashboard({
     .map(([pid, prows]) => {
       let mv = 0, pl = 0;
       for (const p of prows) {
+        if (p.last_price == null) continue; // unpriced: don't fold a phantom loss into the account subtotal
         const r = fx(p.currency);
-        const v = (p.last_price ?? 0) * p.shares * r;
+        const v = p.last_price * p.shares * r;
         mv += v;
         pl += v - p.avg_cost * p.shares * r;
       }
@@ -270,6 +277,14 @@ export default async function Dashboard({
           <Tile label="Invested" hint="What you paid for everything you currently hold." value={money(costBasis, base)} muted />
         </div>
 
+        {unpricedCount > 0 && (
+          <p className="mt-3 text-xs text-slate-500">
+            {unpricedCount} holding{unpricedCount === 1 ? "" : "s"} {unpricedCount === 1 ? "doesn't" : "don't"} have a
+            price yet, so {unpricedCount === 1 ? "it isn't" : "they aren't"} counted in the value or gain/loss above.
+            Prices usually arrive within a day.
+          </p>
+        )}
+
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           {/* Holdings */}
           <section className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
@@ -369,12 +384,18 @@ export default async function Dashboard({
                                   </span>
                                 )}
                               </td>
-                              <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium">{money(mv, p.currency)}</td>
+                              <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium">
+                                {p.last_price == null ? <span className="text-slate-300">—</span> : money(mv, p.currency)}
+                              </td>
                               <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">
                                 {p.div_yield_current != null ? pct(p.div_yield_current) : "—"}
                               </td>
-                              <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium ${pl >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                                {money(pl, p.currency)}
+                              <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium">
+                                {p.last_price == null ? (
+                                  <span className="text-slate-300">—</span>
+                                ) : (
+                                  <span className={pl >= 0 ? "text-emerald-600" : "text-rose-600"}>{money(pl, p.currency)}</span>
+                                )}
                               </td>
                             </tr>
                           );
@@ -405,12 +426,18 @@ export default async function Dashboard({
                               </span>
                             )}
                           </td>
-                          <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium">{money(mv, p.currency)}</td>
+                          <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium">
+                            {p.last_price == null ? <span className="text-slate-300">—</span> : money(mv, p.currency)}
+                          </td>
                           <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-500">
                             {p.div_yield_current != null ? pct(p.div_yield_current) : "—"}
                           </td>
-                          <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium ${pl >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                            {money(pl, p.currency)}
+                          <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium">
+                            {p.last_price == null ? (
+                              <span className="text-slate-300">—</span>
+                            ) : (
+                              <span className={pl >= 0 ? "text-emerald-600" : "text-rose-600"}>{money(pl, p.currency)}</span>
+                            )}
                           </td>
                         </tr>
                       );

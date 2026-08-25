@@ -36,9 +36,13 @@ export async function snapshotPortfolioValues(admin: Admin, base = "USD"): Promi
 
   const byPortfolio = new Map<string, { mv: number; cost: number }>();
   for (const r of rows) {
+    // A holding with no live price yet has null market value but a real cost basis. Recording its
+    // full cost against a $0 value would bake a fabricated loss into the immutable daily snapshot
+    // (and the performance chart drawn from it). Exclude it from BOTH sides until a price lands.
+    if (r.current_total_price == null) continue;
     const f = fx(r.currency);
     const e = byPortfolio.get(r.portfolio_id) ?? { mv: 0, cost: 0 };
-    e.mv += (r.current_total_price ?? 0) * f;
+    e.mv += r.current_total_price * f;
     e.cost += (r.cost_basis ?? 0) * f;
     byPortfolio.set(r.portfolio_id, e);
   }

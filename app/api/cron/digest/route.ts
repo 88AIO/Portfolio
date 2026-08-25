@@ -3,6 +3,7 @@ import { getCachedRates } from "@/lib/fx";
 import { computeOption, type OptionPositionRow } from "@/lib/options";
 import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell } from "@/lib/email";
+import { fetchAll } from "@/lib/supabase/paginate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -39,14 +40,23 @@ export async function GET(request: Request) {
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
   const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
 
-  const [{ data: prefs }, { data: portfolios }, { data: posData }, { data: optPosData }, { data: optTxData }, { data: divTxData }] =
+  // These reads span EVERY user (service role bypasses RLS), so any of them can exceed the
+  // ~1000-row cap. Page through each with a unique sort key, or a truncated read would silently
+  // understate some users' weekly totals or drop their upcoming-events rows.
+  const [prefs, portfolios, posData, optPosData, optTxData, divTxData] =
     await Promise.all([
-      admin.from("notification_prefs").select("user_id").eq("email_digest", true),
-      admin.from("portfolios").select("id, user_id, base_currency"),
-      admin.from("positions").select("portfolio_id, symbol, currency, shares, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"),
-      admin.from("option_positions").select("*"),
-      admin.from("option_transactions").select("portfolio_id, action, premium, contracts, fee, currency, trade_date").gte("trade_date", weekAgo),
-      admin.from("transactions").select("portfolio_id, quantity, price, currency, executed_at").eq("type", "dividend").gte("executed_at", weekAgo),
+      fetchAll<{ user_id: string }>((f, t) =>
+        admin.from("notification_prefs").select("user_id").eq("email_digest", true).order("user_id").range(f, t)),
+      fetchAll<{ id: string; user_id: string; base_currency: string | null }>((f, t) =>
+        admin.from("portfolios").select("id, user_id, base_currency").order("id").range(f, t)),
+      fetchAll<PositionLite & { portfolio_id: string }>((f, t) =>
+        admin.from("positions").select("portfolio_id, symbol, currency, shares, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency").order("portfolio_id").order("instrument_id").range(f, t)),
+      fetchAll<OptionPositionRow & { portfolio_id: string }>((f, t) =>
+        admin.from("option_positions").select("*").order("portfolio_id").order("instrument_id").order("option_type").order("strike").order("expiration").range(f, t)),
+      fetchAll<OptTx>((f, t) =>
+        admin.from("option_transactions").select("portfolio_id, action, premium, contracts, fee, currency, trade_date").gte("trade_date", weekAgo).order("portfolio_id").order("trade_date").order("id").range(f, t)),
+      fetchAll<DivTx>((f, t) =>
+        admin.from("transactions").select("portfolio_id, quantity, price, currency, executed_at").eq("type", "dividend").gte("executed_at", weekAgo).order("portfolio_id").order("executed_at").order("id").range(f, t)),
     ]);
 
   const userByPortfolio = new Map<string, string>();

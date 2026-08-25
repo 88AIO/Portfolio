@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { toCsv, csvResponse, exportFilename, type CsvValue } from "@/lib/export/csv";
+import { fetchAll } from "@/lib/supabase/paginate";
 
 export const dynamic = "force-dynamic";
 
@@ -40,16 +41,20 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
 
-  // RLS scopes transactions to the user's own portfolios automatically.
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("executed_at, type, quantity, price, fees, currency, note, dedupe_key, instruments(symbol, exchange)")
-    .order("executed_at", { ascending: true });
-
-  if (error) return new Response(error.message, { status: 500 });
+  // RLS scopes transactions to the user's own portfolios automatically. Page past the ~1000-row
+  // cap so a heavy multi-year account gets a COMPLETE export — a truncated file would silently
+  // omit the newest trades and rebuild an incomplete portfolio on re-import (breaks "no lock-in").
+  const data = await fetchAll<TxRow>((from, to) =>
+    supabase
+      .from("transactions")
+      .select("executed_at, type, quantity, price, fees, currency, note, dedupe_key, instruments(symbol, exchange)")
+      .order("executed_at", { ascending: true })
+      .order("instrument_id", { ascending: true })
+      .range(from, to),
+  );
 
   const headers = ["date", "symbol", "exchange", "type", "quantity", "price", "fees", "currency", "note", "ref"];
-  const rows: CsvValue[][] = ((data ?? []) as TxRow[]).map((t) => {
+  const rows: CsvValue[][] = (data as TxRow[]).map((t) => {
     const inst = instrumentOf(t.instruments);
     return [
       t.executed_at,

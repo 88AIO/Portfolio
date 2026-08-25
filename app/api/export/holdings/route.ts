@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { toCsv, csvResponse, exportFilename, type CsvValue } from "@/lib/export/csv";
+import { fetchAll } from "@/lib/supabase/paginate";
 
 export const dynamic = "force-dynamic";
 
@@ -40,22 +41,25 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
 
-  // RLS on the positions view scopes this to the signed-in user.
-  const { data, error } = await supabase
-    .from("positions")
-    .select(
-      "symbol, exchange, name, type, currency, sector, country_iso, shares, avg_cost, last_price, cost_basis, current_total_price, gain_value, day_change_pct, year_total_divs, div_yield_current, price_as_of"
-    )
-    .order("symbol", { ascending: true });
-
-  if (error) return new Response(error.message, { status: 500 });
+  // RLS on the positions view scopes this to the signed-in user. Page through in case a portfolio
+  // ever holds more than the ~1000-row cap, so the snapshot is never silently partial.
+  const data = await fetchAll<PositionRow>((from, to) =>
+    supabase
+      .from("positions")
+      .select(
+        "symbol, exchange, name, type, currency, sector, country_iso, shares, avg_cost, last_price, cost_basis, current_total_price, gain_value, day_change_pct, year_total_divs, div_yield_current, price_as_of"
+      )
+      .order("symbol", { ascending: true })
+      .order("exchange", { ascending: true })
+      .range(from, to),
+  );
 
   const headers = [
     "symbol", "exchange", "name", "type", "currency", "shares", "avg_cost", "last_price",
     "market_value", "cost_basis", "gain_value", "gain_pct", "day_change_pct",
     "annual_dividends", "yield_pct", "sector", "country", "price_as_of",
   ];
-  const rows: CsvValue[][] = ((data ?? []) as PositionRow[]).map((p) => {
+  const rows: CsvValue[][] = (data as PositionRow[]).map((p) => {
     const cost = p.cost_basis ?? 0;
     const gainPct = cost > 0 && p.gain_value != null ? (p.gain_value / cost) * 100 : null;
     return [

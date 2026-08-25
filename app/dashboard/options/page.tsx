@@ -75,7 +75,7 @@ export default async function OptionsPage() {
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
 
-  const [{ data: optRows }, { data: posRows }, { data: pfList }, ledger, { data: optTxnRows }, notifPrefs] = await Promise.all([
+  const [{ data: optRows }, { data: posRows }, { data: pfList }, ledger, optTxnRows, notifPrefs] = await Promise.all([
     supabase.from("option_positions").select("*").order("expiration"),
     supabase.from("positions").select(
       "symbol, currency, shares, avg_cost, last_price, price_as_of, div_paid, option_premium, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
@@ -90,7 +90,16 @@ export default async function OptionsPage() {
         .order("instrument_id", { ascending: true })
         .range(from, to),
     ),
-    supabase.from("option_transactions").select("action, option_type, strike, expiration, contracts, premium, fee, currency, trade_date, instruments(symbol)"),
+    // Same cap applies to a heavy seller's option legs — page through so all-time / per-month
+    // premium and the per-ticker wheel history are computed from the complete history.
+    fetchAll<OptTxnRow>((from, to) =>
+      supabase
+        .from("option_transactions")
+        .select("action, option_type, strike, expiration, contracts, premium, fee, currency, trade_date, instruments(symbol)")
+        .order("trade_date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     getNotificationPrefs(),
   ]);
 
