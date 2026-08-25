@@ -116,9 +116,9 @@ export default function LoginPage() {
               />
               <span>
                 I&rsquo;m {MIN_AGE} or older and agree to the{" "}
-                <Link href="/legal/terms" target="_blank" className="text-indigo-600 underline">Terms</Link>{" "}
+                <Link href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Terms</Link>{" "}
                 and{" "}
-                <Link href="/legal/privacy" target="_blank" className="text-indigo-600 underline">Privacy Policy</Link>.
+                <Link href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Privacy Policy</Link>.
               </span>
             </label>
           )}
