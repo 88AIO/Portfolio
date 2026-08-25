@@ -71,6 +71,7 @@ LATER — advanced analytics (opt-in), corporate actions, rebalancing, US tax re
 - ROADMAP_v2_wedge-first.md ...... build order
 - FEATURES_borrowed-best.md ...... features to steal from rivals (alerts, income goal, attribution, Income Health digest…)
 - SPEC_options-selling.md ........ the options-selling PRD (O1/O2/O3)
+- INCIDENT_RESPONSE.md ........... breach/incident one-pager (severity, containment by stack, notification clocks)
 
 ## Setup
 See `README.md` for Supabase + EODHD + Vercel setup and env vars.
