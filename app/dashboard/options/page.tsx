@@ -44,6 +44,7 @@ type PositionLite = {
 
 // Raw ledger row joined to its instrument symbol, for per-symbol realized-gain math.
 type LedgerRow = {
+  id: string;
   type: string;
   quantity: number;
   price: number;
@@ -88,7 +89,7 @@ export default async function OptionsPage() {
     fetchAll<LedgerRow>((from, to) =>
       supabase
         .from("transactions")
-        .select("type, quantity, price, fees, currency, executed_at, instruments(symbol)")
+        .select("id, type, quantity, price, fees, currency, executed_at, instruments(symbol)")
         .order("executed_at", { ascending: true })
         .order("instrument_id", { ascending: true })
         .range(from, to),
@@ -269,6 +270,7 @@ export default async function OptionsPage() {
     else if (o.action === "assigned") { title = "Assigned"; amount = -fee; }
     else { title = "Expired"; amount = -fee; }
     pushEvent(symbol, {
+      id: o.id, source: "option",
       date: o.trade_date, kind: "option", currency: ccy, amount,
       title,
       detail: `${o.contracts}× ${money(o.strike, ccy)} strike · exp ${o.expiration} · ${money(o.premium, ccy)}/sh`,
@@ -282,11 +284,11 @@ export default async function OptionsPage() {
     const ccy = t.currency || base;
     const fees = t.fees ?? 0;
     if (t.type === "buy") {
-      pushEvent(symbol, { date: t.executed_at, kind: "buy", currency: ccy, amount: -(t.quantity * t.price + fees), title: "Bought shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${fees ? ` · ${money(fees, ccy)} fee` : ""}` });
+      pushEvent(symbol, { id: t.id, source: "tx", date: t.executed_at, kind: "buy", currency: ccy, amount: -(t.quantity * t.price + fees), title: "Bought shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${fees ? ` · ${money(fees, ccy)} fee` : ""}` });
     } else if (t.type === "sell") {
-      pushEvent(symbol, { date: t.executed_at, kind: "sell", currency: ccy, amount: t.quantity * t.price - fees, title: "Sold shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${fees ? ` · ${money(fees, ccy)} fee` : ""}` });
+      pushEvent(symbol, { id: t.id, source: "tx", date: t.executed_at, kind: "sell", currency: ccy, amount: t.quantity * t.price - fees, title: "Sold shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${fees ? ` · ${money(fees, ccy)} fee` : ""}` });
     } else if (t.type === "dividend") {
-      pushEvent(symbol, { date: t.executed_at, kind: "dividend", currency: ccy, amount: t.quantity * t.price, title: "Dividend received", detail: `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}` });
+      pushEvent(symbol, { id: t.id, source: "tx", date: t.executed_at, kind: "dividend", currency: ccy, amount: t.quantity * t.price, title: "Dividend received", detail: `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}` });
     }
   }
   for (const sym of Object.keys(historyBySymbol)) {

@@ -34,6 +34,8 @@ export type WheelRow = {
 // One dated entry in a ticker's full wheel history — an option leg, a share assignment/trade,
 // or a dividend. Amounts are in that event's native currency (signed: + cash in, − cash out).
 export type WheelEvent = {
+  id: string;                    // underlying row id, for delete
+  source: "tx" | "option";       // which table the row came from
   date: string; // YYYY-MM-DD
   kind: "option" | "buy" | "sell" | "dividend";
   title: string;

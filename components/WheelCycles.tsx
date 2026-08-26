@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { money, pct, num } from "@/lib/format";
 import { wheelPhaseLabel, type WheelRow, type WheelEvent } from "@/lib/options/wheel";
+import DeleteActivityButton from "@/components/DeleteActivityButton";
 
 // The Wheel cycles table: one summary row per underlying, each expandable to reveal that ticker's
 // entire history since inception — every put/call leg plus the share assignments and dividends
@@ -115,8 +116,8 @@ function FragmentRow({
               {w.symbol} full history ({events.length} event{events.length === 1 ? "" : "s"})
             </div>
             <ul className="space-y-1">
-              {events.map((e, i) => (
-                <li key={i} className="flex items-center justify-between gap-3 border-b border-slate-100 py-1.5 last:border-0">
+              {events.map((e) => (
+                <li key={`${e.source}:${e.id}`} className="group flex items-center justify-between gap-3 border-b border-slate-100 py-1.5 last:border-0">
                   <div className="flex items-center gap-2.5">
                     <span className={`h-2 w-2 shrink-0 rounded-full ${dot(e)}`} />
                     <div>
@@ -124,13 +125,16 @@ function FragmentRow({
                       <div className="text-[11px] text-slate-400">{e.detail}</div>
                     </div>
                   </div>
-                  <div className="text-right">
-                    {e.amount != null && (
-                      <div className={`text-[13px] font-medium tabular-nums ${e.amount >= 0 ? "text-emerald-600" : "text-slate-600"}`}>
-                        {e.amount >= 0 ? "+" : ""}{money(e.amount, e.currency)}
-                      </div>
-                    )}
-                    <div className="text-[11px] text-slate-400">{e.date}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-right">
+                      {e.amount != null && (
+                        <div className={`text-[13px] font-medium tabular-nums ${e.amount >= 0 ? "text-emerald-600" : "text-slate-600"}`}>
+                          {e.amount >= 0 ? "+" : ""}{money(e.amount, e.currency)}
+                        </div>
+                      )}
+                      <div className="text-[11px] text-slate-400">{e.date}</div>
+                    </div>
+                    <DeleteActivityButton id={e.id} instrumentId="" source={e.source} />
                   </div>
                 </li>
               ))}
