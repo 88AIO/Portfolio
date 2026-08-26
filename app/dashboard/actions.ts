@@ -284,3 +284,46 @@ export async function signOut() {
   await supabase.auth.signOut();
   redirect("/login");
 }
+
+// If this delete emptied the holding, its detail page would 404 — send the user to the overview
+// instead. Counts are RLS-scoped, so they only see the caller's own remaining rows on this symbol.
+async function revalidateAfterActivityDelete(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  instrumentId: string,
+) {
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/performance");
+  revalidatePath("/dashboard/options");
+  if (!instrumentId) return;
+  const [{ count: txLeft }, { count: optLeft }] = await Promise.all([
+    supabase.from("transactions").select("id", { count: "exact", head: true }).eq("instrument_id", instrumentId),
+    supabase.from("option_transactions").select("id", { count: "exact", head: true }).eq("instrument_id", instrumentId),
+  ]);
+  if ((txLeft ?? 0) + (optLeft ?? 0) === 0) redirect("/dashboard");
+  revalidatePath(`/dashboard/holding/${instrumentId}`);
+}
+
+// Delete one of the caller's own transactions. RLS scopes the delete to rows in the user's
+// portfolios, so an id they don't own simply affects nothing.
+export async function deleteTransaction(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  const id = String(formData.get("id") || "");
+  const instrumentId = String(formData.get("instrument_id") || "");
+  if (!id) return;
+  await supabase.from("transactions").delete().eq("id", id);
+  await revalidateAfterActivityDelete(supabase, instrumentId);
+}
+
+// Delete one of the caller's own option legs (same RLS scoping as above).
+export async function deleteOptionLeg(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  const id = String(formData.get("id") || "");
+  const instrumentId = String(formData.get("instrument_id") || "");
+  if (!id) return;
+  await supabase.from("option_transactions").delete().eq("id", id);
+  await revalidateAfterActivityDelete(supabase, instrumentId);
+}

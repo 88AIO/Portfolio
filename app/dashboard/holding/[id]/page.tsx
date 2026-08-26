@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../../actions";
 import DashboardNav from "@/components/DashboardNav";
+import DeleteActivityButton from "@/components/DeleteActivityButton";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import { optionActionLabel } from "@/lib/options";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
@@ -35,6 +36,8 @@ function legPremium(o: OptTx): number {
 }
 
 type TimelineItem = {
+  id: string;                    // the underlying row id, for delete
+  source: "tx" | "option";       // which table it came from
   date: string;
   kind: "buy" | "sell" | "dividend" | "option";
   title: string;
@@ -103,14 +106,15 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   const timeline: TimelineItem[] = [];
   for (const t of txs) {
     const portfolio = pfName.get(t.portfolio_id) ?? "Portfolio";
-    if (t.type === "buy") timeline.push({ date: t.executed_at, kind: "buy", title: "Bought shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`, amount: -(t.quantity * t.price + t.fees), portfolio });
-    else if (t.type === "sell") timeline.push({ date: t.executed_at, kind: "sell", title: "Sold shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`, amount: t.quantity * t.price - t.fees, portfolio });
-    else if (t.type === "dividend") timeline.push({ date: t.executed_at, kind: "dividend", title: "Dividend received", detail: `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}`, amount: t.quantity * t.price, portfolio });
+    if (t.type === "buy") timeline.push({ id: t.id, source: "tx", date: t.executed_at, kind: "buy", title: "Bought shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`, amount: -(t.quantity * t.price + t.fees), portfolio });
+    else if (t.type === "sell") timeline.push({ id: t.id, source: "tx", date: t.executed_at, kind: "sell", title: "Sold shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`, amount: t.quantity * t.price - t.fees, portfolio });
+    else if (t.type === "dividend") timeline.push({ id: t.id, source: "tx", date: t.executed_at, kind: "dividend", title: "Dividend received", detail: `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}`, amount: t.quantity * t.price, portfolio });
   }
   for (const o of opts) {
     const portfolio = pfName.get(o.portfolio_id) ?? "Portfolio";
     const label = optionActionLabel(o.action);
     timeline.push({
+      id: o.id, source: "option",
       date: o.trade_date, kind: "option",
       title: `${label} ${o.option_type === "put" ? "put" : "call"}`,
       detail: `${o.contracts}× ${money(o.strike, o.currency)} strike · exp ${o.expiration} · ${money(o.premium, o.currency)}/sh`,
@@ -225,8 +229,8 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
         <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
           <h2 className="mb-4 font-semibold">Everything on {instrument.symbol}</h2>
           <ul className="space-y-1">
-            {timeline.map((item, i) => (
-              <li key={i} className="flex items-center justify-between gap-3 border-b border-slate-50 py-2.5 last:border-0">
+            {timeline.map((item) => (
+              <li key={`${item.source}:${item.id}`} className="group flex items-center justify-between gap-3 border-b border-slate-50 py-2.5 last:border-0">
                 <div className="flex items-center gap-3">
                   <span className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${dot(item.kind)}`} />
                   <div>
@@ -234,13 +238,16 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
                     <div className="text-xs text-slate-400">{item.detail}</div>
                   </div>
                 </div>
-                <div className="text-right">
-                  {item.amount != null && (
-                    <div className={`text-sm font-medium tabular-nums ${item.amount >= 0 ? "text-emerald-600" : "text-slate-600"}`}>
-                      {item.amount >= 0 ? "+" : ""}{money(item.amount, ccy)}
-                    </div>
-                  )}
-                  <div className="text-xs text-slate-400">{item.date}</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-right">
+                    {item.amount != null && (
+                      <div className={`text-sm font-medium tabular-nums ${item.amount >= 0 ? "text-emerald-600" : "text-slate-600"}`}>
+                        {item.amount >= 0 ? "+" : ""}{money(item.amount, ccy)}
+                      </div>
+                    )}
+                    <div className="text-xs text-slate-400">{item.date}</div>
+                  </div>
+                  <DeleteActivityButton id={item.id} instrumentId={id} source={item.source} />
                 </div>
               </li>
             ))}
