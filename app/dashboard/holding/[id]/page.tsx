@@ -130,7 +130,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-display text-2xl font-medium tracking-tight text-slate-900">{instrument.name && instrument.name !== instrument.symbol ? instrument.name : instrument.symbol}</span>
+              <h1 className="font-display text-2xl font-medium tracking-tight text-slate-900">{instrument.name && instrument.name !== instrument.symbol ? instrument.name : instrument.symbol}</h1>
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
                 {instrument.exchange} · {instrument.symbol}
               </span>

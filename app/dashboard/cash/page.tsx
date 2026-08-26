@@ -152,7 +152,7 @@ export default async function CashPage() {
                           <td className="py-3 text-right">
                             <form action={deleteCashEntry}>
                               <input type="hidden" name="id" value={e.id} />
-                              <button aria-label="Delete entry" className="text-xs text-slate-300 hover:text-rose-500" title="Delete">✕</button>
+                              <button aria-label="Delete entry" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-xs text-slate-300 hover:bg-rose-50 hover:text-rose-500" title="Delete">✕</button>
                             </form>
                           </td>
                         </tr>

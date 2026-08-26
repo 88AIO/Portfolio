@@ -20,7 +20,7 @@ export default function PutFinder() {
     }
   };
 
-  const input = "w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-indigo-400";
+  const input = "w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200";
 
   // Color IV low→high so rich-but-risky premium is obvious at a glance.
   const ivClass = (iv: number | null) =>

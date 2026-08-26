@@ -14,12 +14,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [agreed, setAgreed] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   const [loading, setLoading] = useState(false);
+  const note = (text: string, tone: "error" | "info" = "info") => setMsg({ text, tone });
 
   async function sendReset() {
     if (!email) {
-      setMsg("Enter your email above first, then tap Forgot password.");
+      note("Enter your email above first, then tap Forgot password.", "error");
       return;
     }
     setLoading(true);
@@ -29,17 +30,14 @@ export default function LoginPage() {
       redirectTo: `${window.location.origin}/auth/callback?next=/auth/reset`,
     });
     setLoading(false);
-    setMsg(
-      error
-        ? error.message
-        : "Check your email for a link to reset your password.",
-    );
+    if (error) note(error.message, "error");
+    else note("Check your email for a link to reset your password.", "info");
   }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (mode === "signup" && !agreed) {
-      setMsg(`Please confirm you're ${MIN_AGE}+ and agree to the Terms and Privacy Policy.`);
+      note(`Please confirm you're ${MIN_AGE}+ and agree to the Terms and Privacy Policy.`, "error");
       return;
     }
     setLoading(true);
@@ -51,20 +49,21 @@ export default function LoginPage() {
         // Don't leak whether an email is already registered (account enumeration). Surface a
         // generic, actionable message for the common "already registered" case; show real errors
         // (e.g. weak password) that the user genuinely needs to act on.
-        const msg = /registered|already|exists/i.test(error.message)
-          ? "If that email is new, check your inbox to confirm. If you already have an account, sign in instead."
-          : error.message;
-        setMsg(msg);
+        if (/registered|already|exists/i.test(error.message)) {
+          note("If that email is new, check your inbox to confirm. If you already have an account, sign in instead.", "info");
+        } else {
+          note(error.message, "error");
+        }
       } else if (data.session) {
         // Confirmation is off: they're signed in already, so glide straight into the app.
         router.push("/dashboard");
         router.refresh();
       } else {
-        setMsg("Almost there. We sent a confirmation link to your email. Open it and you're in.");
+        note("Almost there. We sent a confirmation link to your email. Open it and you're in.", "info");
       }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setMsg(error.message);
+      if (error) note(error.message, "error");
       else {
         router.push("/dashboard");
         router.refresh();
@@ -147,7 +146,7 @@ export default function LoginPage() {
           )}
         </form>
 
-        {msg && <p className="mt-4 text-sm text-amber-600">{msg}</p>}
+        {msg && <p className={`mt-4 text-sm ${msg.tone === "error" ? "text-rose-600" : "text-amber-600"}`}>{msg.text}</p>}
 
         <button
           onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMsg(null); }}

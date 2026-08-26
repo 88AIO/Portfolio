@@ -8,7 +8,7 @@ type PortfolioOpt = { id: string; name: string };
 export default function AddCashEntryForm({ portfolios }: { portfolios: PortfolioOpt[] }) {
   const ref = useRef<HTMLFormElement>(null);
   const [pending, setPending] = useState(false);
-  const input = "w-full rounded-lg border border-slate-300 px-2 py-1.5 outline-none focus:border-indigo-400";
+  const input = "w-full rounded-lg border border-slate-300 px-2 py-1.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200";
 
   return (
     <form

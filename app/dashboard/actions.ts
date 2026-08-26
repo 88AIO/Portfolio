@@ -55,11 +55,13 @@ export async function addTransaction(formData: FormData) {
   const quantity = Number(formData.get("quantity") || 0);
   const price = Number(formData.get("price") || 0);
   const executed_at = String(formData.get("executed_at") || "") || undefined;
-  if (!symbol || quantity <= 0) return;
+  // Throw (don't silently return) on bad input so the form's catch shows an error instead of
+  // resetting to a false "success" — the user must know nothing was added.
+  if (!symbol || quantity <= 0) throw new Error("Enter a symbol and a quantity greater than zero.");
   // Reject malformed tickers before they create junk reference rows / provider calls.
-  if (!isValidSymbol(symbol) || !isValidExchange(exchange)) return;
+  if (!isValidSymbol(symbol) || !isValidExchange(exchange)) throw new Error("That symbol or exchange doesn't look right.");
   // A supplied date must be a real calendar date (empty is fine — we default to today).
-  if (executed_at && !isValidYmd(executed_at)) return;
+  if (executed_at && !isValidYmd(executed_at)) throw new Error("That trade date isn't a valid date.");
 
   const portfolio = await ensurePortfolio();
 
@@ -74,7 +76,7 @@ export async function addTransaction(formData: FormData) {
     }).select().single();
     inst = newInst;
   }
-  if (!inst) return;
+  if (!inst) throw new Error("Couldn't look up that symbol. Check it and try again.");
 
   const date = executed_at || todayIso();
   const dedupe_key = transactionDedupeKey({

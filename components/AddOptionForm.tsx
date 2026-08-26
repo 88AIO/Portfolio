@@ -12,7 +12,7 @@ export default function AddOptionForm({ portfolios }: { portfolios: PortfolioOpt
   const [error, setError] = useState<string | null>(null);
 
   const input =
-    "w-full rounded-lg border border-slate-300 px-2 py-1.5 outline-none focus:border-indigo-400";
+    "w-full rounded-lg border border-slate-300 px-2 py-1.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200";
 
   return (
     <form
