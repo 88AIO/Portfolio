@@ -364,8 +364,25 @@ create policy "own option_transactions" on public.option_transactions for all us
 );
 
 -- Shared reference data: read-only to clients; writes via service role.
+-- Instruments are scoped to the ones a user actually references (via their own transactions or
+-- option legs), so a signed-in user can't enumerate the full universe of tickers/names/sectors that
+-- OTHER users have added. The security_invoker positions/option_positions views join instruments
+-- only on the user's own instrument_ids, so this policy leaves them intact. Public benchmark lookups
+-- (e.g. SPY on the performance page) use the service-role client instead of relying on this policy.
 drop policy if exists "read instruments" on public.instruments;
-create policy "read instruments" on public.instruments for select using (auth.role() = 'authenticated');
+drop policy if exists "read own instruments" on public.instruments;
+create policy "read own instruments" on public.instruments for select using (
+  exists (
+    select 1 from public.transactions t
+    join public.portfolios p on p.id = t.portfolio_id
+    where t.instrument_id = instruments.id and p.user_id = auth.uid()
+  )
+  or exists (
+    select 1 from public.option_transactions ot
+    join public.portfolios p on p.id = ot.portfolio_id
+    where ot.instrument_id = instruments.id and p.user_id = auth.uid()
+  )
+);
 drop policy if exists "read prices" on public.price_cache;
 create policy "read prices" on public.price_cache for select using (auth.role() = 'authenticated');
 drop policy if exists "read price_history" on public.price_history;

@@ -53,7 +53,8 @@ describe("RLS cross-tenant isolation", { skip }, () => {
   // Two tenants. `A` is the "attacker" whose queries must never surface `B`'s rows.
   const A = { email: `rls-a-${suffix}@example.com`, password: randomUUID(), id: null, portfolioId: null };
   const B = { email: `rls-b-${suffix}@example.com`, password: randomUUID(), id: null, portfolioId: null };
-  let instrumentId = null;
+  let instrumentId = null;   // referenced by BOTH users
+  let instrumentBId = null;  // referenced ONLY by user B — A must not be able to read it
   let clientA = null;
   let clientB = null;
 
@@ -107,6 +108,23 @@ describe("RLS cross-tenant isolation", { skip }, () => {
       for (const r of seed) assert.equal(r.error, null, `seed row: ${r.error?.message}`);
     }
 
+    // An instrument that ONLY user B references — used to prove the tightened instruments policy:
+    // A must not be able to read a ticker/name it has no holding in.
+    {
+      const { data, error } = await db
+        .from("instruments")
+        .insert({ symbol: `RLSB${suffix}`, exchange: "US", name: "RLS B-only Instrument", currency: "USD" })
+        .select("id")
+        .single();
+      assert.equal(error, null, `seed B-only instrument: ${error?.message}`);
+      instrumentBId = data.id;
+      const { error: te } = await db.from("transactions").insert({
+        portfolio_id: B.portfolioId, instrument_id: instrumentBId,
+        type: "buy", quantity: 5, price: 50, currency: "USD",
+      });
+      assert.equal(te, null, `seed B-only transaction: ${te?.message}`);
+    }
+
     // A secret that only the service role should ever touch — owned by B.
     {
       const { error } = await db.from("broker_connections").insert({
@@ -127,6 +145,7 @@ describe("RLS cross-tenant isolation", { skip }, () => {
       if (A.id) await db.auth.admin.deleteUser(A.id);
       if (B.id) await db.auth.admin.deleteUser(B.id);
       if (instrumentId) await db.from("instruments").delete().eq("id", instrumentId);
+      if (instrumentBId) await db.from("instruments").delete().eq("id", instrumentBId);
     } catch {
       // Best-effort cleanup; a leaked test user is uniquely named and harmless.
     }
@@ -172,6 +191,26 @@ describe("RLS cross-tenant isolation", { skip }, () => {
 
   it("isolation is symmetric (B cannot see A either)", () =>
     assertScoped(clientB, "positions", B.portfolioId, A.portfolioId));
+
+  it("instruments: a user can read a reference row it actually holds", async () => {
+    const { data, error } = await clientA.from("instruments").select("id").eq("id", instrumentId);
+    assert.equal(error, null);
+    assert.equal((data ?? []).length, 1, "A should be able to read an instrument it holds");
+  });
+
+  it("instruments: a user cannot read a reference row only another tenant holds", async () => {
+    // Enumerate: B's exclusive instrument must not appear in A's instruments list.
+    const list = await clientA.from("instruments").select("id");
+    assert.equal(list.error, null);
+    assert.ok(
+      !(list.data ?? []).some((r) => r.id === instrumentBId),
+      "instruments leaked a ticker only another tenant holds",
+    );
+    // Direct lookup by id must also come back empty.
+    const byId = await clientA.from("instruments").select("id").eq("id", instrumentBId);
+    assert.equal(byId.error, null);
+    assert.equal((byId.data ?? []).length, 0, "A read another tenant's instrument by id");
+  });
 
   it("broker_connections (service-role only): authenticated read returns nothing", async () => {
     const { data, error } = await clientA.from("broker_connections").select("id");

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ensurePortfolio } from "../actions";
 import DashboardNav from "@/components/DashboardNav";
 import { getCachedRates } from "@/lib/fx";
@@ -200,7 +201,10 @@ export default async function PerformancePage() {
   // Only when there's real trade history (the backtest mode has no dated cash flows to mirror).
   let benchReturnPct: number | null = null;
   if (hasRealHistory && hasData) {
-    const { data: spyInst } = await supabase
+    // SPY is public benchmark reference data every user needs — read it with the service role so it
+    // works even though the tightened `instruments` RLS policy only exposes a user's OWN instruments.
+    // (price_history below stays on the RLS client; its authenticated-read policy is unchanged.)
+    const { data: spyInst } = await createAdminClient()
       .from("instruments").select("id").eq("symbol", "SPY").eq("exchange", "US").maybeSingle();
     const spyId = (spyInst as { id: string } | null)?.id;
     if (spyId) {
