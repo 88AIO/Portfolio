@@ -122,4 +122,14 @@ Materializing/denormalizing positions · any queue/Redis/second datastore · spl
 
 *Audit only — no removals, cancellations, or disablements were performed during the audit itself. Full per-domain findings with file:line evidence live in the session's audit transcript.*
 
-**Execution status (2026-08-26):** Groups 1 and 3 were approved by the owner and implemented the same day (see the `audit remediation` commit). Group 2's telemetry checks and the trigger-based items in section F remain open. The live database still needs the migration block from that commit's notes applied (index drops/adds + the `sync_runs`/`finder_scans` tables — all code tolerates their absence until then).
+**Execution status (2026-08-26):** Groups 1 and 3 were approved by the owner and implemented the same day (see the `audit remediation` commit); the owner applied the accompanying SQL migration. Group 2's remaining telemetry checks and the trigger-based items in section F stay open.
+
+### Verified since publication — three assumptions replaced by facts
+
+Checked directly against the Vercel account after the remediation deploy. Each of these **corrects** a labeled assumption above; the audit's conclusions are amended accordingly.
+
+1. **All three crons fire.** `sync` ran 2026-08-26 06:00:22Z (brokersync logged its own completion), `alerts` 13:00:47Z → **200**, `digest` Mon 2026-08-24 14:00:05Z → **200**. The HIGH finding "a cron may silently never fire" is **closed — no cron is being dropped**. What remains unverified is only whether `RESEND_API_KEY` is set (the routes 200 either way, since `sendEmail` no-ops without it).
+2. **The Vercel plan is Pro, not Hobby.** The $20/mo in the 10× cost model is therefore **already being paid today**, not a future step-change — and the "Hobby is non-commercial, upgrade before charging" HIGH finding is **moot**. Today's true stack cost is ~$20/mo, not $0. Everything else in the cost table stands.
+3. **Data scale is far larger than assumed.** The nightly broker sync reports **10 accounts, 1,941 holdings, 183 option legs** — the audit assumed "~1 user, 20–60 instruments". The sync still completes inside its 300s budget, but the "~400–800 distinct instruments" ceiling is **much nearer than modelled**. Treat the chunked-sync work in section F as the next scale item to watch, and read the first `sync_runs.duration_ms` values as the real measurement (the audit could only estimate).
+
+The end-to-end proof of the migration is the next nightly sync (06:00Z) writing the first `sync_runs` row with a real duration and provider-call count.
