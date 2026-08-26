@@ -16,6 +16,7 @@ import {
   IMPORT_MAX_SYMBOLS,
 } from "@/lib/import/csv";
 import type { ImportResult } from "@/lib/import/types";
+import { isValidYmd } from "@/lib/date";
 
 // Local date as YYYY-MM-DD — used for explicit executed_at and stable dedupe keys.
 function todayIso(): string {
@@ -35,8 +36,11 @@ export async function ensurePortfolio() {
     .from("portfolios").select("*").eq("user_id", user.id).order("created_at").limit(1);
   if (existing && existing.length) return existing[0];
 
-  const { data: created } = await supabase
+  const { data: created, error } = await supabase
     .from("portfolios").insert({ user_id: user.id, name: "My Portfolio" }).select().single();
+  // A transient insert failure must not return undefined — callers immediately read .id /
+  // .base_currency. Throw so the error boundary shows a calm retry instead of a null-deref crash.
+  if (error || !created) throw new Error("We couldn't set up your portfolio just now. Please try again.");
   return created;
 }
 
@@ -54,6 +58,8 @@ export async function addTransaction(formData: FormData) {
   if (!symbol || quantity <= 0) return;
   // Reject malformed tickers before they create junk reference rows / provider calls.
   if (!isValidSymbol(symbol) || !isValidExchange(exchange)) return;
+  // A supplied date must be a real calendar date (empty is fine — we default to today).
+  if (executed_at && !isValidYmd(executed_at)) return;
 
   const portfolio = await ensurePortfolio();
 
@@ -192,6 +198,11 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
     executed_at: string; note: string | null; dedupe_key: string;
   }[] = [];
 
+  // Two genuinely-identical fills with no broker ref (same symbol/qty/price/day/fees) share one
+  // natural dedupe key and would collapse into a single row, under-counting shares. Disambiguate
+  // repeats WITHIN this file with an occurrence suffix so distinct fills survive. Re-importing the
+  // same file reproduces the same sequence of keys, so idempotency holds (no duplicate rows).
+  const natSeen = new Map<string, number>();
   for (const r of rows) {
     const inst = instByKey.get(`${r.symbol}|${r.exchange}`);
     if (!inst) {
@@ -199,6 +210,15 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
       continue;
     }
     const executed_at = r.executed_at || today;
+    let dedupe_key = transactionDedupeKey({
+      ref: r.ref, type: r.type, instrument_id: inst.id,
+      executed_at, quantity: r.quantity, price: r.price, fees: r.fees,
+    });
+    if (dedupe_key.startsWith("nat:")) {
+      const n = natSeen.get(dedupe_key) ?? 0;
+      natSeen.set(dedupe_key, n + 1);
+      if (n > 0) dedupe_key = `${dedupe_key}#${n}`; // 2nd+ identical no-ref fill in this file
+    }
     toInsert.push({
       portfolio_id: portfolio.id,
       instrument_id: inst.id,
@@ -209,10 +229,7 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
       currency: r.currency || inst.currency || "USD",
       executed_at,
       note: r.note,
-      dedupe_key: transactionDedupeKey({
-        ref: r.ref, type: r.type, instrument_id: inst.id,
-        executed_at, quantity: r.quantity, price: r.price, fees: r.fees,
-      }),
+      dedupe_key,
     });
   }
 

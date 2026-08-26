@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../../actions";
+import DashboardNav from "@/components/DashboardNav";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import { optionActionLabel } from "@/lib/options";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
@@ -123,22 +124,22 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-800">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+      <DashboardNav active="overview" />
+
+      <div className="mx-auto max-w-5xl px-6 py-8">
+        <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-lg font-semibold">{instrument.name && instrument.name !== instrument.symbol ? instrument.name : instrument.symbol}</span>
+              <span className="font-display text-2xl font-medium tracking-tight text-slate-900">{instrument.name && instrument.name !== instrument.symbol ? instrument.name : instrument.symbol}</span>
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
                 {instrument.exchange} · {instrument.symbol}
               </span>
             </div>
-            {instrument.sector && <div className="text-xs text-slate-400">{instrument.sector}{instrument.country_iso ? ` · ${instrument.country_iso}` : ""}</div>}
+            {instrument.sector && <div className="mt-0.5 text-xs text-slate-400">{instrument.sector}{instrument.country_iso ? ` · ${instrument.country_iso}` : ""}</div>}
           </div>
-          <Link href="/dashboard" className="text-sm text-indigo-600 hover:underline">← Back to dashboard</Link>
+          <Link href="/dashboard" className="shrink-0 text-sm text-indigo-600 hover:underline">← Back to dashboard</Link>
         </div>
-      </header>
 
-      <div className="mx-auto max-w-5xl px-6 py-8">
         {/* Position snapshot */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Card label="Shares" value={heldNow ? num(shares, 4) : "0 (closed)"} />

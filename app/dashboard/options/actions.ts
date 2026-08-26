@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getQuote } from "@/lib/marketdata";
 import { getCachedRates } from "@/lib/fx";
 import { ensurePortfolio } from "../actions";
+import { isValidYmd } from "@/lib/date";
 import { computeOption, type OptionPositionRow } from "@/lib/options";
 import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell } from "@/lib/email";
@@ -126,6 +127,8 @@ export async function addOptionTransaction(formData: FormData) {
 
   const validActions = ["sell_to_open", "buy_to_close", "expired", "assigned", "rolled"];
   if (!symbol || !strike || !expiration || !validActions.includes(action)) return;
+  // Dates hit NOT NULL columns — reject a malformed expiration/trade_date cleanly instead of 500ing.
+  if (!isValidYmd(expiration) || !isValidYmd(trade_date)) return;
   // Validate the ticker/exchange before any service-role write into the shared `instruments` table,
   // so a malformed underlying can't create junk reference rows (matches addTransaction / CSV import).
   if (!isValidSymbol(symbol) || !isValidExchange(exchange)) return;

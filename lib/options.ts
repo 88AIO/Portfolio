@@ -72,7 +72,9 @@ export function computeOption(row: OptionPositionRow): ComputedOption {
     px && px > 0 ? ((px - row.strike) / px) * 100 : null;
 
   const annualizedRoC =
-    isOpen && collateral > 0 && row.premium_net > 0
+    // Only annualize a position that still has time left. A stale ledger leg past its expiration
+    // (isOpen but dte <= 0) would otherwise divide 365 by a floor and print an absurd RoC (e.g. 365×).
+    isOpen && row.dte > 0 && collateral > 0 && row.premium_net > 0
       ? (row.premium_net / collateral) * (365 / Math.max(row.dte, MS)) * 100 // as a percent
       : null;
 

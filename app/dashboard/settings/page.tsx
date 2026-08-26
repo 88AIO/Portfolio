@@ -1,7 +1,6 @@
-import Link from "next/link";
-import BrandMark from "@/components/BrandMark";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio, signOut } from "../actions";
+import DashboardNav from "@/components/DashboardNav";
 import DeleteAccountButton from "@/components/DeleteAccountButton";
 
 export const dynamic = "force-dynamic";
@@ -13,17 +12,7 @@ export default async function SettingsPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-800">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <BrandMark className="h-7 w-7" />
-            <span className="text-lg font-semibold">Settings</span>
-          </div>
-          <Link href="/dashboard" className="text-sm text-indigo-600 hover:underline">
-            ← Back to dashboard
-          </Link>
-        </div>
-      </header>
+      <DashboardNav active="settings" email={user?.email} />
 
       <div className="mx-auto max-w-3xl space-y-6 px-6 py-8">
         <div className="mb-1">

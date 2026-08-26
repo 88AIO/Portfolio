@@ -47,8 +47,15 @@ export default function LoginPage() {
     const supabase = createClient();
     if (mode === "signup") {
       const { data, error } = await supabase.auth.signUp({ email, password });
-      if (error) setMsg(error.message);
-      else if (data.session) {
+      if (error) {
+        // Don't leak whether an email is already registered (account enumeration). Surface a
+        // generic, actionable message for the common "already registered" case; show real errors
+        // (e.g. weak password) that the user genuinely needs to act on.
+        const msg = /registered|already|exists/i.test(error.message)
+          ? "If that email is new, check your inbox to confirm. If you already have an account, sign in instead."
+          : error.message;
+        setMsg(msg);
+      } else if (data.session) {
         // Confirmation is off: they're signed in already, so glide straight into the app.
         router.push("/dashboard");
         router.refresh();
