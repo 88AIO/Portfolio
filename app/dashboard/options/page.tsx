@@ -9,10 +9,12 @@ import {
   computeOption,
   computeOptionTotals,
   statusLabel,
+  optionActionLabel,
   type OptionPositionRow,
   type ComputedOption,
   type AttentionItem,
 } from "@/lib/options";
+import DeleteActivityButton from "@/components/DeleteActivityButton";
 import { computeWheels, type WheelPosition, type WheelRow, type WheelEvent } from "@/lib/options/wheel";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
 import AddOptionForm from "@/components/AddOptionForm";
@@ -53,6 +55,7 @@ type LedgerRow = {
 
 // Raw option-transaction leg joined to its underlying symbol, for the per-ticker wheel history.
 type OptTxnRow = {
+  id: string;
   action: string;
   option_type: string;
   strike: number;
@@ -95,7 +98,7 @@ export default async function OptionsPage() {
     fetchAll<OptTxnRow>((from, to) =>
       supabase
         .from("option_transactions")
-        .select("action, option_type, strike, expiration, contracts, premium, fee, currency, trade_date, instruments(symbol)")
+        .select("id, action, option_type, strike, expiration, contracts, premium, fee, currency, trade_date, instruments(symbol)")
         .order("trade_date", { ascending: true })
         .order("id", { ascending: true })
         .range(from, to),
@@ -293,6 +296,10 @@ export default async function OptionsPage() {
   const closed = computed
     .filter((o) => !o.isOpen)
     .sort((a, b) => b.last_action_at.localeCompare(a.last_action_at));
+
+  // Raw per-leg trade log (newest first) — the deletable source of truth behind the aggregated
+  // tables above. Removing a leg here updates every derived view (force-dynamic re-render).
+  const tradeLog = [...optTxns].sort((a, b) => b.trade_date.localeCompare(a.trade_date));
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
@@ -520,6 +527,55 @@ export default async function OptionsPage() {
               Return per year is a rough yardstick (total earned ÷ cash tied up, scaled to a year), for
               tracking, not a projection.
             </p>
+          </section>
+        )}
+
+        {tradeLog.length > 0 && (
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+            <h2 className="text-base font-semibold">Trade log</h2>
+            <p className="mb-4 text-xs text-slate-400">
+              Every option leg you&apos;ve logged, newest first. Delete one to remove it everywhere — the
+              positions, wheel, and premium totals above all update to match.
+            </p>
+            <div className="max-h-96 overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white text-left text-xs uppercase text-slate-400">
+                  <tr>
+                    <th className="pb-2 pr-2">Date</th>
+                    <th className="px-2 pb-2">Trade</th>
+                    <th className="px-2 pb-2 text-right">Contracts</th>
+                    <th className="px-2 pb-2 text-right">Net</th>
+                    <th className="pb-2 pl-2 text-right">Remove</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tradeLog.map((o) => {
+                    const sym = relSymbol(o.instruments);
+                    const net = legPrem(o);
+                    return (
+                      <tr key={o.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                        <td className="whitespace-nowrap py-2.5 pr-2 text-slate-500">{o.trade_date}</td>
+                        <td className="px-2 py-2.5">
+                          <div className="font-medium text-slate-800">
+                            {sym} {money(o.strike, o.currency)} {o.option_type === "put" ? "Put" : "Call"}
+                          </div>
+                          <div className="text-xs text-slate-400">{optionActionLabel(o.action)} · exp {o.expiration}</div>
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{o.contracts}</td>
+                        <td className={`whitespace-nowrap px-2 py-2.5 text-right tabular-nums font-medium ${net >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                          {money(net, o.currency)}
+                        </td>
+                        <td className="py-2.5 pl-2 text-right">
+                          <div className="flex justify-end">
+                            <DeleteActivityButton id={o.id} instrumentId="" source="option" />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
       </div>
