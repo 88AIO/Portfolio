@@ -73,6 +73,7 @@ LATER — advanced analytics (opt-in), corporate actions, rebalancing, US tax re
 - SPEC_options-selling.md ........ the options-selling PRD (O1/O2/O3)
 - INCIDENT_RESPONSE.md ........... breach/incident one-pager (severity, containment by stack, notification clocks)
 - LAUNCH_RISK_REVIEW.md .......... B2C pre-launch risk review (verified anchors, gated launch decision, MVL stack) — issue-spotting, not legal advice
+- EFFICIENCY_AUDIT.md ............ efficiency/cost/sustainability audit (scorecard, cost model, removal candidates w/ approval gates, scale triggers)
 
 ## Setup
 See `README.md` for Supabase + EODHD + Vercel setup and env vars.
