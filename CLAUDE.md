@@ -28,13 +28,14 @@ A calm **portfolio tracker for performance + income** (dividends **+** option pr
 Next.js 16 (App Router) · TypeScript · Supabase (Postgres + Auth) · Tailwind · Recharts · market data via the `lib/marketdata` **provider port** (Yahoo free default → EODHD to scale). Deploy on Vercel. One language end-to-end.
 
 ## Market data
-Behind the `lib/marketdata` provider port. Default provider = `yahoo` (free, US incl. options) for personal/dev; switch to `eodhd` via env `MARKET_DATA_PROVIDER` to scale. App reads cached DB tables; only the nightly sync calls a provider. See `docs/MARKET_DATA_ADAPTER.md` and `docs/COST_MODEL.md`.
+Behind the `lib/marketdata` provider port (**done** — `lib/marketdata/index.ts` + `providers/{yahoo,eodhd}.ts`). Default provider = `yahoo` (free, US incl. options) for personal/dev; switch to `eodhd` via env `MARKET_DATA_PROVIDER` to scale. **Caveat:** the eodhd provider implements quotes/FX/search only — dividends, price history, and option chains are Yahoo-only today; complete it before switching production. App reads cached DB tables; only the nightly sync calls a provider. (MARKET_DATA_ADAPTER / COST_MODEL docs were authored in Cowork and are not in this repo — see the docs index note below; `docs/EFFICIENCY_AUDIT.md` carries the current cost model.)
 
 ## What already exists (current state)
-- Auth (email/password + OAuth-ready), session handling in `proxy.ts`.
-- `supabase/schema.sql` — v2, modeled on the blueprint: `profiles, portfolios (full config), categories, instruments (reference+fundamentals+div), transactions, price_cache, dividends`, plus `positions` and `portfolio_totals` views that compute Snowball-style fields.
-- Dashboard: summary cards (market value, cost, P/L, day P/L, est. annual dividends + yield), holdings table with per-holding yield, allocation donut. Multi-currency totals via server FX.
-- `lib/marketdata.ts` — currently calls EODHD directly for quotes, FX, instrument search (to be refactored behind the provider port described above, with Yahoo as the free default). `app/dashboard/actions.ts` — add transaction, refresh prices.
+- Auth (email/password + OAuth-ready), session handling in `proxy.ts`; password reset; self-serve account deletion.
+- `supabase/schema.sql` — v2, modeled on the blueprint: `profiles, portfolios (full config), categories, instruments, transactions, option_transactions, cash_ledger, price_cache, price_history, dividends, fx_rates, iv_history, sync_runs, finder_scans`, plus `positions`/`portfolio_totals`/`option_positions` computed views. RLS throughout; live-vs-reserved columns annotated in the file.
+- Full dashboard suite: overview, performance (with SPY benchmark), dividends, options cockpit + wheel + put finder, tax (FIFO realized gains), cash, broker sync (owner-only), settings. Marketing site + blog/changelog + legal pages.
+- Three Vercel crons (`vercel.json`): nightly market-data sync, daily alerts, weekly digest — each records its run into `sync_runs`.
+- Tests: `npm test` (offline money-math), `npm run test:rls` (cross-tenant isolation; runs in CI when secrets are set).
 - Verified: `npm run build`, `tsc`, and `eslint` all pass.
 
 ## Roadmap (wedge-first — see `docs/ROADMAP_v2_wedge-first.md`)
@@ -62,18 +63,16 @@ LATER — advanced analytics (opt-in), corporate actions, rebalancing, US tax re
 - When you hit an unknown in Snowball's behavior (an endpoint shape, a screen's data), that capture happens in **Cowork** (browser + logged-in session), not here — ask the owner to run it there and drop the result into `docs/`.
 
 ## Strategy & capture docs (docs/)
-- API_*.md ............... reverse-engineered Snowball endpoints (main-stats, growth/benchmark, dividend calendar, backtest/rebalancing/screener, dividend-safety rating)
-- MARKET_DATA_ADAPTER.md . provider port (free Yahoo now, EODHD later, one env switch)
-- COST_MODEL.md .......... run costs (solo ~$0 on free data; commercial tiers)
-- COMPETITIVE_BRIEF.md ... rivals + where we win (the empty seat)
-- PRODUCT_NOTES_user-feedback.md . calm-by-default + no-duplicates principles
-- POSITIONING_where-we-win.md .... one-page positioning
-- ROADMAP_v2_wedge-first.md ...... build order
-- FEATURES_borrowed-best.md ...... features to steal from rivals (alerts, income goal, attribution, Income Health digest…)
+In this repo:
+- API_BLUEPRINT.md ............... reverse-engineered Snowball API/data model (the target model above)
 - SPEC_options-selling.md ........ the options-selling PRD (O1/O2/O3)
+- SPEC_broker-sync.md ............ broker auto-sync spec (SnapTrade, per-user flow design)
+- SPEC_broker-sync-etrade-options.md . E*Trade options-import capture notes
 - INCIDENT_RESPONSE.md ........... breach/incident one-pager (severity, containment by stack, notification clocks)
 - LAUNCH_RISK_REVIEW.md .......... B2C pre-launch risk review (verified anchors, gated launch decision, MVL stack) — issue-spotting, not legal advice
 - EFFICIENCY_AUDIT.md ............ efficiency/cost/sustainability audit (scorecard, cost model, removal candidates w/ approval gates, scale triggers)
+
+Authored in Cowork, **not in this repo** (don't search for them here — ask the owner to export if needed): MARKET_DATA_ADAPTER.md, COST_MODEL.md, ROADMAP_v2_wedge-first.md, COMPETITIVE_BRIEF.md, POSITIONING_where-we-win.md, FEATURES_borrowed-best.md, PRODUCT_NOTES_user-feedback.md, and the other per-endpoint API_*.md captures. The roadmap summary above and EFFICIENCY_AUDIT.md's cost model are the in-repo stand-ins.
 
 ## Setup
 See `README.md` for Supabase + EODHD + Vercel setup and env vars.

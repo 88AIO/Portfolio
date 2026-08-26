@@ -5,7 +5,7 @@ import { ensurePortfolio } from "../../actions";
 import DashboardNav from "@/components/DashboardNav";
 import DeleteActivityButton from "@/components/DeleteActivityButton";
 import { money, pct, num, timeAgo } from "@/lib/format";
-import { optionActionLabel } from "@/lib/options";
+import { optionActionLabel, legPremium } from "@/lib/options";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
 
 export const dynamic = "force-dynamic";
@@ -25,15 +25,6 @@ type OptTx = {
   expiration: string; contracts: number; premium: number; fee: number; currency: string;
   trade_date: string; note: string | null;
 };
-
-// Signed premium cash for one option leg (credit on open, debit on close/roll; fees always a cost).
-function legPremium(o: OptTx): number {
-  const gross = (o.premium ?? 0) * (o.contracts ?? 0) * 100;
-  const fee = o.fee ?? 0;
-  if (o.action === "sell_to_open") return gross - fee;
-  if (o.action === "buy_to_close" || o.action === "rolled") return -gross - fee;
-  return -fee;
-}
 
 type TimelineItem = {
   id: string;                    // the underlying row id, for delete

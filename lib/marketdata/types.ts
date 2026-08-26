@@ -1,6 +1,6 @@
 // Market-data provider port — shared types.
 // Every data vendor (Yahoo, EODHD, …) implements MarketDataProvider so the rest of the
-// app depends on this interface, never on a specific vendor. See docs/MARKET_DATA_ADAPTER.md.
+// app depends on this interface, never on a specific vendor.
 
 export type Quote = {
   price: number | null;

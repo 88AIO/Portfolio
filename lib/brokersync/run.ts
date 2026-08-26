@@ -8,6 +8,7 @@ import { getBrokerProvider } from "@/lib/brokersync";
 import type { BrokerAccount, BrokerPosition, BrokerOptionLeg, BrokerEquityTxn } from "@/lib/brokersync";
 import { enrichInstrumentProfile } from "@/lib/enrich";
 import { snapshotPortfolioValues } from "@/lib/snapshots";
+import { todayIso } from "@/lib/date";
 
 export type BrokerSyncResult = {
   ok: boolean;
@@ -17,13 +18,6 @@ export type BrokerSyncResult = {
   options?: number;
   debug?: string; // per-account option diagnostics (activities scanned / options found / errors)
 };
-
-function todayIso(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
 
 async function resolveInstrument(
   admin: ReturnType<typeof createAdminClient>,

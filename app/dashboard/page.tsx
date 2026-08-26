@@ -7,7 +7,7 @@ import { getCachedRates } from "@/lib/fx";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import AddHoldingForm from "@/components/AddHoldingForm";
-import AllocationChart from "@/components/AllocationChart";
+import { AllocationChart } from "@/components/charts";
 import ImportTransactionsForm from "@/components/ImportTransactionsForm";
 import SubmitButton from "@/components/SubmitButton";
 import FirstRun from "@/components/FirstRun";
@@ -49,27 +49,25 @@ export default async function Dashboard({
   const portfolio = await ensurePortfolio();
   const canBrokerSync = isBrokerSyncOwner(user?.email); // per-user brokerage connect isn't available yet
 
-  // Consolidate across ALL of the user's portfolios (default + broker-synced).
-  // RLS on the positions view scopes this to the signed-in user automatically.
-  const { data: positions } = await supabase.from("positions").select("*").order("symbol");
+  // The four reads below are independent — fetch them together instead of serially (this is the
+  // most-visited page; each awaited round trip adds latency). RLS scopes every one to the user.
+  const [{ data: positions }, { data: optRows }, { data: pfList }, { data: brokerAccts }] =
+    await Promise.all([
+      // Consolidate across ALL of the user's portfolios (default + broker-synced).
+      supabase.from("positions").select("*").order("symbol"),
+      // Net option premium across every leg (including options on underlyings not currently held),
+      // for the income picture. This is the ONLY place premium enters the totals now — it is no
+      // longer folded into equity cost basis, so it is counted exactly once.
+      supabase.from("option_positions").select("premium_net, currency"),
+      // Portfolio names, for grouping holdings by account.
+      supabase.from("portfolios").select("id, name"),
+      // Uninvested cash sitting in each connected brokerage account (from the broker sync).
+      supabase.from("broker_accounts").select("portfolio_id, cash_balance, currency"),
+    ]);
   const rows = (positions ?? []) as Position[];
-
-  // Net option premium across every leg (including options on underlyings not currently held),
-  // for the income picture. This is the ONLY place premium enters the totals now — it is no longer
-  // folded into equity cost basis, so it is counted exactly once.
-  const { data: optRows } = await supabase
-    .from("option_positions")
-    .select("premium_net, currency");
-
-  // Portfolio names, for grouping holdings by account.
-  const { data: pfList } = await supabase.from("portfolios").select("id, name");
   const pfName = new Map<string, string>(
     (pfList ?? []).map((p: { id: string; name: string }) => [p.id, p.name] as [string, string])
   );
-
-  // Uninvested cash sitting in each connected brokerage account (from the broker sync).
-  const { data: brokerAccts } = await supabase
-    .from("broker_accounts").select("portfolio_id, cash_balance, currency");
 
   // Convert every position into the base currency before summing (mixed US + intl total correctly).
   const base = portfolio.base_currency || "USD";

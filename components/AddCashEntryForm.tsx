@@ -8,6 +8,7 @@ type PortfolioOpt = { id: string; name: string };
 export default function AddCashEntryForm({ portfolios }: { portfolios: PortfolioOpt[] }) {
   const ref = useRef<HTMLFormElement>(null);
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const input = "w-full rounded-lg border border-slate-300 px-2 py-1.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200";
 
   return (
@@ -15,9 +16,15 @@ export default function AddCashEntryForm({ portfolios }: { portfolios: Portfolio
       ref={ref}
       action={async (fd) => {
         setPending(true);
-        await addCashEntry(fd);
-        ref.current?.reset();
-        setPending(false);
+        setError(null);
+        try {
+          await addCashEntry(fd);
+          ref.current?.reset();
+        } catch {
+          setError("Couldn't add that entry. Check the amount and date, then try again.");
+        } finally {
+          setPending(false);
+        }
       }}
       className="space-y-2 text-sm"
     >
@@ -41,6 +48,7 @@ export default function AddCashEntryForm({ portfolios }: { portfolios: Portfolio
       <button disabled={pending} className="w-full rounded-lg bg-indigo-600 py-2 font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
         {pending ? "Adding…" : "Add ledger entry"}
       </button>
+      {error && <p className="text-xs text-rose-600">{error}</p>}
     </form>
   );
 }

@@ -13,6 +13,9 @@ import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { snapshotPortfolioValues } from "@/lib/snapshots";
 import { syncFxRates } from "@/lib/fx";
 import { fetchAll } from "@/lib/supabase/paginate";
+import { takeProviderCallCount } from "@/lib/marketdata";
+import { recordSyncRun } from "@/lib/cron";
+import { sendEmail, emailShell } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -43,21 +46,30 @@ function authorized(request: Request): boolean {
 export async function GET(request: Request) {
   if (!authorized(request)) return new Response("Unauthorized", { status: 401 });
 
+  const startedAt = Date.now();
+  takeProviderCallCount(); // reset the counter so the summary reflects only this run
   const admin = createAdminClient();
 
   // --- Brokerage auto-sync (runs first, so newly-synced holdings get priced in the same run) ---
-  // Pull each owner's connected brokerages so options/holdings self-update nightly with no clicks.
-  // Gated to BROKER_SYNC_OWNER_EMAILS — the personal SnapTrade key only reads the owner's accounts,
-  // so we must only ever sync into an owner's own portfolios. Failures here never abort the run.
+  // Candidates are the users with a broker_connections row (only the owner-gated connect flow can
+  // create one), then each is re-verified against BROKER_SYNC_OWNER_EMAILS before syncing — the
+  // personal SnapTrade key only reads the owner's accounts, so we must only ever sync into an
+  // owner's own portfolios. Deliberately NOT a bare auth.admin.listUsers() scan: its default
+  // pagination silently drops users beyond page 1 past ~50 signups, which would quietly kill the
+  // founder's own nightly sync as the user base grows. Failures here never abort the run.
   let brokerSynced = 0;
   try {
-    const { data: userList } = await admin.auth.admin.listUsers();
-    const ownerIds = (userList?.users ?? []).filter((u) => isBrokerSyncOwner(u.email)).map((u) => u.id);
-    for (const uid of ownerIds) {
+    const { data: conns } = await admin.from("broker_connections").select("user_id");
+    const candidateIds = [...new Set((conns ?? []).map((c: { user_id: string }) => c.user_id))];
+    for (const uid of candidateIds) {
+      const { data: u } = await admin.auth.admin.getUserById(uid);
+      if (!isBrokerSyncOwner(u?.user?.email)) continue;
       const res = await runBrokerSyncForUser(uid);
       if (res.ok) brokerSynced += res.options ?? 0;
     }
-  } catch { /* isolate — market-data sync still runs */ }
+  } catch (e) {
+    console.error("[cron:sync] broker sync failed:", e); // isolate — market-data sync still runs
+  }
 
   // The positions view is security_invoker; the service-role client bypasses RLS, so this returns
   // every held position across all users. Page past the ~1000-row cap — once total held rows exceed
@@ -80,6 +92,7 @@ export async function GET(request: Request) {
 
   let ok = 0;
   let failed = 0;
+  const failedSymbols: string[] = [];
   const BATCH = 6;
   for (let i = 0; i < held.length; i += BATCH) {
     await Promise.all(
@@ -102,8 +115,10 @@ export async function GET(request: Request) {
             }
           }
           ok++;
-        } catch {
+        } catch (e) {
           failed++;
+          failedSymbols.push(`${p.symbol}.${p.exchange}`);
+          console.error(`[cron:sync] ${p.symbol}.${p.exchange} failed:`, e);
         }
       })
     );
@@ -119,7 +134,7 @@ export async function GET(request: Request) {
   for (let i = 0; i < ivUniverse.length; i += BATCH) {
     await Promise.all(
       ivUniverse.slice(i, i + BATCH).map(async (sym) => {
-        try { if (await syncIvSample(admin, sym, "US")) ivOk++; } catch { /* isolate per-name */ }
+        try { if (await syncIvSample(admin, sym, "US")) ivOk++; } catch (e) { console.error(`[cron:sync] IV sample ${sym} failed:`, e); }
       })
     );
   }
@@ -128,14 +143,39 @@ export async function GET(request: Request) {
   let fxUpdated = 0;
   try {
     fxUpdated = await syncFxRates(admin);
-  } catch { /* keep prior cached rates on failure */ }
+  } catch (e) {
+    console.error("[cron:sync] FX refresh failed:", e); // keep prior cached rates on failure
+  }
 
   // Record today's value for every account (after fresh prices + FX), building the permanent
   // value-over-time history. Runs regardless of trading activity; isolated so it never aborts sync.
   let valueSnapshots = 0;
   try {
     valueSnapshots = await snapshotPortfolioValues(admin);
-  } catch { /* isolate — a snapshot failure must not fail the whole sync */ }
+  } catch (e) {
+    console.error("[cron:sync] snapshot failed:", e); // isolate — must not fail the whole sync
+  }
 
-  return Response.json({ synced: ok, failed, total: held.length, ivCaptured: ivOk, brokerOptionLegs: brokerSynced, valueSnapshots, fxUpdated });
+  const summary = {
+    synced: ok, failed, total: held.length, ivCaptured: ivOk,
+    brokerOptionLegs: brokerSynced, valueSnapshots, fxUpdated,
+    providerCalls: takeProviderCallCount(),
+  };
+  await recordSyncRun(admin, "sync", startedAt, summary, failedSymbols);
+
+  // Wake the founder when a run goes wrong: any failures, or a run that synced nothing while
+  // holdings exist (a dead provider or a mid-run timeout). Best-effort — the founder emails are the
+  // BROKER_SYNC_OWNER_EMAILS list, and sendEmail no-ops without a Resend key.
+  if (failed > 0 || (ok === 0 && held.length > 0)) {
+    const owner = (process.env.BROKER_SYNC_OWNER_EMAILS ?? "").split(",")[0]?.trim();
+    if (owner) {
+      const body =
+        `<p style="margin:0 0 10px;font-size:14px;color:#334155">Nightly sync finished with problems.</p>` +
+        `<pre style="font-size:12px;background:#f8fafc;padding:10px;border-radius:8px">${JSON.stringify(summary, null, 2)}</pre>` +
+        (failedSymbols.length ? `<p style="font-size:12px;color:#64748b">Failed: ${failedSymbols.join(", ")}</p>` : "");
+      await sendEmail(owner, `Snowfolio sync: ${failed} failure${failed === 1 ? "" : "s"}`, emailShell("Sync report", body));
+    }
+  }
+
+  return Response.json(summary);
 }

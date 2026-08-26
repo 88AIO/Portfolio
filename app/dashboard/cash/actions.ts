@@ -3,13 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
-
-function todayIso(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
+import { isValidYmd, todayIso } from "@/lib/date";
 
 // Record a manual cash movement (deposit / withdrawal / interest / fee) against an account.
 export async function addCashEntry(formData: FormData) {
@@ -23,7 +17,10 @@ export async function addCashEntry(formData: FormData) {
   const amount = Number(formData.get("amount") || 0);
   const currency = String(formData.get("currency") || "USD").trim().toUpperCase() || "USD";
   const direction = String(formData.get("direction") || "in");
-  if (!amount) return;
+  // Throw (don't silently return) on bad input so the form shows an error instead of resetting
+  // to a false success — same contract as addTransaction.
+  if (!amount || !Number.isFinite(amount)) throw new Error("Enter an amount greater than zero.");
+  if (!isValidYmd(entry_date)) throw new Error("That date isn't a valid date.");
   const signed = direction === "out" ? -Math.abs(amount) : Math.abs(amount);
 
   let portfolioId = "";
@@ -33,9 +30,10 @@ export async function addCashEntry(formData: FormData) {
   }
   if (!portfolioId) portfolioId = (await ensurePortfolio()).id;
 
-  await supabase.from("cash_ledger").insert({
+  const { error } = await supabase.from("cash_ledger").insert({
     portfolio_id: portfolioId, entry_date, description, amount: signed, currency, source: "manual",
   });
+  if (error) throw new Error("Couldn't save that entry. Please try again.");
   revalidatePath("/dashboard/cash");
 }
 

@@ -25,6 +25,11 @@ create trigger on_auth_user_created
   after insert on auth.users for each row execute function public.handle_new_user();
 
 -- 2. PORTFOLIOS (mirrors Snowball's 38-field Portfolio config) -
+-- LIVE columns today: id, user_id, name, base_currency, created_at (+ broker/sync_provider/
+-- is_auto_sync_enabled, written by broker sync). Everything else — goals, tax config, composite
+-- "pie" fields, sharing, view options — is RESERVED roadmap scaffolding mirrored from the
+-- blueprint (CLAUDE.md): deliberately kept, near-zero cost as NULL/default columns, no app reader
+-- or writer yet. Don't assume a config UI exists for them.
 create table if not exists public.portfolios (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -75,6 +80,11 @@ create table if not exists public.categories (
 );
 
 -- 4. INSTRUMENTS (shared reference + fundamentals + div info) --
+-- LIVE columns: symbol/exchange/name/currency/type (insert), sector/sector_weights/country_iso
+-- (enrichment), and the dividend-reference block from the nightly sync. The fundamentals
+-- (eps..expense_ratio), bond fields, isin/logo_url/ticker_with_exchange/div_rating/industry are
+-- RESERVED blueprint mirrors — never written, permanently NULL today. div_rating is the natural
+-- future cache slot for the safety score lib/dividends/safety.ts computes live.
 create table if not exists public.instruments (
   id uuid primary key default gen_random_uuid(),
   symbol text not null,
@@ -125,6 +135,8 @@ create table if not exists public.transactions (
 -- Backfill-safe for databases created before dedupe_key existed:
 alter table public.transactions add column if not exists dedupe_key text;
 create index if not exists tx_portfolio_idx on public.transactions(portfolio_id);
+-- The holding-detail page and delete guards filter by instrument_id (also serves the FK side).
+create index if not exists tx_instrument_idx on public.transactions(instrument_id);
 -- Idempotent imports: the same transaction never inserts twice within a portfolio.
 -- (NULL keys are distinct in Postgres, so legacy rows without a key are unaffected.)
 create unique index if not exists transactions_dedupe_uidx
@@ -147,7 +159,7 @@ create table if not exists public.price_history (
   close numeric not null,   -- in the instrument's own currency
   primary key (instrument_id, d)
 );
-create index if not exists price_history_inst_idx on public.price_history(instrument_id, d);
+-- Lookups by (instrument_id, d) are served by the primary key; no extra index needed.
 
 -- 7. DIVIDENDS (history + upcoming) --------------------------
 create table if not exists public.dividends (
@@ -184,6 +196,7 @@ create table if not exists public.option_transactions (
   created_at timestamptz not null default now()
 );
 create index if not exists opt_tx_portfolio_idx on public.option_transactions(portfolio_id);
+create index if not exists opt_tx_instrument_idx on public.option_transactions(instrument_id);
 create unique index if not exists option_transactions_dedupe_uidx
   on public.option_transactions(portfolio_id, dedupe_key);
 
@@ -191,8 +204,11 @@ create unique index if not exists option_transactions_dedupe_uidx
 -- POSITIONS view — computes Snowball-style holding fields
 -- from transactions. Column names kept backward-compatible
 -- (shares, avg_cost, last_price, day_change_pct) and extended.
--- Net option premium collected on an underlying REDUCES its
--- effective cost basis (the options-seller's real P/L).
+-- Net option premium is exposed as its own option_premium column
+-- and deliberately NOT folded into avg_cost/cost_basis/gain_value
+-- (see the note on option_premium below — folding it in
+-- double-counted the same dollars). The "premium lowers my cost"
+-- framing lives only in the holding-detail display math.
 -- ============================================================
 drop view if exists public.positions cascade;
 create view public.positions with (security_invoker = on) as
@@ -200,6 +216,7 @@ with opt as (
   -- Net premium kept per underlying: credits (sell_to_open) minus debits (buy_to_close/rolled),
   -- fees always a cost. Premium is signed by action here — the raw `premium` column is entered
   -- as a positive per-share number regardless of direction.
+  -- Mirrors legPremium() in lib/options.ts — change both together.
   select portfolio_id, instrument_id, sum(
     case when action = 'sell_to_open' then premium*contracts*100 - fee
          when action in ('buy_to_close','rolled') then -(premium*contracts*100) - fee
@@ -269,6 +286,9 @@ left join opt o on o.portfolio_id = a.portfolio_id and o.instrument_id = a.instr
 where abs(a.shares) > 1e-9;
 
 -- PORTFOLIO TOTALS view --------------------------------------
+-- Blueprint mirror consumed only by the CI RLS-isolation test (tests/rls.test.mjs). The app
+-- computes totals in TypeScript with per-currency FX (app/dashboard/page.tsx) — this view sums
+-- mixed currencies naively, so NEVER wire it into the UI without adding FX conversion first.
 drop view if exists public.portfolio_totals;
 create view public.portfolio_totals with (security_invoker = on) as
 select
@@ -299,6 +319,7 @@ with legs as (
              else 0 end)                                            as net_contracts,
     sum(case when ot.action='sell_to_open' then ot.contracts else 0 end) as sold_contracts,
     -- Signed premium: credit on open, debit on close/roll, fees always a cost.
+    -- Mirrors legPremium() in lib/options.ts — change both together.
     sum(case when ot.action='sell_to_open' then ot.premium*ot.contracts*100 - ot.fee
              when ot.action in ('buy_to_close','rolled') then -(ot.premium*ot.contracts*100) - ot.fee
              else -ot.fee end)                                     as premium_net,
@@ -526,8 +547,41 @@ create table if not exists public.iv_history (
   created_at timestamptz not null default now(),
   primary key (symbol, exchange, captured_on)
 );
-create index if not exists iv_history_symbol_idx on public.iv_history(symbol, exchange, captured_on desc);
+-- Reads filter (symbol, exchange, captured_on >= window) — fully served by the primary key.
 
 alter table public.iv_history enable row level security;
 drop policy if exists "read iv_history" on public.iv_history;
 create policy "read iv_history" on public.iv_history for select using (auth.role() = 'authenticated');
+
+-- ============================================================
+-- 12. SYNC RUNS — one row per cron invocation (observability)
+-- ============================================================
+-- The crons already build rich JSON summaries that Vercel discards; this records them so a dead
+-- cron, a partial sync, or provider throttling is visible the next morning instead of never.
+-- Service-role only (RLS on, no client policies). App code writes best-effort: a missing table
+-- (migration not applied yet) must never fail a cron run.
+create table if not exists public.sync_runs (
+  id uuid primary key default gen_random_uuid(),
+  job text not null,               -- sync | alerts | digest | backfill
+  started_at timestamptz not null,
+  duration_ms int,
+  summary jsonb,                   -- the route's own JSON result, incl. provider-call counts
+  failed_symbols text[],           -- which instruments errored (empty = clean run)
+  created_at timestamptz not null default now()
+);
+create index if not exists sync_runs_job_idx on public.sync_runs(job, created_at desc);
+alter table public.sync_runs enable row level security;
+
+-- ============================================================
+-- 13. FINDER SCANS — shared put-finder result cache
+-- ============================================================
+-- One row per (scan-parameter) key with the full FinderResult JSON. Scans are informational, not
+-- live trading data, so a short TTL (enforced in code, ~10 min) is acceptable — and it bounds the
+-- provider fan-out to ~one full scan per TTL globally instead of per user per click.
+-- Service-role only (RLS on, no client policies); reads/writes are best-effort in code.
+create table if not exists public.finder_scans (
+  scan_key text primary key,       -- hash of (targetDte, otmPct, universe)
+  result jsonb not null,
+  created_at timestamptz not null default now()
+);
+alter table public.finder_scans enable row level security;

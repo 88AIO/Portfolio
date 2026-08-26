@@ -30,6 +30,24 @@ export type OptionStatus =
   | "expired"
   | "closed";
 
+// Signed premium cash for one raw option leg — THE single source of truth for the sign convention:
+// credit on sell_to_open, debit on buy_to_close/rolled, fees always a cost (expired/assigned move
+// no premium, only their fee). The SQL views mirror this exactly (supabase/schema.sql: positions
+// `opt` CTE and option_positions `premium_net`) — change BOTH places or income totals will disagree
+// across pages. Covered by tests/options.test.mjs.
+export function legPremium(o: {
+  action: string;
+  premium: number | null;
+  contracts: number | null;
+  fee: number | null;
+}): number {
+  const gross = (o.premium ?? 0) * (o.contracts ?? 0) * 100;
+  const fee = o.fee ?? 0;
+  if (o.action === "sell_to_open") return gross - fee;
+  if (o.action === "buy_to_close" || o.action === "rolled") return -gross - fee;
+  return -fee;
+}
+
 export type ComputedOption = OptionPositionRow & {
   isOpen: boolean;
   contracts: number; // open contracts (abs of net when open)

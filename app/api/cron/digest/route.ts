@@ -1,9 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCachedRates } from "@/lib/fx";
-import { computeOption, type OptionPositionRow } from "@/lib/options";
+import { computeOption, legPremium, type OptionPositionRow } from "@/lib/options";
 import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell } from "@/lib/email";
 import { fetchAll } from "@/lib/supabase/paginate";
+import { recordSyncRun, listAllUserEmails } from "@/lib/cron";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -13,14 +14,6 @@ export const maxDuration = 60;
 
 type OptTx = { portfolio_id: string; action: string; premium: number; contracts: number; fee: number; currency: string; trade_date: string };
 type DivTx = { portfolio_id: string; quantity: number; price: number; currency: string; executed_at: string };
-
-function legPremium(o: OptTx): number {
-  const gross = (o.premium ?? 0) * (o.contracts ?? 0) * 100;
-  const fee = o.fee ?? 0;
-  if (o.action === "sell_to_open") return gross - fee;
-  if (o.action === "buy_to_close" || o.action === "rolled") return -gross - fee;
-  return -fee;
-}
 
 function authorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET;
@@ -35,6 +28,7 @@ function push<T>(m: Map<string, T[]>, k: string, v: T) {
 
 export async function GET(request: Request) {
   if (!authorized(request)) return new Response("Unauthorized", { status: 401 });
+  const startedAt = Date.now();
   const admin = createAdminClient();
   const today = new Date().toISOString().slice(0, 10);
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
@@ -85,6 +79,26 @@ export async function GET(request: Request) {
   }
 
   let emailed = 0;
+  // Hoisted out of the per-user loop: one email map (paginated — a bare getUserById-per-user or
+  // unpaginated listUsers silently breaks past ~50 users) and one FX read per base currency
+  // (fx_rates is a global table; re-reading it per user was N identical round trips).
+  const emailById = await listAllUserEmails(admin);
+  const allCurrencies = [
+    ...optTxData.map((o) => o.currency),
+    ...divTxData.map((d) => d.currency),
+    ...posData.map((p) => p.currency),
+  ];
+  const ratesByBase = new Map<string, Record<string, number>>();
+  for (const b of new Set(baseByUser.values())) {
+    ratesByBase.set(b, await getCachedRates(admin, allCurrencies, b));
+  }
+
+  // One digest per user per ISO week: a manual re-fire or platform retry must not double-send.
+  // Uses the same sent_notifications dedupe log the alerts cron writes.
+  const weekKey = `digest:${today.slice(0, 4)}-W${Math.ceil(
+    ((Date.parse(today) - Date.parse(`${today.slice(0, 4)}-01-01`)) / 86400000 + 1) / 7,
+  )}`;
+
   for (const uid of enabled) {
     const base = baseByUser.get(uid) || "USD";
     const optTx = optTxByUser.get(uid) ?? [];
@@ -92,8 +106,7 @@ export async function GET(request: Request) {
     const positions = posByUser.get(uid) ?? [];
     const options = (optPosByUser.get(uid) ?? []).map(computeOption);
 
-    const currencies = [...optTx.map((o) => o.currency), ...divTx.map((d) => d.currency), ...positions.map((p) => p.currency)];
-    const rates = await getCachedRates(admin, currencies, base);
+    const rates = ratesByBase.get(base) ?? {};
     const fx = (c: string) => rates[c] ?? 1;
 
     const premiumWeek = optTx.reduce((s, o) => s + legPremium(o) * fx(o.currency), 0);
@@ -115,13 +128,25 @@ export async function GET(request: Request) {
     if (premiumWeek === 0 && dividendsWeek === 0 && upcomingExDiv.length === 0 && expiringOptions.length === 0) continue;
 
     const digest: DigestData = { premiumWeek, dividendsWeek, totalWeek: premiumWeek + dividendsWeek, upcomingExDiv, expiringOptions, base };
-    const { data: userRes } = await admin.auth.admin.getUserById(uid);
-    const email = userRes.user?.email;
+    const email = emailById.get(uid);
     if (!email) continue;
 
+    // Skip anyone already sent this week's digest (re-fire / retry safety).
+    const { data: already } = await admin
+      .from("sent_notifications").select("dedupe_key").eq("user_id", uid).eq("dedupe_key", weekKey).maybeSingle();
+    if (already) continue;
+
     const res = await sendEmail(email, "Your weekly income — Snowfolio", emailShell("This week's income", digestEmailHtml(digest)));
-    if (res.sent) emailed++;
+    if (res.sent) {
+      emailed++;
+      await admin.from("sent_notifications").upsert(
+        [{ user_id: uid, dedupe_key: weekKey }],
+        { onConflict: "user_id,dedupe_key", ignoreDuplicates: true }
+      );
+    }
   }
 
-  return Response.json({ emailed, users: enabled.size });
+  const summary = { emailed, users: enabled.size };
+  await recordSyncRun(admin, "digest", startedAt, summary);
+  return Response.json(summary);
 }

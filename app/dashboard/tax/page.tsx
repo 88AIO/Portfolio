@@ -12,6 +12,7 @@ import {
   realizedYears,
   type LedgerTx,
 } from "@/lib/tax/realized";
+import { legPremium } from "@/lib/options";
 
 export const dynamic = "force-dynamic";
 
@@ -37,15 +38,6 @@ type OptRow = {
 function symbolOf(rel: TxRow["instruments"]): string | null {
   if (!rel) return null;
   return Array.isArray(rel) ? rel[0]?.symbol ?? null : rel.symbol;
-}
-
-// Signed premium cash for one option leg (credit on open, debit on close/roll; fees always a cost).
-function legPremium(o: OptRow): number {
-  const gross = (o.premium ?? 0) * (o.contracts ?? 0) * 100;
-  const fee = o.fee ?? 0;
-  if (o.action === "sell_to_open") return gross - fee;
-  if (o.action === "buy_to_close" || o.action === "rolled") return -gross - fee;
-  return -fee;
 }
 
 export default async function TaxPage({

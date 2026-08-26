@@ -5,6 +5,7 @@
 // snapshot is immutable once written.
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { getCachedRates } from "@/lib/fx";
+import { todayIso } from "@/lib/date";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -14,13 +15,6 @@ type PosRow = {
   current_total_price: number | null;
   cost_basis: number | null;
 };
-
-function todayIso(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
 
 // Snapshot today's value for every account. Idempotent on (portfolio_id, d): re-running the same day
 // overwrites with the latest prices. Returns how many account rows were written.

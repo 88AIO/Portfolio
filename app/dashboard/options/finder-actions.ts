@@ -7,13 +7,10 @@ import type { FinderRow, FinderResult } from "@/lib/options";
 import { dividendSafety, type DividendPoint } from "@/lib/dividends/safety";
 import { computeIvRank, IV_RANK_WINDOW_DAYS, type IvSample } from "@/lib/options/iv-rank";
 import { FINDER_UNIVERSE, FINDER_MAX_UNIVERSE } from "@/lib/options/finder-universe";
+import { todayIso } from "@/lib/date";
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 // A raw scan result before IV-rank / dividend-safety enrichment (those need DB history).
@@ -48,6 +45,21 @@ export async function scanPutFinder(input?: {
 
   const today = todayIso();
   const admin = createAdminClient();
+
+  // Shared scan cache: identical (dte, otm, universe) scans within the TTL are served from the
+  // finder_scans table instead of re-fanning out to the option-chain provider — this bounds the
+  // app's spikiest provider consumer to ~one full scan per TTL globally, however many users click.
+  // Scans are informational (not live trading data), so 10-minute staleness is acceptable.
+  // Best-effort on both sides: a missing table (migration not applied yet) must never break a scan.
+  const scanKey = `${targetDte}:${otmPct}:${universe.join(",")}`;
+  const SCAN_TTL_MS = 10 * 60_000;
+  try {
+    const { data: cached } = await admin
+      .from("finder_scans").select("result, created_at").eq("scan_key", scanKey).maybeSingle();
+    if (cached?.result && Date.now() - new Date(cached.created_at).getTime() < SCAN_TTL_MS) {
+      return cached.result as FinderResult;
+    }
+  } catch { /* cache miss path — scan live */ }
 
   // Reference data for the whole universe in one round-trip each: current yield + instrument id
   // (for dividend history), the dividend history itself, and stored IV samples for IV-rank.
@@ -94,13 +106,30 @@ export async function scanPutFinder(input?: {
     ivHistBySym.set(sym, arr);
   }
 
+  // Serve underlying prices from the shared price_cache when fresh — the nightly sync and
+  // refreshPrices keep it current, so re-quoting each name per scan is pure duplicate provider load
+  // (~40% of a scan's calls). Stale/missing entries still get a live quote inside scanOne.
+  const QUOTE_FRESH_MS = 15 * 60_000;
+  const freshPriceBySym = new Map<string, number>();
+  if (instIds.length) {
+    const { data: pcRows } = await admin
+      .from("price_cache").select("instrument_id, price, as_of").in("instrument_id", instIds);
+    for (const pc of (pcRows ?? []) as { instrument_id: string; price: number | null; as_of: string | null }[]) {
+      const sym = idToSym.get(pc.instrument_id);
+      if (!sym || !pc.price || pc.price <= 0 || !pc.as_of) continue;
+      if (Date.now() - new Date(pc.as_of).getTime() < QUOTE_FRESH_MS) freshPriceBySym.set(sym, pc.price);
+    }
+  }
+
   // Fan out to the option-chain provider (bounded concurrency).
   const raws: RawScan[] = [];
   const batchSize = 4;
   for (let i = 0; i < universe.length; i += batchSize) {
     const batch = universe.slice(i, i + batchSize);
     const results = await Promise.all(
-      batch.map((sym) => scanOne(sym, targetDte, otmPct, held, instBySym.get(sym)?.yield ?? null))
+      batch.map((sym) =>
+        scanOne(sym, targetDte, otmPct, held, instBySym.get(sym)?.yield ?? null, freshPriceBySym.get(sym) ?? null)
+      )
     );
     for (const r of results) if (r) raws.push(r);
   }
@@ -130,7 +159,14 @@ export async function scanPutFinder(input?: {
   });
 
   rows.sort((a, b) => b.annualizedRoC - a.annualizedRoC);
-  return { rows, scanned: universe.length, truncated, targetDte, otmPct };
+  const result: FinderResult = { rows, scanned: universe.length, truncated, targetDte, otmPct };
+  try {
+    await admin.from("finder_scans").upsert(
+      { scan_key: scanKey, result, created_at: new Date().toISOString() },
+      { onConflict: "scan_key" }
+    );
+  } catch { /* best-effort — a failed cache write never fails the scan */ }
+  return result;
 }
 
 async function scanOne(
@@ -138,11 +174,12 @@ async function scanOne(
   targetDte: number,
   otmPct: number,
   held: Set<string>,
-  divYield: number | null
+  divYield: number | null,
+  cachedPrice: number | null
 ): Promise<RawScan | null> {
   try {
-    const q = await getQuote(symbol, "US");
-    const price = q.price;
+    // A fresh shared-cache price skips the per-scan quote call; otherwise quote live.
+    const price = cachedPrice ?? (await getQuote(symbol, "US")).price;
     if (!price || price <= 0) return null;
 
     const base = await getOptionChain(symbol, "US");

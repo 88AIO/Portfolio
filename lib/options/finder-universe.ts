@@ -1,5 +1,6 @@
 // The seed universe the O3 put finder scans alongside the user's own US holdings — a small,
-// liquid, optionable set kept bounded to stay inside free-tier data limits (see docs/COST_MODEL.md).
+// liquid, optionable set kept bounded to stay inside free-tier data limits (cost model:
+// docs/EFFICIENCY_AUDIT.md).
 // Shared so the nightly cron captures IV samples for exactly these names too.
 export const FINDER_UNIVERSE = [
   "AAPL", "MSFT", "NVDA", "AMD", "KO", "PEP", "JPM", "XOM",

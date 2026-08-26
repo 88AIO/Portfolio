@@ -10,6 +10,7 @@ import {
   computeOptionTotals,
   statusLabel,
   optionActionLabel,
+  legPremium,
   type OptionPositionRow,
   type ComputedOption,
   type AttentionItem,
@@ -19,7 +20,7 @@ import { computeWheels, type WheelPosition, type WheelRow, type WheelEvent } fro
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
 import AddOptionForm from "@/components/AddOptionForm";
 import WheelCycles from "@/components/WheelCycles";
-import MonthlyPremiumChart from "@/components/MonthlyPremiumChart";
+import { MonthlyPremiumChart } from "@/components/charts";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 import NotificationSettings from "@/components/NotificationSettings";
 import { getNotificationPrefs } from "./actions";
@@ -141,21 +142,14 @@ export default async function OptionsPage() {
     .slice(0, 10);
 
   // --- Premium income over time: every option leg aggregated by trade month ---
-  // Canonical sign: credit on open (sell_to_open), debit on close/roll, fee always a cost.
-  const legPrem = (o: OptTxnRow): number => {
-    const gross = (o.premium ?? 0) * (o.contracts ?? 0) * 100;
-    const fee = o.fee ?? 0;
-    if (o.action === "sell_to_open") return gross - fee;
-    if (o.action === "buy_to_close" || o.action === "rolled") return -gross - fee;
-    return -fee;
-  };
+  // Sign convention comes from the shared legPremium helper (lib/options.ts).
   const premByMonth = new Map<string, number>();
   let premYtd = 0;
   let premAllTime = 0;
   const curYear = today.slice(0, 4);
   for (const o of optTxns) {
     if (!o.trade_date) continue;
-    const net = legPrem(o) * fx(o.currency);
+    const net = legPremium(o) * fx(o.currency);
     const m = o.trade_date.slice(0, 7);
     premByMonth.set(m, (premByMonth.get(m) ?? 0) + net);
     premAllTime += net;
@@ -260,18 +254,16 @@ export default async function OptionsPage() {
   for (const o of optTxns) {
     const symbol = relSymbol(o.instruments);
     const ccy = o.currency || base;
-    const gross = (o.premium ?? 0) * (o.contracts ?? 0) * 100;
-    const fee = o.fee ?? 0;
     const isPut = o.option_type === "put";
-    let title: string, amount: number;
-    if (o.action === "sell_to_open") { title = `Sold ${isPut ? "put" : "call"}`; amount = gross - fee; }
-    else if (o.action === "buy_to_close") { title = "Bought to close"; amount = -gross - fee; }
-    else if (o.action === "rolled") { title = "Rolled"; amount = -gross - fee; }
-    else if (o.action === "assigned") { title = "Assigned"; amount = -fee; }
-    else { title = "Expired"; amount = -fee; }
+    let title: string;
+    if (o.action === "sell_to_open") title = `Sold ${isPut ? "put" : "call"}`;
+    else if (o.action === "buy_to_close") title = "Bought to close";
+    else if (o.action === "rolled") title = "Rolled";
+    else if (o.action === "assigned") title = "Assigned";
+    else title = "Expired";
     pushEvent(symbol, {
       id: o.id, source: "option",
-      date: o.trade_date, kind: "option", currency: ccy, amount,
+      date: o.trade_date, kind: "option", currency: ccy, amount: legPremium(o),
       title,
       detail: `${o.contracts}× ${money(o.strike, ccy)} strike · exp ${o.expiration} · ${money(o.premium, ccy)}/sh`,
     });
@@ -553,7 +545,7 @@ export default async function OptionsPage() {
                 <tbody>
                   {tradeLog.map((o) => {
                     const sym = relSymbol(o.instruments);
-                    const net = legPrem(o);
+                    const net = legPremium(o);
                     return (
                       <tr key={o.id} className="border-t border-slate-100 hover:bg-slate-50/60">
                         <td className="whitespace-nowrap py-2.5 pr-2 text-slate-500">{o.trade_date}</td>

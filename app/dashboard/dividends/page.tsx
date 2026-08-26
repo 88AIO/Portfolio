@@ -7,7 +7,7 @@ import { money, pct } from "@/lib/format";
 import { dividendSafety, type DividendSafety } from "@/lib/dividends/safety";
 import { buildDividendCalendar } from "@/lib/dividends/calendar";
 import SafetyBadge from "@/components/SafetyBadge";
-import DividendCalendarChart from "@/components/DividendCalendarChart";
+import { DividendCalendarChart } from "@/components/charts";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 
 export const dynamic = "force-dynamic";

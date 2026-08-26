@@ -6,18 +6,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getQuote } from "@/lib/marketdata";
 import { getCachedRates } from "@/lib/fx";
 import { ensurePortfolio } from "../actions";
-import { isValidYmd } from "@/lib/date";
-import { computeOption, type OptionPositionRow } from "@/lib/options";
+import { isValidYmd, todayIso } from "@/lib/date";
+import { computeOption, legPremium, type OptionPositionRow } from "@/lib/options";
 import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell } from "@/lib/email";
 import { isValidSymbol, isValidExchange } from "@/lib/import/csv";
-
-function todayIso(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
 
 // --- Notification preferences (options/dividend alerts + weekly income digest) ---
 export async function getNotificationPrefs(): Promise<{ email_alerts: boolean; email_digest: boolean }> {
@@ -29,14 +22,6 @@ export async function getNotificationPrefs(): Promise<{ email_alerts: boolean; e
   return { email_alerts: !!data?.email_alerts, email_digest: !!data?.email_digest };
 }
 
-// Signed sign of one option leg's premium cash (credit on open, debit on close/roll; fee a cost).
-function legPremiumCash(o: { action: string; premium: number; contracts: number; fee: number | null }): number {
-  const gross = (o.premium ?? 0) * (o.contracts ?? 0) * 100;
-  const fee = o.fee ?? 0;
-  if (o.action === "sell_to_open") return gross - fee;
-  if (o.action === "buy_to_close" || o.action === "rolled") return -gross - fee;
-  return -fee;
-}
 
 // Send a test copy of the weekly income digest to the signed-in user's own email — built from their
 // real last-7-days data — so they can confirm delivery and see exactly what the digest looks like.
@@ -66,7 +51,7 @@ export async function sendTestEmail(): Promise<{ ok: boolean; message: string }>
   const rates = await getCachedRates(supabase, [...oTx.map((o) => o.currency), ...dTx.map((d) => d.currency), ...positions.map((p) => p.currency)], base);
   const fx = (c: string) => rates[c] ?? 1;
 
-  const premiumWeek = oTx.reduce((s, o) => s + legPremiumCash(o) * fx(o.currency), 0);
+  const premiumWeek = oTx.reduce((s, o) => s + legPremium(o) * fx(o.currency), 0);
   const dividendsWeek = dTx.reduce((s, d) => s + d.quantity * d.price * fx(d.currency), 0);
   const upcomingExDiv = positions
     .filter((p) => p.shares > 0 && p.next_dividend_date && p.next_dividend_date >= today && p.next_dividend_date <= in7)
@@ -126,12 +111,18 @@ export async function addOptionTransaction(formData: FormData) {
   const portfolioIdRaw = String(formData.get("portfolio_id") || "").trim();
 
   const validActions = ["sell_to_open", "buy_to_close", "expired", "assigned", "rolled"];
-  if (!symbol || !strike || !expiration || !validActions.includes(action)) return;
+  // Throw (don't silently return) on bad input so AddOptionForm's catch shows an error instead of
+  // resetting to a false success — a mistyped leg must never look saved (same contract as
+  // addTransaction). The income totals would otherwise silently understate.
+  if (!symbol || !strike || !expiration || !validActions.includes(action))
+    throw new Error("Enter a symbol, a strike, and an expiration.");
   // Dates hit NOT NULL columns — reject a malformed expiration/trade_date cleanly instead of 500ing.
-  if (!isValidYmd(expiration) || !isValidYmd(trade_date)) return;
+  if (!isValidYmd(expiration) || !isValidYmd(trade_date))
+    throw new Error("That expiration or trade date isn't a valid date.");
   // Validate the ticker/exchange before any service-role write into the shared `instruments` table,
   // so a malformed underlying can't create junk reference rows (matches addTransaction / CSV import).
-  if (!isValidSymbol(symbol) || !isValidExchange(exchange)) return;
+  if (!isValidSymbol(symbol) || !isValidExchange(exchange))
+    throw new Error("That symbol or exchange doesn't look right.");
 
   // Resolve the target portfolio (must belong to the signed-in user); default to the primary one.
   let portfolioId = "";
@@ -151,7 +142,7 @@ export async function addOptionTransaction(formData: FormData) {
     }).select("id, currency").single();
     inst = created;
   }
-  if (!inst) return;
+  if (!inst) throw new Error("Couldn't look up that symbol. Check it and try again.");
   const currency = inst.currency || "USD";
 
   // Assignment writes the equity leg it creates (idempotent via a stable dedupe_key).
@@ -176,7 +167,7 @@ export async function addOptionTransaction(formData: FormData) {
     linkedTxnId = (tx as { id: string } | null)?.id ?? null;
   }
 
-  await supabase.from("option_transactions").upsert(
+  const { error: upsertError } = await supabase.from("option_transactions").upsert(
     {
       portfolio_id: portfolioId,
       instrument_id: inst.id,
@@ -195,6 +186,7 @@ export async function addOptionTransaction(formData: FormData) {
     },
     { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true }
   );
+  if (upsertError) throw new Error("Couldn't save that option leg. Please try again.");
 
   // Pull a fresh underlying price so collateral / RoC / moneyness compute immediately.
   const q = await getQuote(symbol, exchange);

@@ -39,5 +39,10 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  // Only the routes that actually need a session: the app (guard + token refresh), the login
+  // bounce, and the auth flows (callback/reset). Marketing/blog/legal pages are static and
+  // anonymous — matching them made every signed-in visitor pay a Supabase auth round trip per
+  // navigation for pages that never read the result. Server pages and API routes refresh sessions
+  // themselves via lib/supabase/server.ts, so nothing else depends on the middleware running.
+  matcher: ["/dashboard/:path*", "/login", "/auth/:path*"],
 };

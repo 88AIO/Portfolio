@@ -11,11 +11,12 @@ import {
   type PerfTransaction,
   type PerfClose,
 } from "@/lib/performance/series";
-import PerformanceChart from "@/components/PerformanceChart";
+import { PerformanceChart } from "@/components/charts";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 import BackfillButton from "@/components/BackfillButton";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { fetchAll, fetchAllParallel } from "@/lib/supabase/paginate";
+import { todayIso } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // the one-time history backfill fetches several years of weekly closes
@@ -40,10 +41,6 @@ type Pos = {
 };
 
 type Hist = { instrument_id: string; d: string; close: number };
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export default async function PerformancePage() {
   const supabase = await createClient();

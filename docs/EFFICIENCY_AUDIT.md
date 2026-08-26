@@ -120,4 +120,6 @@ Materializing/denormalizing positions · any queue/Redis/second datastore · spl
 
 ---
 
-*Audit only — no removals, cancellations, or disablements were performed. Group 1 items await explicit approval; Group 3 is proposed as a remediation batch; everything else is trigger-based. Full per-domain findings with file:line evidence live in the session's audit transcript.*
+*Audit only — no removals, cancellations, or disablements were performed during the audit itself. Full per-domain findings with file:line evidence live in the session's audit transcript.*
+
+**Execution status (2026-08-26):** Groups 1 and 3 were approved by the owner and implemented the same day (see the `audit remediation` commit). Group 2's telemetry checks and the trigger-based items in section F remain open. The live database still needs the migration block from that commit's notes applied (index drops/adds + the `sync_runs`/`finder_scans` tables — all code tolerates their absence until then).

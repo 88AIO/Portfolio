@@ -3,6 +3,7 @@ import { computeOption, type OptionPositionRow } from "@/lib/options";
 import { buildAlerts, alertsEmailHtml, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell } from "@/lib/email";
 import { fetchAll } from "@/lib/supabase/paginate";
+import { recordSyncRun, listAllUserEmails } from "@/lib/cron";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -18,6 +19,7 @@ function authorized(request: Request): boolean {
 
 export async function GET(request: Request) {
   if (!authorized(request)) return new Response("Unauthorized", { status: 401 });
+  const startedAt = Date.now();
   const admin = createAdminClient();
   const today = new Date().toISOString().slice(0, 10);
 
@@ -51,6 +53,9 @@ export async function GET(request: Request) {
     (optByUser.get(uid) ?? optByUser.set(uid, []).get(uid)!).push(o);
   }
 
+  // One paginated email map instead of a getUserById round trip per user (breaks past ~50 users).
+  const emailById = await listAllUserEmails(admin);
+
   let emailed = 0;
   for (const uid of enabledUsers) {
     const options = (optByUser.get(uid) ?? []).map(computeOption);
@@ -65,8 +70,7 @@ export async function GET(request: Request) {
     const fresh = items.filter((i) => !sentSet.has(i.dedupeKey));
     if (!fresh.length) continue;
 
-    const { data: userRes } = await admin.auth.admin.getUserById(uid);
-    const email = userRes.user?.email;
+    const email = emailById.get(uid);
     if (!email) continue;
 
     const res = await sendEmail(
@@ -83,5 +87,7 @@ export async function GET(request: Request) {
     }
   }
 
-  return Response.json({ emailed, users: enabledUsers.size });
+  const summary = { emailed, users: enabledUsers.size };
+  await recordSyncRun(admin, "alerts", startedAt, summary);
+  return Response.json(summary);
 }

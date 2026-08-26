@@ -16,15 +16,7 @@ import {
   IMPORT_MAX_SYMBOLS,
 } from "@/lib/import/csv";
 import type { ImportResult } from "@/lib/import/types";
-import { isValidYmd } from "@/lib/date";
-
-// Local date as YYYY-MM-DD — used for explicit executed_at and stable dedupe keys.
-function todayIso(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
+import { isValidYmd, todayIso } from "@/lib/date";
 
 // Get the user's default portfolio, creating one on first use.
 export async function ensurePortfolio() {
@@ -112,9 +104,19 @@ export async function refreshPrices() {
   if (!user) redirect("/login"); // don't let anon calls drive provider fan-out
 
   const admin = createAdminClient();
-  const { data: pos } = await supabase
-    .from("positions").select("instrument_id, symbol, exchange, name, currency, sector, sector_weights, type");
-  if (!pos) return;
+  const { data: allPos } = await supabase
+    .from("positions").select("instrument_id, symbol, exchange, name, currency, sector, sector_weights, type, price_as_of");
+  if (!allPos) return;
+
+  // Freshness gate: skip instruments quoted within the last ~2 minutes. price_cache is shared
+  // across users, so this doubles as a global cooldown — however many users (or repeat clicks)
+  // hammer the button, each instrument costs at most one provider call per window. Without it, one
+  // enthusiastic user could rate-limit the free Yahoo feed every other user depends on.
+  const FRESH_MS = 2 * 60_000;
+  const pos = allPos.filter(
+    (p: { price_as_of: string | null }) =>
+      !p.price_as_of || Date.now() - new Date(p.price_as_of).getTime() > FRESH_MS
+  );
 
   // "Refresh prices" is the FAST path — it only fetches live quotes (price + day change), one call
   // per holding, so it always finishes well inside the function limit even for large portfolios.
@@ -167,8 +169,11 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
   const admin = createAdminClient();
   const portfolio = await ensurePortfolio();
 
-  // Resolve each unique (symbol, exchange) to an instrument once (creating new ones).
+  // Resolve each unique (symbol, exchange) to an instrument once (creating new ones). Track which
+  // instruments this import actually CREATED — the post-import provider fan-out is scoped to those,
+  // so re-importing the same file (a DB no-op via dedupe) costs zero provider calls.
   const instByKey = new Map<string, { id: string; currency: string }>();
+  const createdKeys: string[] = [];
   const uniqueKeys = [...new Set(rows.map((r) => `${r.symbol}|${r.exchange}`))];
   if (uniqueKeys.length > IMPORT_MAX_SYMBOLS) {
     return { imported: 0, duplicates: 0, failed: rows.length, total: rows.length, errors: [{ line: 0, message: `Too many distinct symbols (${uniqueKeys.length}); max ${IMPORT_MAX_SYMBOLS} per import.` }] };
@@ -189,6 +194,7 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
         currency: meta?.currency ?? "USD", type: meta?.type ?? "stock",
       }).select("id, currency").single();
       inst = newInst;
+      if (inst) createdKeys.push(key);
     }
     if (inst) instByKey.set(key, inst);
   }
@@ -250,23 +256,29 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
     imported = inserted?.length ?? 0;
   }
 
-  // Best-effort: pull a fresh price for each instrument just imported.
-  await Promise.all(
-    uniqueKeys.map(async (key) => {
-      const inst = instByKey.get(key);
-      if (!inst) return;
-      const [symbol, exchange] = key.split("|");
-      const q = await getQuote(symbol, exchange);
-      if (q.price != null) {
-        await admin.from("price_cache").upsert({
-          instrument_id: inst.id, price: q.price, currency: inst.currency,
-          change_pct: q.changePct, as_of: new Date().toISOString(),
-        });
-      }
-      await syncInstrumentDividends(admin, inst.id, symbol, exchange, inst.currency);
-      await syncInstrumentPriceHistory(admin, inst.id, symbol, exchange);
-    })
-  );
+  // Best-effort: quote each instrument this import CREATED, in bounded batches. Previously this
+  // fanned out quotes + dividends + price history for EVERY symbol in the file — up to ~2,000
+  // provider calls per click, re-fired in full on every re-import, and killed mid-flight by the
+  // 60s page limit. Created-only + quotes-only bounds the burst; the nightly cron picks up
+  // dividends/history for the new names (the app's read-from-cache architecture already assumes
+  // reference data arrives on the nightly cadence).
+  const BATCH = 6;
+  for (let i = 0; i < createdKeys.length; i += BATCH) {
+    await Promise.all(
+      createdKeys.slice(i, i + BATCH).map(async (key) => {
+        const inst = instByKey.get(key);
+        if (!inst) return;
+        const [symbol, exchange] = key.split("|");
+        const q = await getQuote(symbol, exchange);
+        if (q.price != null) {
+          await admin.from("price_cache").upsert({
+            instrument_id: inst.id, price: q.price, currency: inst.currency,
+            change_pct: q.changePct, as_of: new Date().toISOString(),
+          });
+        }
+      })
+    );
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/performance");
