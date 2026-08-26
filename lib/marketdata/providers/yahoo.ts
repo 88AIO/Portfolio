@@ -2,6 +2,7 @@
 // Uses the `yahoo-finance2` library. Covers US equities/ETFs + FX (and options, wired up in O1).
 // US-first: US tickers pass through unchanged; a small suffix map handles common intl exchanges.
 import YahooFinance from "yahoo-finance2";
+import { normalizeCurrency, canonicalSector } from "../normalize";
 import type {
   DividendHistoryPoint,
   DividendInfo,
@@ -81,15 +82,6 @@ function mapType(quoteType?: string): string {
 // Yahoo quotes some markets in a currency's *minor* unit — London in pence (currency "GBp"),
 // Johannesburg in cents ("ZAc"), Tel Aviv in agorot ("ILA"). Left as-is, a £42.00 share arrives
 // as 4200 "GBp", its FX pair "GBpUSD=X" won't resolve (→ silent 1.0), and the holding reads ~100×
-// too large. Normalize to the major ISO unit (÷100) so prices, dividends, and FX all agree.
-const MINOR_UNIT: Record<string, string> = { GBP: "GBP", GBX: "GBP", ZAC: "ZAR", ILA: "ILS" };
-function normalizeCurrency(raw: string | null | undefined): { currency: string; divisor: number } {
-  if (!raw) return { currency: "USD", divisor: 1 };
-  // The tell for a minor-unit quote is a lowercase trailing letter (GBp, ZAc, ILa).
-  const isMinor = /[a-z]$/.test(raw) && MINOR_UNIT[raw.toUpperCase()] != null;
-  if (isMinor) return { currency: MINOR_UNIT[raw.toUpperCase()], divisor: 100 };
-  return { currency: raw.toUpperCase(), divisor: 1 };
-}
 
 async function getQuote(symbol: string, exchange: string): Promise<Quote> {
   try {
@@ -272,19 +264,6 @@ async function getProfile(symbol: string, exchange: string): Promise<InstrumentP
 // Yahoo's fund sectorWeightings use snake_case keys; map them to the same human labels
 // Yahoo's assetProfile uses for individual stocks, so ETF look-through and stock sectors
 // land in the SAME buckets on the allocation chart.
-const FUND_SECTOR_LABEL: Record<string, string> = {
-  realestate: "Real Estate",
-  consumer_cyclical: "Consumer Cyclical",
-  basic_materials: "Basic Materials",
-  consumer_defensive: "Consumer Defensive",
-  technology: "Technology",
-  communication_services: "Communication Services",
-  financial_services: "Financial Services",
-  utilities: "Utilities",
-  industrials: "Industrials",
-  energy: "Energy",
-  healthcare: "Healthcare",
-};
 
 async function getFundBreakdown(symbol: string, exchange: string): Promise<FundBreakdown | null> {
   try {
@@ -301,7 +280,7 @@ async function getFundBreakdown(symbol: string, exchange: string): Promise<FundB
       const key = Object.keys(entry)[0];
       const weight = entry[key];
       if (!key || typeof weight !== "number" || weight <= 0) continue;
-      sectorWeights.push({ sector: FUND_SECTOR_LABEL[key] ?? key, weight });
+      sectorWeights.push({ sector: canonicalSector(key), weight });
     }
     return sectorWeights.length ? { sectorWeights } : null;
   } catch {

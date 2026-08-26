@@ -68,7 +68,30 @@ npm run test:rls # cross-tenant RLS isolation test (needs Supabase env vars; ski
 
 **Data model:** you record **transactions** (equity, options, cash); current **positions** and option exposure are computed views over that ledger. Pages read cached tables (`price_cache`, `fx_rates`, `price_history`, `dividends`); only the nightly cron talks to the market-data vendor.
 
-**Note on the EODHD switch:** the `eodhd` provider currently implements quotes/FX/search only — dividends, price history, and **option chains are Yahoo-only today**. Complete the EODHD provider before flipping `MARKET_DATA_PROVIDER` in production, or the options features silently go stale.
+### Market-data provider coverage
+
+Both providers implement the same port (`lib/marketdata/`), so switching is one env var — but they
+are not identical. What each covers today:
+
+| Port method | Yahoo (default, free) | EODHD (`MARKET_DATA_PROVIDER=eodhd`) |
+|---|---|---|
+| Quotes · FX · instrument search | ✅ | ✅ |
+| Price history (weekly closes) | ✅ | ✅ |
+| Dividend history · dividend info | ✅ | ✅ |
+| Company profile (sector/country) | ✅ | ✅ |
+| ETF/fund sector breakdown | ✅ | ✅ |
+| **Option chains** | ✅ | ❌ **separate paid add-on** |
+
+Everything the nightly sync needs works on either provider. The one gap is options: EODHD sells US
+options through a marketplace add-on (Unicorn Data Services, `/mp/unicornbay/options/*`) that is
+not included in any base plan. `capabilities.options` is therefore `false` for EODHD, so the port
+degrades honestly rather than returning empty option boards — the options cockpit, wheel, and put
+finder stay Yahoo-only until that add-on is subscribed and `getOptionChain` is implemented against
+a real payload.
+
+**Licensing note:** Yahoo is an unofficial, non-commercial feed. It is fine for personal and
+development use; a paid product should move to a licensed provider. That is what the EODHD path
+exists for.
 
 ---
 
