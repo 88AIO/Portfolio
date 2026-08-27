@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computeOption, type OptionPositionRow } from "@/lib/options";
 import { buildAlerts, alertsEmailHtml, type PositionLite } from "@/lib/notifications/build";
-import { sendEmail, emailShell } from "@/lib/email";
+import { sendEmail, emailShell, emailConfig, reportEmailFailure } from "@/lib/email";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { recordSyncRun, listAllUserEmails } from "@/lib/cron";
 
@@ -57,6 +57,7 @@ export async function GET(request: Request) {
   const emailById = await listAllUserEmails(admin);
 
   let emailed = 0;
+  let emailIssue: string | null = null;
   for (const uid of enabledUsers) {
     const options = (optByUser.get(uid) ?? []).map(computeOption);
     const items = buildAlerts(options, posByUser.get(uid) ?? [], today);
@@ -84,10 +85,16 @@ export async function GET(request: Request) {
         { onConflict: "user_id,dedupe_key", ignoreDuplicates: true }
       );
       emailed++;
+    } else {
+      // Keep the first reason only: with a missing key every user fails identically, and one line
+      // says it as well as N do.
+      emailIssue ??= reportEmailFailure("alerts", res);
     }
   }
 
-  const summary = { emailed, users: enabledUsers.size };
+  // emailed:0 on its own is ambiguous — it equally means "nobody had alerts today". These two
+  // fields disambiguate it without needing a send to have been attempted.
+  const summary = { emailed, users: enabledUsers.size, ...emailConfig(), emailIssue };
   await recordSyncRun(admin, "alerts", startedAt, summary);
   return Response.json(summary);
 }

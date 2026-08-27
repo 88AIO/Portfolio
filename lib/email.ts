@@ -4,6 +4,27 @@
 
 export type EmailResult = { sent: boolean; skipped?: string; error?: string };
 
+// Whether email can actually be delivered from this environment. Both of these fail SILENTLY:
+// with no RESEND_API_KEY every send no-ops, and with no EMAIL_FROM the sender falls back to
+// Resend's shared test address, which only ever delivers to the account owner — so alerts and
+// digests to real users vanish while the cron still returns 200. The crons report this in their
+// recorded summary so "is email even on?" is answered by the next run instead of staying a guess.
+export function emailConfig(): { configured: boolean; fromIsTestAddress: boolean } {
+  return {
+    configured: !!process.env.RESEND_API_KEY,
+    fromIsTestAddress: !process.env.EMAIL_FROM,
+  };
+}
+
+// One place to turn a failed send into a log line + a short reason for the summary. Callers were
+// discarding EmailResult entirely, which is how a dead notification path stayed invisible.
+export function reportEmailFailure(job: string, res: EmailResult): string | null {
+  if (res.sent) return null;
+  const reason = res.error ?? res.skipped ?? "unknown";
+  console.error(`[cron:${job}] email not sent: ${reason}`);
+  return reason;
+}
+
 export async function sendEmail(to: string, subject: string, html: string): Promise<EmailResult> {
   const key = process.env.RESEND_API_KEY;
   if (!key) return { sent: false, skipped: "RESEND_API_KEY not set" };

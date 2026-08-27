@@ -2,7 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getCachedRates } from "@/lib/fx";
 import { computeOption, legPremium, type OptionPositionRow } from "@/lib/options";
 import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
-import { sendEmail, emailShell } from "@/lib/email";
+import { sendEmail, emailShell, emailConfig, reportEmailFailure } from "@/lib/email";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { recordSyncRun, listAllUserEmails } from "@/lib/cron";
 
@@ -79,6 +79,7 @@ export async function GET(request: Request) {
   }
 
   let emailed = 0;
+  let emailIssue: string | null = null;
   // Hoisted out of the per-user loop: one email map (paginated — a bare getUserById-per-user or
   // unpaginated listUsers silently breaks past ~50 users) and one FX read per base currency
   // (fx_rates is a global table; re-reading it per user was N identical round trips).
@@ -143,10 +144,12 @@ export async function GET(request: Request) {
         [{ user_id: uid, dedupe_key: weekKey }],
         { onConflict: "user_id,dedupe_key", ignoreDuplicates: true }
       );
+    } else {
+      emailIssue ??= reportEmailFailure("digest", res);
     }
   }
 
-  const summary = { emailed, users: enabled.size };
+  const summary = { emailed, users: enabled.size, ...emailConfig(), emailIssue };
   await recordSyncRun(admin, "digest", startedAt, summary);
   return Response.json(summary);
 }

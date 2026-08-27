@@ -15,7 +15,7 @@ import { syncFxRates } from "@/lib/fx";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { takeProviderCallCount } from "@/lib/marketdata";
 import { recordSyncRun } from "@/lib/cron";
-import { sendEmail, emailShell } from "@/lib/email";
+import { sendEmail, emailShell, emailConfig, reportEmailFailure } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     console.error(`[cron:sync] provider config: ${configError.message}`);
     const owner = (process.env.BROKER_SYNC_OWNER_EMAILS ?? "").split(",")[0]?.trim();
     if (owner) {
-      await sendEmail(
+      const res = await sendEmail(
         owner,
         `Snowfolio sync: market-data provider ${configError.fatal ? "misconfigured" : "warning"}`,
         emailShell(
@@ -68,6 +68,7 @@ export async function GET(request: Request) {
             `<p style="font-size:12px;color:#64748b">${configError.fatal ? "This run was aborted; no data was written or changed." : "The run continued on the fallback provider."}</p>`
         )
       );
+      reportEmailFailure("sync", res);
     }
     if (configError.fatal) {
       // Abort rather than spend thousands of requests confirming the same thing per instrument.
@@ -198,6 +199,9 @@ export async function GET(request: Request) {
     synced: ok, failed, total: held.length, ivCaptured: ivOk,
     brokerOptionLegs: brokerSynced, valueSnapshots, fxUpdated,
     providerCalls: takeProviderCallCount(),
+    // Whether the failure email below could actually be delivered. A dead notification path is
+    // worth knowing about on a GOOD night, not discovered on the bad one.
+    ...emailConfig(),
   };
   await recordSyncRun(admin, "sync", startedAt, summary, failedSymbols);
   // Also emit the summary to the platform log. sync_runs is the durable record, but it needs
@@ -216,7 +220,10 @@ export async function GET(request: Request) {
         `<p style="margin:0 0 10px;font-size:14px;color:#334155">Nightly sync finished with problems.</p>` +
         `<pre style="font-size:12px;background:#f8fafc;padding:10px;border-radius:8px">${JSON.stringify(summary, null, 2)}</pre>` +
         (failedSymbols.length ? `<p style="font-size:12px;color:#64748b">Failed: ${failedSymbols.join(", ")}</p>` : "");
-      await sendEmail(owner, `Snowfolio sync: ${failed} failure${failed === 1 ? "" : "s"}`, emailShell("Sync report", body));
+      const res = await sendEmail(owner, `Snowfolio sync: ${failed} failure${failed === 1 ? "" : "s"}`, emailShell("Sync report", body));
+      // If this send fails the founder never learns the sync failed — log it loudly rather than
+      // letting a broken alert path hide a broken sync.
+      reportEmailFailure("sync", res);
     }
   }
 
