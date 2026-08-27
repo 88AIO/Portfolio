@@ -87,8 +87,11 @@ export function takeProviderCallCount(): number {
   return n;
 }
 
-export function getQuote(symbol: string, exchange: string) {
-  return counted(getProvider().getQuote(symbol, exchange));
+// knownCurrency lets a provider without per-quote currency (EODHD) pick the right minor-unit
+// divisor for THIS listing rather than guessing from the exchange. Pass the instrument row's
+// stored currency whenever the caller has it. Yahoo reports its own currency and ignores it.
+export function getQuote(symbol: string, exchange: string, knownCurrency?: string | null) {
+  return counted(getProvider().getQuote(symbol, exchange, knownCurrency));
 }
 
 export function getFxRate(from: string, base: string) {
@@ -109,10 +112,15 @@ export function getDividendHistory(symbol: string, exchange: string) {
   return provider.getDividendHistory ? counted(provider.getDividendHistory(symbol, exchange)) : Promise.resolve([]);
 }
 
-export function getPriceHistory(symbol: string, exchange: string, fromDays: number) {
+export function getPriceHistory(
+  symbol: string,
+  exchange: string,
+  fromDays: number,
+  knownCurrency?: string | null
+) {
   const provider = getProvider();
   return provider.getPriceHistory
-    ? counted(provider.getPriceHistory(symbol, exchange, fromDays))
+    ? counted(provider.getPriceHistory(symbol, exchange, fromDays, knownCurrency))
     : Promise.resolve([]);
 }
 

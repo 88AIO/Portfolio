@@ -67,9 +67,10 @@ export async function syncInstrumentPriceHistory(
   instrumentId: string,
   symbol: string,
   exchange: string,
-  fromDays = 400
+  fromDays = 400,
+  currency?: string | null
 ) {
-  const history = await getPriceHistory(symbol, exchange, fromDays);
+  const history = await getPriceHistory(symbol, exchange, fromDays, currency);
   if (!history.length) return;
   for (let i = 0; i < history.length; i += 500) {
     await admin.from("price_history").upsert(
@@ -163,7 +164,7 @@ export async function syncInstrumentQuote(
   exchange: string,
   currency?: string
 ) {
-  const q = await getQuote(symbol, exchange);
+  const q = await getQuote(symbol, exchange, currency);
   if (q.price != null) {
     await admin.from("price_cache").upsert({
       instrument_id: instrumentId,

@@ -8,7 +8,7 @@ import { isBrokerSyncOwner } from "@/lib/brokersync";
 
 type Row = {
   instrument_id: string;
-  instruments: { symbol: string; exchange: string; type: string | null } | null;
+  instruments: { symbol: string; exchange: string; type: string | null; currency: string | null } | null;
 };
 
 // One-time deep backfill of weekly closing-price history, so the value-over-time chart reaches back
@@ -25,17 +25,17 @@ export async function backfillHistory(): Promise<{ ok: boolean; message: string 
   const admin = createAdminClient();
   const { data: txInsts, error } = await admin
     .from("transactions")
-    .select("instrument_id, instruments(symbol, exchange, type)");
+    .select("instrument_id, instruments(symbol, exchange, type, currency)");
   if (error) return { ok: false, message: `Couldn't read holdings: ${error.message}` };
 
   // Every instrument in the ledger (held or since-exited — the historical line values positions you
   // held at each past date). Dedupe to one entry per instrument; skip crypto (no reliable weekly feed).
-  const byId = new Map<string, { id: string; symbol: string; exchange: string }>();
+  const byId = new Map<string, { id: string; symbol: string; exchange: string; currency: string | null }>();
   for (const r of (txInsts ?? []) as unknown as Row[]) {
     const inst = r.instruments;
     if (!inst || !r.instrument_id || byId.has(r.instrument_id)) continue;
     if ((inst.type ?? "") === "crypto") continue;
-    byId.set(r.instrument_id, { id: r.instrument_id, symbol: inst.symbol, exchange: inst.exchange });
+    byId.set(r.instrument_id, { id: r.instrument_id, symbol: inst.symbol, exchange: inst.exchange, currency: inst.currency });
   }
   const instruments = [...byId.values()];
 
@@ -46,7 +46,7 @@ export async function backfillHistory(): Promise<{ ok: boolean; message: string 
     await Promise.all(
       instruments.slice(i, i + BATCH).map(async (inst) => {
         try {
-          await syncInstrumentPriceHistory(admin, inst.id, inst.symbol, inst.exchange, 2600); // ~7 years
+          await syncInstrumentPriceHistory(admin, inst.id, inst.symbol, inst.exchange, 2600, inst.currency); // ~7 years
           ok++;
         } catch {
           failed++;

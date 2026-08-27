@@ -78,12 +78,17 @@ export interface MarketDataProvider {
   readonly name: string;
   readonly capabilities: ProviderCapabilities;
 
-  getQuote(symbol: string, exchange: string): Promise<Quote>;
+  // knownCurrency: the currency already stored on the instrument row, when the caller has it.
+  // A provider whose price endpoints report their own currency (Yahoo) ignores it. A provider
+  // whose price endpoints DON'T (EODHD) needs it to decide the minor-unit divisor per instrument
+  // rather than per exchange — LSE carries GBP lines quoted in pence alongside USD- and
+  // EUR-denominated ones, so the exchange code alone cannot answer the question.
+  getQuote(symbol: string, exchange: string, knownCurrency?: string | null): Promise<Quote>;
   getFxRate(from: string, base: string): Promise<number>;
   searchInstrument(symbol: string, exchange: string): Promise<InstrumentMeta | null>;
   getDividendInfo?(symbol: string, exchange: string): Promise<DividendInfo | null>;
   getDividendHistory?(symbol: string, exchange: string): Promise<DividendHistoryPoint[]>;
-  getPriceHistory?(symbol: string, exchange: string, fromDays: number): Promise<PriceHistoryPoint[]>;
+  getPriceHistory?(symbol: string, exchange: string, fromDays: number, knownCurrency?: string | null): Promise<PriceHistoryPoint[]>;
   getProfile?(symbol: string, exchange: string): Promise<InstrumentProfile | null>;
   getFundBreakdown?(symbol: string, exchange: string): Promise<FundBreakdown | null>;
 

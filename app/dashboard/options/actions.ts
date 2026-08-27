@@ -189,7 +189,7 @@ export async function addOptionTransaction(formData: FormData) {
   if (upsertError) throw new Error("Couldn't save that option leg. Please try again.");
 
   // Pull a fresh underlying price so collateral / RoC / moneyness compute immediately.
-  const q = await getQuote(symbol, exchange);
+  const q = await getQuote(symbol, exchange, currency);
   if (q.price != null) {
     await admin.from("price_cache").upsert({
       instrument_id: inst.id, price: q.price, change_pct: q.changePct, currency, as_of: new Date().toISOString(),

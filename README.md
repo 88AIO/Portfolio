@@ -143,6 +143,27 @@ because EODHD sells option chains only as a separate add-on. The finder says so 
 reporting an empty scan (`optionsUnavailable` on `FinderResult`), and the nightly IV sample is
 skipped rather than failing once per symbol.
 
+### International holdings: which provider is safer
+
+Yahoo returns a **currency with every quote**, so the minor-unit divisor is read from the data
+(`normalizeCurrency(q.currency)`) and is correct for any exchange, including ones nobody
+enumerated. EODHD's price endpoints return **no currency**, so the divisor has to be inferred.
+
+The inference rule is: the **exchange** says which currency is quoted in a minor unit (London
+pence, Johannesburg cents, Tel Aviv agorot); the **instrument's own stored currency** says whether
+this particular listing is that currency. London matters here because it lists USD- and
+EUR-denominated lines alongside its pence ones — an exchange-only rule divided those by 100 too,
+producing a plausible number that nothing downstream would reject. Callers pass the stored currency
+into `getQuote`/`getPriceHistory`; `tests/minor-unit.test.mjs` pins every case.
+
+The minor-unit list is deliberately three entries. Hong Kong, Tokyo, Sydney, Toronto, Singapore and
+Mumbai all quote in major units — **adding exchanges to that map manufactures 100× errors rather
+than preventing them.** Extend it only for an exchange whose quotes are genuinely in a minor unit.
+
+Net: for an international portfolio Yahoo is the structurally safer feed, and it is the only one
+with option chains. EODHD's advantage is **licensing**, which is what matters once the product
+charges money.
+
 ---
 
 *Built with Claude Code. Product strategy, roadmap, and audit docs: see `CLAUDE.md` and `docs/`.*

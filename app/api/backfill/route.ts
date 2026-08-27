@@ -38,15 +38,15 @@ export async function GET(request: Request) {
   // past value still belongs on the historical line. Join to instruments for the symbol/exchange.
   const { data: txInsts, error } = await admin
     .from("transactions")
-    .select("instrument_id, instruments(symbol, exchange, type)");
+    .select("instrument_id, instruments(symbol, exchange, type, currency)");
   if (error) return new Response(error.message, { status: 500 });
 
-  type Row = { instrument_id: string; instruments: { symbol: string; exchange: string; type: string | null } | null };
-  const byId = new Map<string, { id: string; symbol: string; exchange: string; type: string | null }>();
+  type Row = { instrument_id: string; instruments: { symbol: string; exchange: string; type: string | null; currency: string | null } | null };
+  const byId = new Map<string, { id: string; symbol: string; exchange: string; type: string | null; currency: string | null }>();
   for (const r of (txInsts ?? []) as unknown as Row[]) {
     const inst = r.instruments;
     if (!inst || !r.instrument_id || byId.has(r.instrument_id)) continue;
-    byId.set(r.instrument_id, { id: r.instrument_id, symbol: inst.symbol, exchange: inst.exchange, type: inst.type });
+    byId.set(r.instrument_id, { id: r.instrument_id, symbol: inst.symbol, exchange: inst.exchange, type: inst.type, currency: inst.currency });
   }
   // Crypto weekly history isn't reliably available via the equity price feed and is a negligible
   // slice — skip it here (current value still shows on the dashboard).
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     await Promise.all(
       instruments.slice(i, i + BATCH).map(async (inst) => {
         try {
-          await syncInstrumentPriceHistory(admin, inst.id, inst.symbol, inst.exchange, fromDays);
+          await syncInstrumentPriceHistory(admin, inst.id, inst.symbol, inst.exchange, fromDays, inst.currency);
           ok++;
         } catch {
           failed++;

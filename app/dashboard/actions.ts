@@ -83,7 +83,7 @@ export async function addTransaction(formData: FormData) {
   );
 
   // Fetch a fresh price + full dividend sync for this instrument right away.
-  const q = await getQuote(symbol, exchange);
+  const q = await getQuote(symbol, exchange, inst.currency);
   if (q.price != null) {
     await admin.from("price_cache").upsert({
       instrument_id: inst.id, price: q.price, currency: inst.currency,
@@ -91,7 +91,7 @@ export async function addTransaction(formData: FormData) {
     });
   }
   await syncInstrumentDividends(admin, inst.id, symbol, exchange, inst.currency);
-  await syncInstrumentPriceHistory(admin, inst.id, symbol, exchange);
+  await syncInstrumentPriceHistory(admin, inst.id, symbol, exchange, undefined, inst.currency);
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/performance");
@@ -127,7 +127,7 @@ export async function refreshPrices() {
   for (let i = 0; i < pos.length; i += 10) {
     await Promise.all(
       pos.slice(i, i + 10).map(async (p) => {
-        const q = await getQuote(p.symbol, p.exchange);
+        const q = await getQuote(p.symbol, p.exchange, p.currency);
         if (q.price != null) {
           await admin.from("price_cache").upsert({
             instrument_id: p.instrument_id, price: q.price,
@@ -269,7 +269,7 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
         const inst = instByKey.get(key);
         if (!inst) return;
         const [symbol, exchange] = key.split("|");
-        const q = await getQuote(symbol, exchange);
+        const q = await getQuote(symbol, exchange, inst.currency);
         if (q.price != null) {
           await admin.from("price_cache").upsert({
             instrument_id: inst.id, price: q.price, currency: inst.currency,

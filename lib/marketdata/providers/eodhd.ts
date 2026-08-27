@@ -65,14 +65,37 @@ function daysAgo(n: number): string {
   return new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 }
 
-// Exchanges that quote in a minor unit, so prices/dividends come back 100x. EODHD's price
-// endpoints don't return a currency, and its fundamentals endpoint is billed at a multiple of a
-// normal call — far too expensive to fetch per instrument on the nightly sync just to learn a
-// divisor. The exchange code settles it deterministically and for free. Mirrors the MINOR_UNIT
-// set in ../normalize.
-const MINOR_UNIT_EXCHANGE = new Set(["LSE", "JSE", "TA"]);
-function exchangeDivisor(exchange: string): number {
-  return MINOR_UNIT_EXCHANGE.has((exchange || "US").toUpperCase()) ? 100 : 1;
+// --- Minor-unit handling -------------------------------------------------------------------
+// Some exchanges quote in a minor unit, so prices and dividends come back 100x: London in pence,
+// Johannesburg in cents, Tel Aviv in agorot. EODHD's price endpoints return no currency, and its
+// fundamentals endpoint is billed at a multiple of a normal call — far too expensive to fetch per
+// instrument on the nightly sync just to learn a divisor.
+//
+// The exchange code alone is NOT enough to answer this, which is the trap worth naming: London
+// lists USD- and EUR-denominated lines (ETFs, depositary receipts) right alongside its pence-quoted
+// GBP ones. Dividing those by 100 is as wrong as failing to divide a pence line, and nothing
+// downstream would catch it — the result is simply a plausible number that is 100x too small.
+//
+// So the exchange says which currency is quoted in a minor unit, and the instrument's own stored
+// currency decides whether this particular listing is that currency. A USD line on LSE divides by
+// 1. Only when the caller has no stored currency to offer do we fall back to the exchange alone.
+//
+// This list is deliberately short. It covers the exchanges that genuinely quote in minor units —
+// Hong Kong, Tokyo, Sydney, Toronto, Singapore, Mumbai and the rest all quote in major units, and
+// adding them here would manufacture 100x errors where none exist.
+const MINOR_UNIT_EXCHANGE: Record<string, string> = {
+  LSE: "GBP", // pence (GBX/GBp)
+  JSE: "ZAR", // cents (ZAc)
+  TA: "ILS",  // agorot (ILa)
+};
+
+function minorUnitDivisor(exchange: string, knownCurrency?: string | null): number {
+  const major = MINOR_UNIT_EXCHANGE[(exchange || "US").toUpperCase()];
+  if (!major) return 1;
+  // No stored currency (e.g. the very first quote for a brand-new instrument): fall back to the
+  // exchange's dominant convention, which is the pence/cents line on all three of these.
+  if (!knownCurrency) return 100;
+  return normalizeCurrency(knownCurrency).currency === major ? 100 : 1;
 }
 
 // --- Fundamentals ------------------------------------------------------------------------------
@@ -104,7 +127,11 @@ function fundamentals(symbol: string, exchange: string): Promise<Fundamentals | 
 
 // --- Port methods ------------------------------------------------------------------------------
 
-async function getQuote(symbol: string, exchange: string): Promise<Quote> {
+async function getQuote(
+  symbol: string,
+  exchange: string,
+  knownCurrency?: string | null
+): Promise<Quote> {
   const empty: Quote = { price: null, currency: null, changePct: null };
   const d = await get<{ close?: unknown; change_p?: unknown }>(
     `/real-time/${encodeURIComponent(ticker(symbol, exchange))}`,
@@ -112,7 +139,7 @@ async function getQuote(symbol: string, exchange: string): Promise<Quote> {
   );
   if (!d) return empty;
   const price = num(d.close);
-  const divisor = exchangeDivisor(exchange);
+  const divisor = minorUnitDivisor(exchange, knownCurrency);
   return {
     price: price != null ? price / divisor : null,
     // The real-time endpoint doesn't return a currency; the instrument row carries it (set from
@@ -210,7 +237,8 @@ async function getDividendHistory(
 async function getPriceHistory(
   symbol: string,
   exchange: string,
-  fromDays: number
+  fromDays: number,
+  knownCurrency?: string | null
 ): Promise<PriceHistoryPoint[]> {
   // Weekly bars (period=w) to match the Yahoo provider: ~52 points/year per instrument, light to
   // store and to draw. adjusted_close so splits don't put a false cliff in the value chart.
@@ -219,7 +247,7 @@ async function getPriceHistory(
     86_400
   );
   if (!Array.isArray(rows)) return [];
-  const divisor = exchangeDivisor(exchange);
+  const divisor = minorUnitDivisor(exchange, knownCurrency);
   const out: PriceHistoryPoint[] = [];
   for (const r of rows) {
     const date = ymd(r.date);

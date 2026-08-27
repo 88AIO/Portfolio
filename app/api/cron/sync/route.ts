@@ -131,7 +131,7 @@ export async function GET(request: Request) {
         try {
           await syncInstrumentQuote(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
           await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
-          await syncInstrumentPriceHistory(admin, p.instrument_id, p.symbol, p.exchange);
+          await syncInstrumentPriceHistory(admin, p.instrument_id, p.symbol, p.exchange, undefined, p.currency);
 
           if (!p.sector && !p.sector_weights) {
             await enrichInstrumentProfile(admin, {
