@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26 · **Scope:** whole repo + vendor stack, at current use / 10× / 100× / 12 mo / 36 mo · **Method:** six parallel domain audits (assets, database, tech debt, performance/cost, vendors/financials, architecture/process) + an adversarial verification pass on every removal candidate. **Nothing was removed, cancelled, or disabled in this audit.** Every claim carries file:line evidence in the audit transcript; every dollar figure is labeled **PE** (provider estimate, public pricing verified 2026-08-26) or **A** (assumption, stated). No invoices or runtime telemetry were reachable — pre-launch, ~1 real user, no analytics by design.
 
-> **Read the “Verified since publication” section at the end before relying on any figure here.** Four items in this report (Vercel plan, cron firing, data scale, EODHD completeness) were later checked against the live account or superseded by shipped work and corrected there; where the body and that section disagree, that section wins.
+> **Read the “Verified since publication” section at the end before relying on any figure here.** Five items in this report (Vercel plan, cron firing, data scale, EODHD completeness, and the first measured nightly sync) were later checked against the live account or superseded by shipped work and corrected there; where the body and that section disagree, that section wins.
 
 ---
 
@@ -132,7 +132,7 @@ Checked directly against the Vercel account after the remediation deploy. Each o
 
 1. **All three crons fire.** `sync` ran 2026-08-26 06:00:22Z (brokersync logged its own completion), `alerts` 13:00:47Z → **200**, `digest` Mon 2026-08-24 14:00:05Z → **200**. The HIGH finding "a cron may silently never fire" is **closed — no cron is being dropped**. What remains unverified is only whether `RESEND_API_KEY` is set (the routes 200 either way, since `sendEmail` no-ops without it).
 2. **The Vercel plan is Pro, not Hobby.** The $20/mo in the 10× cost model is therefore **already being paid today**, not a future step-change — and the "Hobby is non-commercial, upgrade before charging" HIGH finding is **moot**. Today's true stack cost is ~$20/mo, not $0. Everything else in the cost table stands.
-3. **Data scale is far larger than assumed.** The nightly broker sync reports **10 accounts, 1,941 holdings, 183 option legs** — the audit assumed "~1 user, 20–60 instruments". The sync still completes inside its 300s budget, but the "~400–800 distinct instruments" ceiling is **much nearer than modelled**. Treat the chunked-sync work in section F as the next scale item to watch, and read the first `sync_runs.duration_ms` values as the real measurement (the audit could only estimate).
+3. **Data scale — assumed low, then over-corrected, now measured.** The nightly broker sync reports **10 accounts, 1,941 holdings, 183 option legs** against an assumed "~1 user, 20–60 instruments", which read as *"the ~400–800 instrument ceiling is much nearer than modelled."* **That over-corrected.** Holdings are not instruments: the same tickers repeat across the 10 accounts. The 2026-08-27 06:00Z run measured **76 distinct instruments** — the number that actually drives the sync — so the ceiling is far away, not near. See #5 for the full measurement.
 
 4. **The EODHD escape hatch is now built — except options.** Finding #2 above described it as ⅓ complete. As of commit 8e3e417 the provider implements quotes, FX, search, price history, dividend history, dividend info, profile and fund breakdown; only `getOptionChain` is unimplemented, because EODHD sells chains as a separate marketplace add-on rather than in any base plan. `capabilities.options` stays `false` and the put finder now says so rather than reporting an empty scan. **This does not soften the licensing gate** — Yahoo remains outside its terms for commercial use, and the switch must still happen before the first paid dollar.
 
@@ -140,4 +140,16 @@ Checked directly against the Vercel account after the remediation deploy. Each o
    - EODHD's price endpoints return **no currency**, so the minor-unit ÷100 (London pence, Johannesburg cents, Tel Aviv agorot) must be inferred. The exchange code alone is not sufficient: London lists USD- and EUR-denominated lines next to its pence ones. The divisor is now decided by the instrument's own stored currency, pinned by `tests/minor-unit.test.mjs`. **Yahoo has no equivalent risk** — it reports a currency per quote, so for an international portfolio Yahoo is the structurally safer feed and the licensing gate is the *only* reason to leave it.
    - Steady-state nightly cost under EODHD is **4 requests per distinct instrument** (quote, dividend info via `/fundamentals`, dividend history, price history) plus one FX call per currency. `/fundamentals` is billed at a multiple of a normal call, so with ~1,941 holdings this is the line item to price against a plan's daily allowance before switching.
 
-The end-to-end proof of the migration is the next nightly sync (06:00Z) writing the first `sync_runs` row with a real duration and provider-call count.
+5. **First measured nightly sync — 2026-08-27 06:00:47Z, all figures MEASURED, not estimated.**
+
+   ```
+   {"provider":"yahoo","synced":76,"failed":0,"total":76,"ivCaptured":53,
+    "brokerOptionLegs":0,"valueSnapshots":5,"fxUpdated":10,
+    "providerCalls":484,"durationMs":17559}
+   ```
+
+   - **`durationMs` 17,559 against the 300,000 ms ceiling — 5.9% of budget.** The audit could only estimate this. Section F's chunked-sync trigger (*">~400 instruments or duration >200s"*) is nowhere close on either axis; **defer it**, and stop treating it as the next scale item.
+   - **`providerCalls` 484** — the first real per-night vendor usage figure, and the input the audit wanted for sizing a licensed provider. It decomposes as ~4 per instrument (304) + 10 FX + ~170 across the IV samples.
+   - **`failed` 0 of 76**, no runtime errors in 12h. `ivCaptured` 53 and `fxUpdated` 10 confirm option chains and multi-currency conversion are both live.
+   - **This run's EODHD cost implication is much smaller than the 1,941-holdings framing suggested**: 76 instruments × 4 requests = ~304/night, of which **76 are `/fundamentals`** (billed at a premium). Price the switch against 76, not 1,941.
+   - **`provider` reads `yahoo`.** Production was switched to EODHD and then rolled back before this run, deliberately: Yahoo derives the minor-unit divisor from each quote's own currency (safer for this international portfolio, which spans 10 currencies), keeps the put finder and IV rank alive (`ivCaptured` 53 above would be 0 on EODHD), and is free. **The licensing gate in finding #2 is unchanged and unpaid** — Yahoo's terms do not cover commercial use, so the EODHD switch is still mandatory before the first paid dollar, and the options add-on must be quoted before pricing.
