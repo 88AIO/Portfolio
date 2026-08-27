@@ -6,7 +6,7 @@ import {
   syncIvSample,
 } from "@/lib/marketdata/sync";
 import { enrichInstrumentProfile } from "@/lib/enrich";
-import { searchInstrument } from "@/lib/marketdata";
+import { searchInstrument, providerSupportsOptions } from "@/lib/marketdata";
 import { FINDER_UNIVERSE } from "@/lib/options/finder-universe";
 import { runBrokerSyncForUser } from "@/lib/brokersync/run";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
@@ -126,10 +126,14 @@ export async function GET(request: Request) {
 
   // Capture a daily IV sample for every US name the O3 put finder can scan (held + its seed
   // universe), so IV Rank builds a trailing range even on days no one runs a manual scan.
-  const ivUniverse = [...new Set([
-    ...held.filter((p) => (p.exchange ?? "US").toUpperCase() === "US").map((p) => p.symbol.toUpperCase()),
-    ...FINDER_UNIVERSE,
-  ])];
+  // Skipped wholesale when the provider has no option chains, so the run doesn't spend a few
+  // hundred no-op iterations discovering that one symbol at a time.
+  const ivUniverse = providerSupportsOptions()
+    ? [...new Set([
+        ...held.filter((p) => (p.exchange ?? "US").toUpperCase() === "US").map((p) => p.symbol.toUpperCase()),
+        ...FINDER_UNIVERSE,
+      ])]
+    : [];
   let ivOk = 0;
   for (let i = 0; i < ivUniverse.length; i += BATCH) {
     await Promise.all(

@@ -111,9 +111,37 @@ makes every LSE price 100× off) and the dividend-yield scale (fraction vs. perc
 Run this rather than pointing a preview deployment at EODHD. `price_cache`, `price_history`,
 `dividends`, and `instruments` are **shared reference tables written with the service-role key and
 are not scoped per environment** — with a single Supabase project, a preview deploy running the
-nightly sync overwrites the same rows production reads. Flip `MARKET_DATA_PROVIDER=eodhd` only
-after the dry run is clean (and note that the options cockpit, wheel, and put finder go dark on
-EODHD — see the matrix above).
+nightly sync overwrites the same rows production reads.
+
+### The cutover
+
+Only after `npm run verify:eodhd` exits 0.
+
+1. **Check the call budget against your plan.** Steady state, the nightly sync makes **4 provider
+   requests per distinct instrument**: quote, dividend info (`/fundamentals`), dividend history,
+   price history — plus one FX call per distinct currency, and a one-off `/search` for any
+   instrument still showing a bare ticker as its name. The `/fundamentals` one is the expensive
+   one: EODHD bills it at a multiple of a normal call. Multiply by your instrument count and
+   confirm it fits your plan's daily allowance before the first night, not after.
+2. **Set both variables in Vercel → Settings → Environment Variables, Production:**
+   `EODHD_API_TOKEN` = your token, and `MARKET_DATA_PROVIDER` = `eodhd`.
+3. **Redeploy.** Env vars are read at runtime, but a redeploy is the clean way to be sure every
+   running function picks them up.
+4. **Trigger one sync and read the result** — `sync_runs` records `duration_ms`, `providerCalls`,
+   and `failed_symbols` for the run. `failed_symbols` should be empty or near it; `providerCalls`
+   should land near your step-1 estimate. A big gap either way means stop.
+5. **Spot-check the data it wrote**: one US name and one LSE name in `price_cache`, against a
+   public quote. This is the last place a wrong ÷100 can still be caught.
+
+**Rollback** is one variable: set `MARKET_DATA_PROVIDER` back to `yahoo` and redeploy. The next
+nightly sync overwrites whatever EODHD wrote, since every table it touches is an upsert keyed by
+instrument. Nothing is migrated or destroyed by the switch, so there is no restore step.
+
+**What changes for users:** the options cockpit and wheel keep working — they're computed from the
+user's own recorded transactions, not from chains. The **put finder** and **IV rank** go dark,
+because EODHD sells option chains only as a separate add-on. The finder says so plainly instead of
+reporting an empty scan (`optionsUnavailable` on `FinderResult`), and the nightly IV sample is
+skipped rather than failing once per symbol.
 
 ---
 

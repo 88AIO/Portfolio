@@ -224,6 +224,10 @@ export type FinderResult = {
   truncated: boolean;
   targetDte: number;
   otmPct: number;
+  // Set when the configured market-data provider sells no option chains (see
+  // capabilities.options in lib/marketdata). Without it an empty scan is indistinguishable from
+  // "no liquid puts today", and the UI would explain a missing feed as a quiet market.
+  optionsUnavailable?: boolean;
 };
 
 export function statusLabel(s: OptionStatus): string {

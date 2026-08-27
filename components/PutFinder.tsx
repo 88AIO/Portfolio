@@ -57,7 +57,18 @@ export default function PutFinder() {
         </button>
       </div>
 
-      {res && (
+      {res?.optionsUnavailable && (
+        <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-medium">Option data isn&apos;t available right now.</p>
+          <p className="mt-1 text-amber-800">
+            The market-data provider this app is currently set to doesn&apos;t cover option chains, so there&apos;s
+            nothing to scan — this isn&apos;t a quiet market. Your recorded option positions, premium, and wheel
+            history are unaffected; they come from your own transactions.
+          </p>
+        </div>
+      )}
+
+      {res && !res.optionsUnavailable && (
         <div className="mt-5">
           <p className="mb-3 text-xs text-slate-400">
             Ranked by annualized return-on-capital · scanned {res.scanned} names at ~{res.targetDte} DTE, ~{res.otmPct}% OTM

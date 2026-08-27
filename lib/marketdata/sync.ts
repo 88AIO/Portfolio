@@ -9,6 +9,7 @@ import {
   getPriceHistory,
   getQuote,
   getOptionChain,
+  providerSupportsOptions,
 } from "@/lib/marketdata";
 
 type Admin = ReturnType<typeof createAdminClient>;
@@ -23,6 +24,9 @@ export async function syncIvSample(
   exchange: string,
   targetDte = 35
 ): Promise<boolean> {
+  // No chains from this provider means no IV to sample — bail before the call rather than logging
+  // a failure per symbol per night.
+  if (!providerSupportsOptions()) return false;
   const base = await getOptionChain(symbol, exchange);
   if (!base) return false;
   const now = Date.now();

@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote, getOptionChain } from "@/lib/marketdata";
+import { getQuote, getOptionChain, providerSupportsOptions } from "@/lib/marketdata";
 import type { FinderRow, FinderResult } from "@/lib/options";
 import { dividendSafety, type DividendPoint } from "@/lib/dividends/safety";
 import { computeIvRank, IV_RANK_WINDOW_DAYS, type IvSample } from "@/lib/options/iv-rank";
@@ -30,6 +30,14 @@ export async function scanPutFinder(input?: {
   // caller shouldn't be able to drive that external cost.
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { rows: [], scanned: 0, truncated: false, targetDte, otmPct };
+
+  // Not every provider sells option chains (EODHD gates them behind a separate marketplace
+  // add-on). Say so up front rather than scanning: every symbol would come back null and the
+  // result would look identical to a thin market. Checked before the scan cache too, so a scan
+  // cached under a provider that had chains isn't replayed under one that doesn't.
+  if (!providerSupportsOptions()) {
+    return { rows: [], scanned: 0, truncated: false, targetDte, otmPct, optionsUnavailable: true };
+  }
 
   const { data: pos } = await supabase
     .from("positions").select("symbol, exchange").limit(300);
