@@ -200,6 +200,11 @@ export async function GET(request: Request) {
     providerCalls: takeProviderCallCount(),
   };
   await recordSyncRun(admin, "sync", startedAt, summary, failedSymbols);
+  // Also emit the summary to the platform log. sync_runs is the durable record, but it needs
+  // database access to read; this line makes a run diagnosable from the deployment logs alone —
+  // which is the difference between "the switch worked" and "nobody can tell". Counts and a
+  // provider name only: no user data, no secrets.
+  console.log(`[cron:sync] summary ${JSON.stringify({ ...summary, durationMs: Date.now() - startedAt })}`);
 
   // Wake the founder when a run goes wrong: any failures, or a run that synced nothing while
   // holdings exist (a dead provider or a mid-run timeout). Best-effort — the founder emails are the
