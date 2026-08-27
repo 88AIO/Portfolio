@@ -93,6 +93,28 @@ a real payload.
 development use; a paid product should move to a licensed provider. That is what the EODHD path
 exists for.
 
+### Before switching to EODHD
+
+```bash
+EODHD_API_TOKEN=your-token npm run verify:eodhd
+# or pick your own tickers:
+EODHD_API_TOKEN=your-token npm run verify:eodhd -- AAPL:US SCHD:US ULVR:LSE
+```
+
+`scripts/verify-eodhd.mjs` calls **both** providers for the same tickers and diffs them — prices,
+currency, weekly history, dividend rate/yield/history, sector labels, fund weights, FX — and exits
+non-zero if anything looks wrong. It **reads only; it writes nothing to Supabase.** It is looking
+for the two ways this provider can be confidently wrong: the minor-unit ÷100 (EODHD's price
+endpoints return no currency, so the provider infers it from the exchange code — a wrong guess
+makes every LSE price 100× off) and the dividend-yield scale (fraction vs. percent).
+
+Run this rather than pointing a preview deployment at EODHD. `price_cache`, `price_history`,
+`dividends`, and `instruments` are **shared reference tables written with the service-role key and
+are not scoped per environment** — with a single Supabase project, a preview deploy running the
+nightly sync overwrites the same rows production reads. Flip `MARKET_DATA_PROVIDER=eodhd` only
+after the dry run is clean (and note that the options cockpit, wheel, and put finder go dark on
+EODHD — see the matrix above).
+
 ---
 
 *Built with Claude Code. Product strategy, roadmap, and audit docs: see `CLAUDE.md` and `docs/`.*
