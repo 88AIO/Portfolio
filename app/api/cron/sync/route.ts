@@ -6,7 +6,7 @@ import {
   syncIvSample,
 } from "@/lib/marketdata/sync";
 import { enrichInstrumentProfile } from "@/lib/enrich";
-import { searchInstrument, providerSupportsOptions } from "@/lib/marketdata";
+import { searchInstrument, providerSupportsOptions, providerName, providerConfigError } from "@/lib/marketdata";
 import { FINDER_UNIVERSE } from "@/lib/options/finder-universe";
 import { runBrokerSyncForUser } from "@/lib/brokersync/run";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
@@ -49,6 +49,37 @@ export async function GET(request: Request) {
   const startedAt = Date.now();
   takeProviderCallCount(); // reset the counter so the summary reflects only this run
   const admin = createAdminClient();
+
+  // --- Provider preflight ----------------------------------------------------------------------
+  // A provider switch is two environment variables, and getting one of them wrong fails silently:
+  // the run completes, writes nothing, and every price freezes. Check first, record the verdict,
+  // and tell the founder — a stale dashboard should never be the first sign of a bad config.
+  const configError = providerConfigError();
+  if (configError) {
+    console.error(`[cron:sync] provider config: ${configError.message}`);
+    const owner = (process.env.BROKER_SYNC_OWNER_EMAILS ?? "").split(",")[0]?.trim();
+    if (owner) {
+      await sendEmail(
+        owner,
+        `Snowfolio sync: market-data provider ${configError.fatal ? "misconfigured" : "warning"}`,
+        emailShell(
+          "Provider configuration",
+          `<p style="margin:0 0 10px;font-size:14px;color:#334155">${configError.message}</p>` +
+            `<p style="font-size:12px;color:#64748b">${configError.fatal ? "This run was aborted; no data was written or changed." : "The run continued on the fallback provider."}</p>`
+        )
+      );
+    }
+    if (configError.fatal) {
+      // Abort rather than spend thousands of requests confirming the same thing per instrument.
+      // Nothing is written, so the previous night's cached data stays intact and correct.
+      await recordSyncRun(
+        admin, "sync", startedAt,
+        { aborted: true, provider: providerName(), reason: configError.message },
+        []
+      );
+      return Response.json({ ok: false, aborted: true, error: configError.message }, { status: 500 });
+    }
+  }
 
   // --- Brokerage auto-sync (runs first, so newly-synced holdings get priced in the same run) ---
   // Candidates are the users with a broker_connections row (only the owner-gated connect flow can
@@ -161,6 +192,9 @@ export async function GET(request: Request) {
   }
 
   const summary = {
+    // Which provider actually served the run — the one number that confirms a switch took effect,
+    // read back from sync_runs after the first night on a new provider.
+    provider: providerName(),
     synced: ok, failed, total: held.length, ivCaptured: ivOk,
     brokerOptionLegs: brokerSynced, valueSnapshots, fxUpdated,
     providerCalls: takeProviderCallCount(),

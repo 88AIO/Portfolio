@@ -33,6 +33,45 @@ export function getProvider(): MarketDataProvider {
   return PROVIDERS[key] ?? yahooProvider;
 }
 
+export function providerName(): string {
+  return getProvider().name;
+}
+
+// Misconfigurations that would otherwise degrade in silence. Both failure modes below leave the
+// app looking healthy — pages render, no error is thrown — while the data quietly stops moving or
+// comes from a provider the operator didn't choose. The nightly sync checks this before doing any
+// work and records the answer, so a provider switch reports back instead of being discovered weeks
+// later from a stale "prices as of" date.
+export function providerConfigError(): { fatal: boolean; message: string } | null {
+  const raw = process.env.MARKET_DATA_PROVIDER;
+  const key = (raw || "yahoo").toLowerCase();
+
+  // A typo silently serves Yahoo. Data stays correct, but the switch did not actually happen and
+  // nothing says so.
+  if (!(key in PROVIDERS)) {
+    return {
+      fatal: false,
+      message:
+        `MARKET_DATA_PROVIDER is "${raw}", which is not a known provider ` +
+        `(${Object.keys(PROVIDERS).join(", ")}). Serving yahoo instead — the intended switch has NOT taken effect.`,
+    };
+  }
+
+  // Selected EODHD with no key: every call returns null, every write is skipped by its own guard,
+  // and prices freeze at their last good value with no error anywhere.
+  if (key === "eodhd" && !process.env.EODHD_API_TOKEN) {
+    return {
+      fatal: true,
+      message:
+        "MARKET_DATA_PROVIDER=eodhd but EODHD_API_TOKEN is not set in this environment. " +
+        "Every provider call would return null and the run would write nothing, leaving all prices " +
+        "frozen at their last value. Set the token in the same environment as the provider variable.",
+    };
+  }
+
+  return null;
+}
+
 // Count every provider round trip made in this process. Within one serverless invocation this is
 // exactly that run's vendor-call total — the nightly cron reads (and resets) it into its recorded
 // summary, the only usage number we have for the free Yahoo feed until a paid provider's dashboard
