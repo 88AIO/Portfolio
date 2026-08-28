@@ -74,16 +74,74 @@ function normalizeHeader(h: string): string {
   return HEADER_ALIASES[k] ?? k;
 }
 
+// Locales disagree about which of "." and "," is the decimal point, and getting it backwards is
+// silent: "1.234,56" (European for 1234.56) read as 1.23456 is a ~1000x error that no downstream
+// validation rejects, because 1.23456 is still a plausible price.
 function toNumber(v: string): number {
-  const s = v.replace(/[^0-9.\-]/g, "");
-  if (s === "" || s === "-" || s === ".") return NaN;
-  return Number(s);
+  let s = v.trim();
+  if (!s) return NaN;
+
+  // Accounting notation: (1,234.56) means negative.
+  let negative = false;
+  if (/^\(.*\)$/.test(s)) {
+    negative = true;
+    s = s.slice(1, -1).trim();
+  }
+
+  // Drop currency symbols and spaces — including the thin/non-breaking spaces several locales use
+  // as the thousands separator.
+  s = s.replace(/[^\d.,+-]/g, "");
+  if (s.startsWith("-")) {
+    negative = !negative;
+    s = s.slice(1);
+  } else if (s.startsWith("+")) {
+    s = s.slice(1);
+  }
+  if (/[+-]/.test(s)) return NaN; // a sign mid-number is not something to guess at
+
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+  if (lastComma !== -1 && lastDot !== -1) {
+    // Both present: the RIGHTMOST separator is the decimal point, the other groups thousands.
+    s = lastComma > lastDot ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
+  } else if (lastComma !== -1) {
+    // Commas only, and genuinely ambiguous in isolation: "1,234" is 1234 in the US and 1.234 in
+    // much of Europe. Three trailing digits (or more than one comma) reads as thousands groups,
+    // matching the US-first default; anything else ("99,95") is a decimal comma.
+    const groups = s.split(",");
+    const grouped = groups.length > 2 || groups[groups.length - 1].length === 3;
+    s = grouped ? s.replace(/,/g, "") : s.replace(",", ".");
+  }
+
+  if (s === "" || s === ".") return NaN;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return NaN;
+  return negative ? -n : n;
 }
 
 // Accept ISO (YYYY-MM-DD) directly; otherwise parse and reformat. Returns null if unparseable.
 function toIsoDate(s: string): string | null {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const d = new Date(s);
+  const t = s.trim();
+
+  // An ISO date states a calendar day, so take it verbatim — with or without a time suffix.
+  // Routing "2024-01-15T00:00:00Z" through Date would re-read it as an instant, and the local
+  // getters below would then report Jan 14 anywhere west of UTC: a trade silently moved a day,
+  // and at a year boundary moved into the wrong tax year. Production runs in UTC, which hides
+  // this; a user's own machine would not.
+  const iso = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (iso) {
+    const [, y, mo, d] = iso;
+    const probe = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
+    const real =
+      probe.getUTCFullYear() === Number(y) &&
+      probe.getUTCMonth() === Number(mo) - 1 &&
+      probe.getUTCDate() === Number(d);
+    return real ? `${y}-${mo}-${d}` : null; // rejects 2024-13-45 rather than passing it on
+  }
+
+  // Everything else ("03/15/2024", "Mar 15, 2024") carries no timezone, so Date reads it as local
+  // midnight and the local getters read it back unchanged.
+  const d = new Date(t);
   if (isNaN(d.getTime())) return null;
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -100,6 +158,10 @@ export function parseTransactionsCsv(text: string): ParseResult {
     transformHeader: normalizeHeader,
   });
 
+  // Whether the file declares a type column at all — a blank cell means something different in a
+  // file that has one than in a bare holdings list.
+  const hasTypeColumn = (parsed.meta?.fields ?? []).includes("type");
+
   parsed.data.forEach((raw, i) => {
     const line = i + 2; // +1 header row, +1 for 1-based numbering
     const get = (k: string) => (raw[k] ?? "").toString().trim();
@@ -114,10 +176,24 @@ export function parseTransactionsCsv(text: string): ParseResult {
     }
 
     const rawType = get("type").toLowerCase();
-    const type = rawType ? TYPE_ALIASES[rawType] : "buy";
-    if (!type) {
-      errors.push({ line, message: `Unknown type "${rawType}"` });
-      return;
+    let type: string;
+    if (!rawType) {
+      // No type column anywhere → a plain holdings list, so "buy" is the sensible reading. But a
+      // BLANK cell in a file that DOES declare the column is missing data, and defaulting it
+      // invents a purchase the user never made — the kind of wrong number that only surfaces
+      // later, in their cost basis.
+      if (hasTypeColumn) {
+        errors.push({ line, message: "Missing type" });
+        return;
+      }
+      type = "buy";
+    } else {
+      const mapped = TYPE_ALIASES[rawType];
+      if (!mapped) {
+        errors.push({ line, message: `Unknown type "${rawType}"` });
+        return;
+      }
+      type = mapped;
     }
 
     const quantity = toNumber(get("quantity"));
