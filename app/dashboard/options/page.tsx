@@ -52,7 +52,7 @@ type LedgerRow = {
   fees: number | null;
   currency: string;
   executed_at: string;
-  instruments: { symbol: string } | { symbol: string }[] | null;
+  instruments: { symbol: string; exchange: string | null } | { symbol: string; exchange: string | null }[] | null;
 };
 
 // Raw option-transaction leg joined to its underlying symbol, for the per-ticker wheel history.
@@ -67,10 +67,10 @@ type OptTxnRow = {
   fee: number | null;
   currency: string;
   trade_date: string;
-  instruments: { symbol: string } | { symbol: string }[] | null;
+  instruments: { symbol: string; exchange: string | null } | { symbol: string; exchange: string | null }[] | null;
 };
 
-function relSymbol(rel: { symbol: string } | { symbol: string }[] | null): string {
+function relSymbol(rel: { symbol: string; exchange: string | null } | { symbol: string; exchange: string | null }[] | null): string {
   const r = Array.isArray(rel) ? rel[0] : rel;
   return r?.symbol ?? "";
 }
@@ -90,7 +90,7 @@ export default async function OptionsPage() {
     fetchAll<LedgerRow>((from, to) =>
       supabase
         .from("transactions")
-        .select("id, type, quantity, price, fees, currency, executed_at, instruments(symbol)")
+        .select("id, type, quantity, price, fees, currency, executed_at, instruments(symbol, exchange)")
         .order("executed_at", { ascending: true })
         .order("instrument_id", { ascending: true })
         .range(from, to),
@@ -100,7 +100,7 @@ export default async function OptionsPage() {
     fetchAll<OptTxnRow>((from, to) =>
       supabase
         .from("option_transactions")
-        .select("id, action, option_type, strike, expiration, contracts, premium, fee, currency, trade_date, instruments(symbol)")
+        .select("id, action, option_type, strike, expiration, contracts, premium, fee, currency, trade_date, instruments(symbol, exchange)")
         .order("trade_date", { ascending: true })
         .order("id", { ascending: true })
         .range(from, to),
@@ -208,6 +208,7 @@ export default async function OptionsPage() {
       const rel = Array.isArray(t.instruments) ? t.instruments[0] : t.instruments;
       return {
         symbol: rel?.symbol ?? "",
+        exchange: rel?.exchange ?? null,
         currency: t.currency,
         type: t.type,
         quantity: t.quantity,

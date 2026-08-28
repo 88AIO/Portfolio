@@ -86,7 +86,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
 
   // Realized gains (FIFO) on this symbol.
   const ledger: LedgerTx[] = txs.map((t) => ({
-    symbol: instrument.symbol, currency: ccy, type: t.type,
+    symbol: instrument.symbol, exchange: instrument.exchange, currency: ccy, type: t.type,
     quantity: t.quantity, price: t.price, fees: t.fees, executed_at: t.executed_at,
   }));
   const realized = summarizeRealized(computeRealizedLots(ledger), () => 1);

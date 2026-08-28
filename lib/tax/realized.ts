@@ -7,6 +7,8 @@
 
 export type LedgerTx = {
   symbol: string;
+  // Optional, but pass it when you have it: a ticker string alone does not identify an instrument.
+  exchange?: string | null;
   currency: string;
   type: string; // buy | sell | dividend | deposit | withdrawal
   quantity: number;
@@ -29,11 +31,24 @@ export type RealizedLot = {
 
 type OpenLot = { qty: number; costPerShare: number; date: string };
 
-const DAY = 86_400_000;
-
-/** Held ≥ 365 days → long-term (US). Uses calendar days from open to close. */
+/**
+ * Long-term when held MORE than one calendar year (US).
+ *
+ * IRS Pub. 550: the holding period begins the day AFTER acquisition and includes the day of
+ * disposal, and a gain is long-term only if the property was held more than one year — so a sale
+ * ON the one-year anniversary is still short-term. A day-count rule gets this wrong twice: it
+ * calls the anniversary long-term, and it misjudges any period spanning a leap day, where one
+ * calendar year is 366 days. Long-term rates are lower, so both errors understate the tax owed.
+ *
+ * Compare calendar anniversaries instead of counting days. A Feb-29 purchase has no Feb-29
+ * anniversary; it rolls to Mar 1, which keeps the sale short-term a day longer — the conservative
+ * direction.
+ */
 function isLongTerm(openDate: string, closeDate: string): boolean {
-  return (Date.parse(closeDate) - Date.parse(openDate)) / DAY >= 365;
+  const open = new Date(`${openDate}T00:00:00Z`);
+  if (Number.isNaN(open.getTime())) return false;
+  const anniversary = Date.UTC(open.getUTCFullYear() + 1, open.getUTCMonth(), open.getUTCDate());
+  return Date.parse(`${closeDate}T00:00:00Z`) > anniversary;
 }
 
 // Process buys before sells on the same day so a same-day round trip matches correctly.
@@ -48,16 +63,22 @@ function order(a: LedgerTx, b: LedgerTx): number {
  * Only buy/sell transactions matter; dividends/cash movements are ignored here.
  */
 export function computeRealizedLots(txs: LedgerTx[]): RealizedLot[] {
-  const bySymbol = new Map<string, LedgerTx[]>();
+  // Group by INSTRUMENT, not by ticker string. A dual-listed name shares its ticker across venues
+  // (a London line in GBP, a US line in USD), and matching a GBP buy against a USD sell produces a
+  // cost basis that is arithmetic nonsense — which the tax page then converts at the sell
+  // currency's FX rate, compounding it. Currency is the field that always distinguishes them;
+  // exchange refines it further when the caller supplies it.
+  const byInstrument = new Map<string, { symbol: string; txs: LedgerTx[] }>();
   for (const t of txs) {
     if (t.type !== "buy" && t.type !== "sell") continue;
-    const arr = bySymbol.get(t.symbol) ?? [];
-    arr.push(t);
-    bySymbol.set(t.symbol, arr);
+    const key = `${t.symbol}\u0000${t.exchange ?? ""}\u0000${t.currency}`;
+    const entry = byInstrument.get(key) ?? { symbol: t.symbol, txs: [] };
+    entry.txs.push(t);
+    byInstrument.set(key, entry);
   }
 
   const lots: RealizedLot[] = [];
-  for (const [symbol, list] of bySymbol) {
+  for (const { symbol, txs: list } of byInstrument.values()) {
     const open: OpenLot[] = [];
     for (const t of [...list].sort(order)) {
       const qty = Math.abs(t.quantity);

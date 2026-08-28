@@ -15,12 +15,19 @@ type TxRow = {
   fees: number | null;
   currency: string | null;
   executed_at: string | null;
-  instruments: { symbol: string } | { symbol: string }[] | null;
+  instruments: { symbol: string; exchange: string | null } | { symbol: string; exchange: string | null }[] | null;
 };
 
 function symbolOf(rel: TxRow["instruments"]): string | null {
   if (!rel) return null;
   return Array.isArray(rel) ? rel[0]?.symbol ?? null : rel.symbol;
+}
+
+// A ticker alone doesn't identify an instrument — a dual-listed name shares it across venues.
+// computeRealizedLots keys on symbol+exchange+currency so their lots never cross-match.
+function exchangeOf(rel: TxRow["instruments"]): string | null {
+  if (!rel) return null;
+  return Array.isArray(rel) ? rel[0]?.exchange ?? null : rel.exchange;
 }
 
 function round(n: number, dp = 2): number {
@@ -44,7 +51,7 @@ export async function GET(request: Request) {
   const data = await fetchAll<TxRow>((from, to) =>
     supabase
       .from("transactions")
-      .select("type, quantity, price, fees, currency, executed_at, instruments(symbol)")
+      .select("type, quantity, price, fees, currency, executed_at, instruments(symbol, exchange)")
       .order("executed_at", { ascending: true })
       .order("instrument_id", { ascending: true })
       .range(from, to),
@@ -53,6 +60,7 @@ export async function GET(request: Request) {
   const ledger: LedgerTx[] = (data as TxRow[])
     .map((t) => ({
       symbol: symbolOf(t.instruments) ?? "",
+      exchange: exchangeOf(t.instruments),
       currency: t.currency ?? "USD",
       type: t.type,
       quantity: t.quantity ?? 0,

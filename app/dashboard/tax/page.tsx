@@ -23,7 +23,7 @@ type TxRow = {
   fees: number | null;
   currency: string | null;
   executed_at: string | null;
-  instruments: { symbol: string } | { symbol: string }[] | null;
+  instruments: { symbol: string; exchange: string | null } | { symbol: string; exchange: string | null }[] | null;
 };
 
 type OptRow = {
@@ -38,6 +38,13 @@ type OptRow = {
 function symbolOf(rel: TxRow["instruments"]): string | null {
   if (!rel) return null;
   return Array.isArray(rel) ? rel[0]?.symbol ?? null : rel.symbol;
+}
+
+// A ticker alone doesn't identify an instrument — a dual-listed name shares it across venues.
+// computeRealizedLots keys on symbol+exchange+currency so their lots never cross-match.
+function exchangeOf(rel: TxRow["instruments"]): string | null {
+  if (!rel) return null;
+  return Array.isArray(rel) ? rel[0]?.exchange ?? null : rel.exchange;
 }
 
 export default async function TaxPage({
@@ -56,7 +63,7 @@ export default async function TaxPage({
     fetchAll<TxRow>((from, to) =>
       supabase
         .from("transactions")
-        .select("type, quantity, price, fees, currency, executed_at, instruments(symbol)")
+        .select("type, quantity, price, fees, currency, executed_at, instruments(symbol, exchange)")
         .order("executed_at", { ascending: true })
         .order("instrument_id", { ascending: true })
         .range(from, to),
@@ -70,6 +77,7 @@ export default async function TaxPage({
   const ledger: LedgerTx[] = txRows
     .map((t) => ({
       symbol: symbolOf(t.instruments) ?? "",
+      exchange: exchangeOf(t.instruments),
       currency: t.currency ?? base,
       type: t.type,
       quantity: t.quantity ?? 0,
