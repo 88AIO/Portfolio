@@ -23,7 +23,7 @@
 
 ## Headline findings
 
-1. **RESOLVED — all three crons fire.** *(Superseded, see “Verified since publication”: the project is on Vercel **Pro**, and all three crons were later observed running with 200s — this finding is closed, not merely “legal”.)* Since Jan 2026 Vercel allows 100 crons/project on every plan, and `maxDuration=300` fits under Fluid compute. The earlier 2-cron worry is dead. **Still unverified:** whether `RESEND_API_KEY`/`EMAIL_FROM` are set in Vercel env — without them the alerts + digest crons silently no-op (`lib/email.ts:9-10`), and `EMAIL_FROM` defaults to Resend's test address which only delivers to the founder. *15-minute dashboard check; two shipped features may be silently dead.*
+1. **RESOLVED — all three crons fire.** *(Superseded, see “Verified since publication”: the project is on Vercel **Pro**, and all three crons were later observed running with 200s — this finding is closed, not merely “legal”.)* Since Jan 2026 Vercel allows 100 crons/project on every plan, and `maxDuration=300` fits under Fluid compute. The earlier 2-cron worry is dead. **RESOLVED — see "Verified since publication" #6:** measured 2026-08-28, `RESEND_API_KEY` **is** set and `EMAIL_FROM` **is not**. Half the worry was real.
 2. **The whole data layer rides on unofficial, non-commercial Yahoo.** *(Partly superseded — see “Verified since publication” #4: the escape hatch is no longer ⅓ built. EODHD now implements every port method except option chains, so a switch keeps dividends, price history and enrichment. The **licensing** half of this finding stands unchanged.)* Originally: `eodhd.ts` implemented 3 of 10 port methods with `options:false`. Hard gate: licensed data **before the first paid dollar** — options chains remain a separate EODHD add-on (quote still needed) and the put finder/IV rank go dark without them. True post-launch cost floor ≈ $100–130/mo (PE), which is why Pro pricing must assume it.
 3. **Zero observability is the worst category.** All three crons return rich JSON summaries that nobody records; every failure path is a bare `catch`; 6 console statements in the whole app. The nightly sync's ceiling (~400–800 instruments, A) would starve the *same tail instruments every night, invisibly*. Cheapest fix set (~1 day): a `sync_runs` table, provider-call counters, `console.error` in catches, and a failure email to the founder.
 4. **Bug-grade inconsistency found:** `addOptionTransaction` and `addCashEntry` silently `return` on invalid input while their forms reset — false success; a mistyped expiration means the leg never exists and income is silently understated (the exact "confident wrong number" the product forbids). Also **`npm test` is broken** (verified empirically: exit 1 MODULE_NOT_FOUND; the glob form works) while CI happens to call `test:rls` directly.
@@ -153,3 +153,18 @@ Checked directly against the Vercel account after the remediation deploy. Each o
    - **`failed` 0 of 76**, no runtime errors in 12h. `ivCaptured` 53 and `fxUpdated` 10 confirm option chains and multi-currency conversion are both live.
    - **This run's EODHD cost implication is much smaller than the 1,941-holdings framing suggested**: 76 instruments × 4 requests = ~304/night, of which **76 are `/fundamentals`** (billed at a premium). Price the switch against 76, not 1,941.
    - **`provider` reads `yahoo`.** Production was switched to EODHD and then rolled back before this run, deliberately: Yahoo derives the minor-unit divisor from each quote's own currency (safer for this international portfolio, which spans 10 currencies), keeps the put finder and IV rank alive (`ivCaptured` 53 above would be 0 on EODHD), and is free. **The licensing gate in finding #2 is unchanged and unpaid** — Yahoo's terms do not cover commercial use, so the EODHD switch is still mandatory before the first paid dollar, and the options add-on must be quoted before pricing.
+
+6. **Email: half-configured. MEASURED 2026-08-28 06:00:48Z**, from the nightly sync summary:
+
+   ```
+   "emailConfigured": true,   "emailFromIsTestAddress": true
+   ```
+
+   This closes the audit's last unverified item, and it splits cleanly:
+
+   - **`RESEND_API_KEY` is set.** The alerts cron, the weekly digest, and the sync's own failure email can all send. The founder's automatic warnings work — which also means the monitoring built on top of them is real, not notional.
+   - **`EMAIL_FROM` is NOT set.** The sender therefore falls back to Resend's shared `onboarding@resend.dev`, which **only ever delivers to the Resend account owner**. So the founder's own alerts arrive; mail to any other user is rejected by Resend, silently as far as the app is concerned. The alerts and digest features are dead for everyone except the founder.
+
+   **This is a Gate 1 launch blocker with a dependency chain, not a one-field fix:** setting `EMAIL_FROM` requires a verified sending domain in Resend, which requires owning the domain. So the real order is **buy `snowfolio.app` → verify it in Resend → set `EMAIL_FROM`** — three items on issue #2 that are actually one sequence. Nothing user-facing that sends email should launch before it completes.
+
+   Same run, unchanged and healthy: provider `yahoo`, 76/76 synced, 0 failed, `providerCalls` 497, `durationMs` 28,966 (9.7% of the 300s ceiling; up from 17,559 the previous night, still far below any trigger). No runtime errors in 24h.

@@ -9,10 +9,12 @@ export type EmailResult = { sent: boolean; skipped?: string; error?: string };
 // Resend's shared test address, which only ever delivers to the account owner — so alerts and
 // digests to real users vanish while the cron still returns 200. The crons report this in their
 // recorded summary so "is email even on?" is answered by the next run instead of staying a guess.
-export function emailConfig(): { configured: boolean; fromIsTestAddress: boolean } {
+// Keys are prefixed because callers spread this into a summary alongside a dozen other fields —
+// a bare `configured` there reads as "configured... what?".
+export function emailConfig(): { emailConfigured: boolean; emailFromIsTestAddress: boolean } {
   return {
-    configured: !!process.env.RESEND_API_KEY,
-    fromIsTestAddress: !process.env.EMAIL_FROM,
+    emailConfigured: !!process.env.RESEND_API_KEY,
+    emailFromIsTestAddress: !process.env.EMAIL_FROM,
   };
 }
 
