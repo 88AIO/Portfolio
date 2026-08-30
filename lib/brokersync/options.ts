@@ -36,15 +36,33 @@ function numOf(v: unknown): number | null {
   if (typeof v === "string" && v.trim() !== "" && isFinite(Number(v))) return Number(v);
   return null;
 }
-// Currency can be a bare code or an object { code } / { currency }.
+// Currency can be a bare code or an object { code } / { currency }. Always upper-cased: the FX
+// cache is keyed by uppercase code, so a lowercase "usd" would miss it and the holding would be
+// converted at 1.0 — silently reporting a native figure as if it were the base currency.
 function currencyOf(v: unknown): string {
-  if (typeof v === "string" && v) return v;
+  if (typeof v === "string" && v) return v.toUpperCase();
   if (v && typeof v === "object") {
     const o = v as { code?: unknown; currency?: unknown };
     const c = str(o.code) || str(o.currency);
-    if (c) return c;
+    if (c) return c.toUpperCase();
   }
   return "USD";
+}
+
+// SnapTrade dates arrive as ISO dates or full timestamps. Anything else (a locale format like
+// 06/19/2026) would be sliced to ten meaningless characters and stored verbatim as a date no
+// downstream code can read, so treat it as absent and drop the row instead.
+function isoDate(v: unknown): string {
+  const s = str(v).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+}
+
+// The ticker root of an OCC contract code. Brokers send these both spaced ("AAPL  260619P00150000")
+// and unspaced ("AAPL260619P00150000"); splitting on whitespace alone leaves the entire contract
+// code as the "underlying", which would create and then perpetually quote a junk instrument.
+// Splitting on the first digit handles both, and US option roots are alphabetic.
+function rootSymbol(v: unknown): string {
+  return str(v).trim().split(/[\s\d]/)[0] ?? "";
 }
 
 // Map a SnapTrade activity (`type`, `option_type`) onto our seller-flow action, or null to skip.
@@ -78,12 +96,12 @@ export function normalizeSnaptradeActivity(raw: unknown): BrokerOptionLeg | null
   if (!optionType) return null;
 
   const strike = numOf(o.strike_price);
-  const expiration = str(o.expiration_date).slice(0, 10);
+  const expiration = isoDate(o.expiration_date);
   if (strike == null || !expiration) return null;
 
   // Underlying ticker: prefer the nested underlying_symbol, fall back to the option ticker's root.
   const und = o.underlying_symbol as Record<string, unknown> | undefined;
-  const underlying = (str(und?.symbol) || str(und?.raw_symbol) || str(o.ticker).split(/[\s_]/)[0]).toUpperCase();
+  const underlying = (str(und?.symbol) || str(und?.raw_symbol) || rootSymbol(o.ticker)).toUpperCase();
   if (!underlying) return null;
 
   const contracts = Math.abs(Math.round(numOf(a.units) ?? 0)) || 1;
@@ -95,7 +113,7 @@ export function normalizeSnaptradeActivity(raw: unknown): BrokerOptionLeg | null
     : amount != null ? Math.abs(amount) / (contracts * 100)
     : 0;
   const fee = Math.abs(numOf(a.fee) ?? 0);
-  const tradeDate = (str(a.trade_date) || str(a.settlement_date)).slice(0, 10);
+  const tradeDate = isoDate(a.trade_date) || isoDate(a.settlement_date);
   if (!tradeDate) return null;
 
   const ref = str(a.id) || str(a.external_reference_id) ||
@@ -152,13 +170,14 @@ export function normalizeSnaptradeOptionPosition(raw: unknown, today: string): B
   if (!optionType) return null;
 
   const strike = numOf(inst.strike_price);
-  const expiration = str(inst.expiration_date).slice(0, 10);
+  const expiration = isoDate(inst.expiration_date);
   if (strike == null || !expiration) return null;
 
   // Underlying ticker: the instrument's underlying object, else the OCC symbol's leading root.
   const und = inst.underlying as Record<string, unknown> | undefined;
-  const occRoot = str(inst.symbol).trim().split(/[\s\d]/)[0];
-  const underlying = (str(und?.symbol) || str(und?.raw_symbol) || str(und?.ticker) || occRoot).toUpperCase();
+  const underlying = (
+    str(und?.symbol) || str(und?.raw_symbol) || str(und?.ticker) || rootSymbol(inst.symbol)
+  ).toUpperCase();
   if (!underlying) return null;
 
   // Premium per share: SnapTrade cost_basis is the per-share average (same convention the equity
