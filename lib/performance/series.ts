@@ -28,7 +28,10 @@ export type PerformanceSeries = {
   endInvested: number;
   // Return over the window on the money actually deployed (simple, not time-weighted — honest label).
   gain: number; // endValue - endInvested
-  gainPct: number;
+  // null when there is no positive deployed capital left to compute a return against (a fully
+  // exited position leaves net invested at or below zero). Reporting 0% there would be a
+  // confident wrong number sitting next to a real gain figure.
+  gainPct: number | null;
 };
 
 /** Cumulative shares held on each transaction date, for one instrument (dates ascending). */
@@ -215,7 +218,10 @@ export function buildPerformanceSeries(
       else if (t.type === "sell") invested -= (t.quantity * t.price - t.fees) * r;
     }
 
-    points.push({ date, value, invested: Math.max(0, invested) });
+    // Deliberately NOT clamped at zero. Once you have taken more cash out than you put in, net
+    // invested is genuinely negative, and clamping it collapses `gain` (value - invested) to zero:
+    // someone who bought for 1,000 and sold for 1,500 would be told they made nothing.
+    points.push({ date, value, invested });
   }
 
   const start = points[0];
@@ -230,6 +236,6 @@ export function buildPerformanceSeries(
     endValue,
     endInvested,
     gain,
-    gainPct: endInvested > 0 ? (gain / endInvested) * 100 : 0,
+    gainPct: endInvested > 0 ? (gain / endInvested) * 100 : null,
   };
 }

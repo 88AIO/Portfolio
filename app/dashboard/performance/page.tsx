@@ -158,7 +158,7 @@ export default async function PerformancePage() {
   const hasRealHistory = txs.some((t) => (t.type === "buy" || t.type === "sell") && t.executed_at < today);
 
   let chartData: { date: string; value: number; invested: number; benchmark?: number }[];
-  let endValue: number, endInvested: number, gain: number, gainPct: number, hasData: boolean;
+  let endValue: number, endInvested: number, gain: number, gainPct: number | null, hasData: boolean;
 
   if (hasRealHistory) {
     const series = buildPerformanceSeries(txs as PerfTransaction[], historyById, currencyById, fx, today, currentValueById);
@@ -173,7 +173,7 @@ export default async function PerformancePage() {
       mv += (p.last_price ?? 0) * p.shares * fx(p.currency);
       cost += (p.avg_cost ?? 0) * p.shares * fx(p.currency);
     }
-    endValue = mv; endInvested = cost; gain = mv - cost; gainPct = cost > 0 ? (gain / cost) * 100 : 0;
+    endValue = mv; endInvested = cost; gain = mv - cost; gainPct = cost > 0 ? (gain / cost) * 100 : null;
     // Flat cost-basis reference line alongside the value line.
     chartData = bt.points.map((p) => ({ date: p.date, value: Math.round(p.value), invested: Math.round(cost) }));
     hasData = bt.points.length >= 2 && mv > 0;
@@ -252,17 +252,19 @@ export default async function PerformancePage() {
           <Card
             label="Return"
             value={pct(gainPct)}
-            tone={gainPct >= 0 ? "up" : "down"}
+            tone={gainPct == null ? undefined : gainPct >= 0 ? "up" : "down"}
           />
         </div>
 
-        {benchReturnPct != null && (
+        {/* Requires BOTH returns: with no positive deployed capital the user's own return is
+            undefined, and "beating the market by X" against an undefined number is meaningless. */}
+        {benchReturnPct != null && gainPct != null && (
           <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
             <span className="font-medium text-slate-700">
               vs. the S&amp;P 500 <span className="text-slate-400">(same money, same timing)</span>:
             </span>
             <span className="tabular-nums">
-              You <strong className={gainPct >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(gainPct)}</strong>
+              You <strong className={gainPct == null ? "text-slate-500" : gainPct >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(gainPct)}</strong>
             </span>
             <span className="text-slate-300">·</span>
             <span className="tabular-nums">
