@@ -44,10 +44,21 @@ function annualTotals(history: DividendPoint[]): { year: number; total: number }
     byYear.set(year, (byYear.get(year) ?? 0) + amt);
   }
   const currentYear = Number(new Date().toISOString().slice(0, 4));
-  return [...byYear.entries()]
+  const paid = [...byYear.entries()]
     .filter(([year]) => year < currentYear) // current year is still in progress → not comparable
-    .map(([year, total]) => ({ year, total }))
-    .sort((a, b) => a.year - b.year);
+    .sort((a, b) => a[0] - b[0]);
+  if (!paid.length) return [];
+
+  // Fill every year from the first payout to the last COMPLETE year, inserting an explicit zero
+  // where nothing was paid. A skipped year leaves no rows at all, so without this the series steps
+  // straight from the last paying year to the next one and a SUSPENSION — the loudest warning a
+  // dividend can give — is invisible to the cut detector below, which compares consecutive
+  // entries. A company that stopped paying three years ago would otherwise still score as an
+  // unbroken record.
+  const totals = new Map(paid);
+  const out: { year: number; total: number }[] = [];
+  for (let y = paid[0][0]; y <= currentYear - 1; y++) out.push({ year: y, total: totals.get(y) ?? 0 });
+  return out;
 }
 
 function band(score: number): { band: SafetyBand; label: string } {
@@ -67,20 +78,24 @@ export function dividendSafety(
   yieldPct: number | null | undefined
 ): DividendSafety {
   const years = annualTotals(history);
+  // Years in which something was actually paid. `years` now spans the full calendar including
+  // skipped years, so the two counts differ precisely when the payout was interrupted.
+  const paidYears = years.filter((y) => y.total > 0).length;
+  const missedYears = years.length - paidYears;
 
-  // Honest floor: with fewer than two complete years we can't spot a cut or a trend.
-  if (years.length < 2) {
+  // Honest floor: with fewer than two years of actual payouts we can't spot a cut or a trend.
+  if (paidYears < 2) {
     return {
       score: null,
       band: "unrated",
       label: "Building history",
       summary: "Not enough payout history yet to judge safety.",
       factors: [],
-      yearsOfHistory: years.length,
+      yearsOfHistory: paidYears,
     };
   }
 
-  const yearsOfHistory = years.length;
+  const yearsOfHistory = paidYears;
 
   // --- Cuts (40) — the heaviest signal. Compare each complete year to the one before it.
   // A cut hurts in proportion to its depth and how recent it is (recent cuts weigh most).
@@ -108,7 +123,9 @@ export function dividendSafety(
 
   // --- Track record (25) — years of uninterrupted payments. Full marks at ~10 years.
   const recordScore = Math.min(1, yearsOfHistory / 10);
-  const recordDetail = `${yearsOfHistory} complete year${yearsOfHistory === 1 ? "" : "s"} of payouts`;
+  const recordDetail =
+    `${yearsOfHistory} complete year${yearsOfHistory === 1 ? "" : "s"} of payouts` +
+    (missedYears > 0 ? `, ${missedYears} skipped` : "");
 
   // --- Growth (20) — annualised growth of the payout across the record.
   const first = years[0].total;
@@ -155,7 +172,9 @@ export function dividendSafety(
   const { band: b, label } = band(score);
 
   const summary =
-    cutCount > 0
+    missedYears > 0
+      ? `Paid for ${yearsOfHistory} years but skipped ${missedYears} — the payout has been interrupted.`
+      : cutCount > 0
       ? `Paid for ${yearsOfHistory} years but cut the payout ${cutCount === 1 ? "once" : `${cutCount} times`}.`
       : cagr >= 0.001
         ? `Uninterrupted for ${yearsOfHistory} years and still growing.`
