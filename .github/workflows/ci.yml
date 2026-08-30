@@ -16,6 +16,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      # The offline suite: money math (FIFO tax, option premium, performance, dividends), CSV
+      # import/export, provider config and broker normalization. Needs no secrets, and every case
+      # in it pins behaviour a real bug once got wrong — so it has to gate the build, not sit
+      # beside it.
+      - run: npm test
       - run: npm run build
         env:
           # Public placeholders so `next build` can compile without real secrets.
@@ -37,6 +42,22 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Say plainly, in the run summary, whether this job actually verified anything. A green
+      # check next to "rls-isolation" otherwise reads as "tenant isolation confirmed" when the
+      # suite in fact skipped — a check that proves nothing is worse than no check at all.
+      # The expression compares the secret to empty and yields a boolean; it never exposes it.
+      - name: Report whether the security test can run
+        env:
+          HAS_SECRETS: ${{ secrets.SUPABASE_URL != '' }}
+        run: |
+          if [ "$HAS_SECRETS" = "true" ]; then
+            echo "### Cross-tenant RLS test: RUNNING against a live project" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### :warning: Cross-tenant RLS test SKIPPED — nothing was verified" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "This job is green because the suite skipped, **not** because tenant isolation passed." >> "$GITHUB_STEP_SUMMARY"
+            echo "Set \`SUPABASE_URL\`, \`SUPABASE_ANON_KEY\` and \`SUPABASE_SERVICE_ROLE_KEY\` (staging project) to enable it." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - run: npm run test:rls
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
