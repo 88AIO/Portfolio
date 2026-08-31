@@ -9,6 +9,8 @@ import { money, pct, num, timeAgo } from "@/lib/format";
 import { optionActionLabel, legPremium } from "@/lib/options";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
 import { loadSplitRecords } from "@/lib/corporate/load";
+import { splitFactor } from "@/lib/corporate/splits";
+import { getCachedRates } from "@/lib/fx";
 import SplitsSection from "@/components/SplitsSection";
 import { isDripBuy } from "@/lib/dividends/drip";
 import { isBrokerRestated, isBrokerCashDividend } from "@/lib/brokersync/restated";
@@ -61,15 +63,35 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   const priceAsOf = (pc as { as_of: string | null } | null)?.as_of ?? null;
   const pfName = new Map<string, string>((pfList ?? []).map((p: { id: string; name: string }) => [p.id, p.name]));
 
+  // Splits, loaded before the position math because the share count depends on them. This page
+  // computes from the raw ledger rather than reading the positions view, so it has to apply the
+  // same adjustment the view does — otherwise a split would move the dashboard's share count and
+  // leave this page's disagreeing with it.
+  const splitRecords = (await loadSplitRecords(supabase, [id])).get(id) ?? [];
+  const splits = splitRecords.map((r) => ({ exDate: r.exDate, ratio: r.ratio }));
+  const holdingSplits = new Map([[id, splits]]);
+  // A broker's opening-balance lot is already in today's shares (lib/brokersync/restated.ts).
+  const sharesOf = (t: Tx) => t.quantity * (isBrokerRestated(t.dedupe_key) ? 1 : splitFactor(splits, t.executed_at));
+
+  // Every figure on this page is shown in the instrument's own currency, but a transaction can be
+  // recorded in another one — an ADR paying its dividend in the home currency, say. Summing those
+  // raw would add unlike units and print a total that is simply not a quantity of anything.
+  const txCurrencies = [...txs.map((t) => t.currency), ...opts.map((o) => o.currency)];
+  const rates = await getCachedRates(supabase, txCurrencies, ccy);
+  const fxTo = (c: string | null | undefined) => rates[(c || ccy).toUpperCase()] ?? 1;
+
   // --- Position math from the raw ledger (works for open and fully-closed positions) ---
   let shares = 0, buyValue = 0, buyShares = 0, divPaid = 0;
   for (const t of txs) {
-    if (t.type === "buy") { shares += t.quantity; buyValue += t.quantity * t.price + t.fees; buyShares += t.quantity; }
-    else if (t.type === "sell") shares -= t.quantity;
-    else if (t.type === "dividend") divPaid += t.quantity * t.price;
+    const r = fxTo(t.currency);
+    // Share counts scale with splits; money does not — a split changes how many pieces you hold,
+    // never what you paid or were paid.
+    if (t.type === "buy") { shares += sharesOf(t); buyValue += (t.quantity * t.price + t.fees) * r; buyShares += sharesOf(t); }
+    else if (t.type === "sell") shares -= sharesOf(t);
+    else if (t.type === "dividend") divPaid += t.quantity * t.price * r;
   }
   const avgCost = buyShares > 0 ? buyValue / buyShares : 0;
-  const netPremium = opts.reduce((s, o) => s + legPremium(o), 0); // signed, kept
+  const netPremium = opts.reduce((s, o) => s + legPremium(o) * fxTo(o.currency), 0); // signed, kept
 
   const marketValue = price != null ? price * shares : 0;
   const costBasis = avgCost * shares;
@@ -83,15 +105,17 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   const effectiveCostAfterIncome = avgCost - incomePerShare;
 
   // Realized gains (FIFO) on this symbol.
+  // Each row keeps its OWN currency. computeRealizedLots groups by symbol/exchange/currency
+  // precisely so a GBP buy can never become the cost basis for a USD sale; forcing every row to the
+  // instrument's currency here defeated that guard on the one page that shows the lots.
   const ledger: LedgerTx[] = txs.map((t) => ({
-    instrument_id: id, dedupe_key: t.dedupe_key, symbol: instrument.symbol, exchange: instrument.exchange, currency: ccy, type: t.type,
+    instrument_id: id, dedupe_key: t.dedupe_key, symbol: instrument.symbol, exchange: instrument.exchange,
+    currency: t.currency || ccy, type: t.type,
     quantity: t.quantity, price: t.price, fees: t.fees, executed_at: t.executed_at,
   }));
   // Without splits, a pre-split buy cannot cover a post-split sale: FIFO finds a quarter of the
   // shares it needs and books the rest as a zero-basis gain, which overstates the realized profit.
-  const splitRecords = (await loadSplitRecords(supabase, [id])).get(id) ?? [];
-  const holdingSplits = new Map([[id, splitRecords.map((r) => ({ exDate: r.exDate, ratio: r.ratio }))]]);
-  const realized = summarizeRealized(computeRealizedLots(ledger, holdingSplits), () => 1);
+  const realized = summarizeRealized(computeRealizedLots(ledger, holdingSplits), fxTo);
 
   const totalIncome = netPremium + divPaid;
 
@@ -119,23 +143,23 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
       const fromNote = isDripBuy(t.type, t.note);
       const drip = !restated && isDripBuy(t.type, t.note, t.drip);
       if (drip) {
-        dripShares += t.quantity;
-        dripCost += t.quantity * t.price + (t.fees ?? 0);
+        dripShares += sharesOf(t);
+        dripCost += (t.quantity * t.price + (t.fees ?? 0)) * fxTo(t.currency);
       }
-      if (restated) restatedShares += t.quantity;
+      if (restated) restatedShares += sharesOf(t);
       shareActivity.push({
         id: t.id, source: "tx", date: t.executed_at, kind: t.type,
         title: restated ? "Opening balance" : t.type === "buy" ? "Bought shares" : "Sold shares",
         detail: restated
-          ? `${num(t.quantity, 4)} shares at your broker's average cost of ${money(t.price, ccy)} — shares you already held before ${t.executed_at}, not a trade on that date`
-          : `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`,
+          ? `${num(t.quantity, 4)} shares at your broker's average cost of ${money(t.price, t.currency || ccy)} — shares you already held before ${t.executed_at}, not a trade on that date`
+          : `${num(t.quantity, 4)} @ ${money(t.price, t.currency || ccy)}${t.fees ? ` · ${money(t.fees, t.currency || ccy)} fee` : ""}`,
         amount: t.type === "buy" ? -(t.quantity * t.price + t.fees) : t.quantity * t.price - t.fees,
         portfolio,
         // Only real buys can be reinvestments; a sell or a reconciling lot has nothing to toggle.
         drip: t.type === "buy" && !restated ? { isDrip: drip, locked: fromNote } : undefined,
       });
     } else if (t.type === "dividend") {
-      dividendsReceived += t.quantity * t.price;
+      dividendsReceived += t.quantity * t.price * fxTo(t.currency);
       dividendActivity.push({
         id: t.id, source: "tx", date: t.executed_at, kind: "dividend",
         title: "Dividend received",
@@ -143,7 +167,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
         // state a per-share dividend six hundred times NVDA's real one.
         detail: isBrokerCashDividend(t.type, t.dedupe_key)
           ? "Cash dividend, as reported by your broker"
-          : `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}`,
+          : `${money(t.price, t.currency || ccy)}/sh × ${num(t.quantity, 4)}`,
         amount: t.quantity * t.price, portfolio,
       });
     }
