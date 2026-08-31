@@ -123,7 +123,8 @@ export default function SplitsSection({
         Enter it the way it was announced — <span className="text-slate-500">4-for-1</span>, or{" "}
         <span className="text-slate-500">1-for-10</span> for a reverse split. Adding a date that is
         already listed replaces it, and a ratio of{" "}
-        <span className="text-slate-500">1-for-1</span> cancels a split that shouldn&apos;t be there.
+        <span className="text-slate-500">1-for-1</span>{" "}
+        cancels a split that shouldn&apos;t be there.
       </p>
     </section>
   );

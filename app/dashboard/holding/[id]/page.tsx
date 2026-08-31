@@ -3,13 +3,14 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../../actions";
 import DashboardNav from "@/components/DashboardNav";
-import DeleteActivityButton from "@/components/DeleteActivityButton";
+import ActivityList, { type ActivityItem } from "@/components/ActivityList";
 import RemoveHoldingButton from "@/components/RemoveHoldingButton";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import { optionActionLabel, legPremium } from "@/lib/options";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
 import { loadSplitRecords } from "@/lib/corporate/load";
 import SplitsSection from "@/components/SplitsSection";
+import { isDripBuy } from "@/lib/dividends/drip";
 
 export const dynamic = "force-dynamic";
 
@@ -27,17 +28,6 @@ type OptTx = {
   id: string; portfolio_id: string; action: string; option_type: string; strike: number;
   expiration: string; contracts: number; premium: number; fee: number; currency: string;
   trade_date: string; note: string | null;
-};
-
-type TimelineItem = {
-  id: string;                    // the underlying row id, for delete
-  source: "tx" | "option";       // which table it came from
-  date: string;
-  kind: "buy" | "sell" | "dividend" | "option";
-  title: string;
-  detail: string;
-  amount: number | null; // cash flow in the instrument's currency (+ in, − out)
-  portfolio: string;
 };
 
 export default async function HoldingDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -101,17 +91,48 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   const totalIncome = netPremium + divPaid;
 
   // --- Unified activity timeline (equity + options + dividends), newest first ---
-  const timeline: TimelineItem[] = [];
+  // Three separate stories, not one mixed feed. "How did I build this position", "what has it
+  // actually paid me" and "what have I run against it" are different questions, and interleaving
+  // them by date answers none of them well.
+  const shareActivity: ActivityItem[] = [];
+  const dividendActivity: ActivityItem[] = [];
+  const optionActivity: ActivityItem[] = [];
+
+  let dripShares = 0;
+  let dripCost = 0;
+  let dividendsReceived = 0;
+
   for (const t of txs) {
     const portfolio = pfName.get(t.portfolio_id) ?? "Portfolio";
-    if (t.type === "buy") timeline.push({ id: t.id, source: "tx", date: t.executed_at, kind: "buy", title: "Bought shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`, amount: -(t.quantity * t.price + t.fees), portfolio });
-    else if (t.type === "sell") timeline.push({ id: t.id, source: "tx", date: t.executed_at, kind: "sell", title: "Sold shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`, amount: t.quantity * t.price - t.fees, portfolio });
-    else if (t.type === "dividend") timeline.push({ id: t.id, source: "tx", date: t.executed_at, kind: "dividend", title: "Dividend received", detail: `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}`, amount: t.quantity * t.price, portfolio });
+    if (t.type === "buy" || t.type === "sell") {
+      const drip = isDripBuy(t.type, t.note);
+      if (drip) {
+        dripShares += t.quantity;
+        dripCost += t.quantity * t.price + (t.fees ?? 0);
+      }
+      shareActivity.push({
+        id: t.id, source: "tx", date: t.executed_at, kind: t.type,
+        title: t.type === "buy" ? "Bought shares" : "Sold shares",
+        detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`,
+        amount: t.type === "buy" ? -(t.quantity * t.price + t.fees) : t.quantity * t.price - t.fees,
+        portfolio,
+        badge: drip ? "DRIP" : undefined,
+        badgeTitle: drip ? `Reinvested dividend — your broker described this as: ${t.note}` : undefined,
+      });
+    } else if (t.type === "dividend") {
+      dividendsReceived += t.quantity * t.price;
+      dividendActivity.push({
+        id: t.id, source: "tx", date: t.executed_at, kind: "dividend",
+        title: "Dividend received",
+        detail: `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}`,
+        amount: t.quantity * t.price, portfolio,
+      });
+    }
   }
   for (const o of opts) {
     const portfolio = pfName.get(o.portfolio_id) ?? "Portfolio";
     const label = optionActionLabel(o.action);
-    timeline.push({
+    optionActivity.push({
       id: o.id, source: "option",
       date: o.trade_date, kind: "option",
       title: `${label} ${o.option_type === "put" ? "put" : "call"}`,
@@ -119,7 +140,9 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
       amount: legPremium(o), portfolio,
     });
   }
-  timeline.sort((a, b) => b.date.localeCompare(a.date));
+  for (const list of [shareActivity, dividendActivity, optionActivity]) {
+    list.sort((a, b) => b.date.localeCompare(a.date));
+  }
 
   const openOptions = opts.filter((o) => o.action === "sell_to_open"); // display list of sold legs
   const heldNow = shares > 0.0000001;
@@ -225,36 +248,70 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
 
         <SplitsSection instrumentId={id} symbol={instrument.symbol} splits={splitRecords} />
 
-        {/* Full activity timeline */}
+        {/* Options run against this name */}
         <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-semibold">Everything on {instrument.symbol}</h2>
+          <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-semibold">Options on {instrument.symbol}</h2>
+            <span className="text-sm text-slate-500">
+              {money(netPremium, ccy)} net premium
+            </span>
+          </div>
+          <p className="mb-4 text-xs text-slate-400">
+            Every leg you&apos;ve opened, closed, rolled or let expire on this name. Open legs are
+            summarised above; this is the full record, newest first.
+          </p>
+          <ActivityList
+            items={optionActivity}
+            instrumentId={id}
+            currency={ccy}
+            empty={`No options recorded on ${instrument.symbol} yet.`}
+          />
+        </section>
+
+        {/* Dividends actually paid on this name */}
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-semibold">Dividends from {instrument.symbol}</h2>
+            <span className="text-sm text-slate-500">{money(dividendsReceived, ccy)} received</span>
+          </div>
+          <p className="mb-4 text-xs text-slate-400">
+            What this holding has actually paid you, from your own transactions. Option premium is
+            never counted here — it&apos;s in the section above.
+          </p>
+          <ActivityList
+            items={dividendActivity}
+            instrumentId={id}
+            currency={ccy}
+            empty={`No dividends recorded from ${instrument.symbol} yet.`}
+          />
+        </section>
+
+        {/* How the position was built */}
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold">Purchase history</h2>
             <RemoveHoldingButton instrumentId={id} symbol={instrument.symbol} />
           </div>
-          <ul className="space-y-1">
-            {timeline.map((item) => (
-              <li key={`${item.source}:${item.id}`} className="group flex items-center justify-between gap-3 border-b border-slate-50 py-2.5 last:border-0">
-                <div className="flex items-center gap-3">
-                  <span className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${dot(item.kind)}`} />
-                  <div>
-                    <div className="text-sm font-medium">{item.title}</div>
-                    <div className="text-xs text-slate-400">{item.detail}</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="text-right">
-                    {item.amount != null && (
-                      <div className={`text-sm font-medium tabular-nums ${item.amount >= 0 ? "text-emerald-600" : "text-slate-600"}`}>
-                        {item.amount >= 0 ? "+" : ""}{money(item.amount, ccy)}
-                      </div>
-                    )}
-                    <div className="text-xs text-slate-400">{item.date}</div>
-                  </div>
-                  <DeleteActivityButton id={item.id} instrumentId={id} source={item.source} />
-                </div>
-              </li>
-            ))}
-          </ul>
+          <p className="mb-4 text-xs text-slate-400">
+            Every share bought and sold, newest first.
+            {dripShares > 0 ? (
+              <>
+                {" "}
+                <span className="font-medium text-slate-500">
+                  {num(dripShares, 4)} of your shares came from reinvested dividends
+                </span>{" "}
+                ({money(dripCost, ccy)}), marked DRIP.
+              </>
+            ) : (
+              " A purchase is marked DRIP when your broker's own description says it was a reinvested dividend."
+            )}
+          </p>
+          <ActivityList
+            items={shareActivity}
+            instrumentId={id}
+            currency={ccy}
+            empty={`No share transactions recorded for ${instrument.symbol} yet.`}
+          />
         </section>
 
         {priceAsOf && (
@@ -263,10 +320,6 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
       </div>
     </main>
   );
-}
-
-function dot(kind: TimelineItem["kind"]): string {
-  return kind === "buy" ? "bg-[#4f9580]" : kind === "sell" ? "bg-slate-400" : kind === "dividend" ? "bg-emerald-500" : "bg-[#b98a34]";
 }
 
 function Card({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "up" | "down" }) {
