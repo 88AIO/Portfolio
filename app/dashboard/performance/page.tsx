@@ -12,7 +12,7 @@ import {
   type PerfTransaction,
   type PerfClose,
 } from "@/lib/performance/series";
-import { PerformanceChart } from "@/components/charts";
+import PerformanceRange from "@/components/PerformanceRange";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 import BackfillButton from "@/components/BackfillButton";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
@@ -310,7 +310,7 @@ export default async function PerformancePage() {
           </p>
 
           {hasData ? (
-            <PerformanceChart data={chartData} currency={base} />
+            <PerformanceRange data={chartData} currency={base} dailyFrom={firstSnapDate} />
           ) : (
             <div className="py-16 text-center text-sm text-slate-400">
               <p className="mb-2">Not enough price history to chart yet.</p>

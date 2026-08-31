@@ -18,9 +18,12 @@ type Point = { date: string; value: number; invested: number; benchmark?: number
 export default function PerformanceChart({
   data,
   currency = "USD",
+  tickFormatter,
 }: {
   data: Point[];
   currency?: string;
+  /** Supplied by the range control so labels suit the visible span; falls back to month + year. */
+  tickFormatter?: (d: string) => string;
 }) {
   const money = (v: number) =>
     Number(v).toLocaleString("en-US", { style: "currency", currency, maximumFractionDigits: 0 });
@@ -45,7 +48,7 @@ export default function PerformanceChart({
           <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} vertical={false} />
           <XAxis
             dataKey="date"
-            tickFormatter={shortDate}
+            tickFormatter={tickFormatter ?? shortDate}
             tickLine={false}
             axisLine={false}
             fontSize={11}
