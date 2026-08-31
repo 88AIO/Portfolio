@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/supabase/user";
 import { ensurePortfolio, refreshPrices } from "./actions";
 import DashboardNav from "@/components/DashboardNav";
 import { getCachedRates } from "@/lib/fx";
@@ -45,7 +46,7 @@ export default async function Dashboard({
   const sp = await searchParams;
   const view = sp.holdings === "accounts" ? "accounts" : "consolidated";
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   const portfolio = await ensurePortfolio();
   const canBrokerSync = isBrokerSyncOwner(user?.email); // per-user brokerage connect isn't available yet
 

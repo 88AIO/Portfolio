@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/supabase/user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getQuote, searchInstrument } from "@/lib/marketdata";
 import { syncInstrumentDividends, syncInstrumentPriceHistory } from "@/lib/marketdata/sync";
@@ -21,7 +22,8 @@ import { isValidYmd, todayIso } from "@/lib/date";
 // Get the user's default portfolio, creating one on first use.
 export async function ensurePortfolio() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  // Request-cached: the calling page has almost always resolved the user already, so this is free.
+  const user = await getCurrentUser();
   if (!user) redirect("/login");
 
   const { data: existing } = await supabase
@@ -293,7 +295,10 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
 
 export async function signOut() {
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  // "local" clears this device's session and cookies without waiting on a round trip to revoke the
+  // refresh token server-side. The user is signed out here the moment the cookies are gone, and
+  // the token expires on its own; waiting for the network just made the button feel sticky.
+  await supabase.auth.signOut({ scope: "local" });
   redirect("/login");
 }
 

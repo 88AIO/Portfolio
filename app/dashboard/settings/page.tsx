@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/supabase/user";
 import { ensurePortfolio, signOut } from "../actions";
 import DashboardNav from "@/components/DashboardNav";
 import DeleteAccountButton from "@/components/DeleteAccountButton";
@@ -6,9 +6,8 @@ import DeleteAccountButton from "@/components/DeleteAccountButton";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const supabase = await createClient();
   await ensurePortfolio(); // ensures signed in (redirects to /login otherwise)
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-800">

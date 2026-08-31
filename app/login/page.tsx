@@ -56,8 +56,10 @@ export default function LoginPage() {
         }
       } else if (data.session) {
         // Confirmation is off: they're signed in already, so glide straight into the app.
+        // push() alone: /dashboard is force-dynamic, so it always renders fresh on arrival.
+        // Following it with refresh() rendered the whole dashboard a second time — every query
+        // twice — which is most of what made signing in feel slow.
         router.push("/dashboard");
-        router.refresh();
       } else {
         note("Almost there. We sent a confirmation link to your email. Open it and you're in.", "info");
       }
@@ -65,8 +67,10 @@ export default function LoginPage() {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) note(error.message, "error");
       else {
+        // push() alone: /dashboard is force-dynamic, so it always renders fresh on arrival.
+        // Following it with refresh() rendered the whole dashboard a second time — every query
+        // twice — which is most of what made signing in feel slow.
         router.push("/dashboard");
-        router.refresh();
       }
     }
     setLoading(false);

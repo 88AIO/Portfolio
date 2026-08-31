@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/supabase/user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ensurePortfolio } from "../actions";
 import DashboardNav from "@/components/DashboardNav";
@@ -46,7 +47,7 @@ export default async function PerformancePage() {
   const supabase = await createClient();
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   const isOwner = isBrokerSyncOwner(user?.email);
 
   // Transactions, live positions, and recorded daily snapshots are independent reads — fire them
