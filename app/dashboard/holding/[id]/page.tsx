@@ -62,6 +62,10 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   const changePct = (pc as { change_pct: number | null } | null)?.change_pct ?? null;
   const priceAsOf = (pc as { as_of: string | null } | null)?.as_of ?? null;
   const pfName = new Map<string, string>((pfList ?? []).map((p: { id: string; name: string }) => [p.id, p.name]));
+  // When one holding's activity spans several accounts, naming the account on each row is what
+  // separates a real second position from the same event recorded twice.
+  const showAccount =
+    new Set([...txs.map((t) => t.portfolio_id), ...opts.map((o) => o.portfolio_id)]).size > 1;
 
   // Splits, loaded before the position math because the share count depends on them. This page
   // computes from the raw ledger rather than reading the positions view, so it has to apply the
@@ -314,6 +318,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
             instrumentId={id}
             currency={ccy}
             empty={`No options recorded on ${instrument.symbol} yet.`}
+            showAccount={showAccount}
           />
         </section>
 
@@ -332,6 +337,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
             instrumentId={id}
             currency={ccy}
             empty={`No dividends recorded from ${instrument.symbol} yet.`}
+            showAccount={showAccount}
           />
         </section>
 
@@ -371,6 +377,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
             instrumentId={id}
             currency={ccy}
             empty={`No share transactions recorded for ${instrument.symbol} yet.`}
+            showAccount={showAccount}
           />
         </section>
 

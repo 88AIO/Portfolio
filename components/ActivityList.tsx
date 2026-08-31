@@ -35,11 +35,15 @@ export default function ActivityList({
   instrumentId,
   currency,
   empty,
+  showAccount,
 }: {
   items: ActivityItem[];
   instrumentId: string;
   currency: string;
   empty: string;
+  /** Name each row's account. Only worth the space when more than one is in play — and then it is
+   *  the fastest way to tell a genuine second holding from the same event counted twice. */
+  showAccount?: boolean;
 }) {
   if (!items.length) {
     return <p className="py-8 text-center text-sm text-slate-400">{empty}</p>;
@@ -65,7 +69,12 @@ export default function ActivityList({
                   />
                 )}
               </div>
-              <div className="text-xs text-slate-400">{item.detail}</div>
+              <div className="text-xs text-slate-400">
+                {item.detail}
+                {showAccount && item.portfolio && (
+                  <span className="text-slate-300"> · {item.portfolio}</span>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
