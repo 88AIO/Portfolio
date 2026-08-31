@@ -11,7 +11,7 @@ import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax
 import { loadSplitRecords } from "@/lib/corporate/load";
 import SplitsSection from "@/components/SplitsSection";
 import { isDripBuy } from "@/lib/dividends/drip";
-import { isBrokerRestated } from "@/lib/brokersync/restated";
+import { isBrokerRestated, isBrokerCashDividend } from "@/lib/brokersync/restated";
 
 export const dynamic = "force-dynamic";
 
@@ -139,7 +139,11 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
       dividendActivity.push({
         id: t.id, source: "tx", date: t.executed_at, kind: "dividend",
         title: "Dividend received",
-        detail: `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}`,
+        // A broker row carries the cash amount, not a rate. Printing "$64.32/sh × 1" for it would
+        // state a per-share dividend six hundred times NVDA's real one.
+        detail: isBrokerCashDividend(t.type, t.dedupe_key)
+          ? "Cash dividend, as reported by your broker"
+          : `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}`,
         amount: t.quantity * t.price, portfolio,
       });
     }

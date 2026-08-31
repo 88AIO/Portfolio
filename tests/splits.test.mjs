@@ -392,3 +392,23 @@ test("the value chart does not re-adjust an opening balance either", () => {
   );
   near(series.endValue, 400 * 40, "valued at 400 shares, not 4,000");
 });
+
+// --- broker dividend rows carry cash, not a rate ---------------------------------------------------
+
+const { isBrokerCashDividend } = await import("../lib/brokersync/restated.ts");
+
+test("a broker dividend is recognised as a cash total", () => {
+  assert.equal(isBrokerCashDividend("dividend", "ref:snaptrade-act:9"), true);
+});
+
+test("dividends from every other source keep their per-share rate", () => {
+  // CSV and manual rows really are shares x rate, so blanking their per-share column would throw
+  // away a figure the user can check against a statement.
+  assert.equal(isBrokerCashDividend("dividend", "csv:abc"), false);
+  assert.equal(isBrokerCashDividend("dividend", null), false);
+});
+
+test("only dividend rows are affected", () => {
+  // A broker BUY genuinely has a per-share price; suppressing it would lose real information.
+  assert.equal(isBrokerCashDividend("buy", "ref:snaptrade-act:9"), false);
+});

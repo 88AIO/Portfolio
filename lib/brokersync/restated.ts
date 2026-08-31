@@ -21,3 +21,19 @@ export function isBrokerRestated(dedupeKey: string | null | undefined): boolean 
   if (!dedupeKey) return false;
   return RESTATED_PREFIXES.some((p) => dedupeKey.startsWith(p));
 }
+
+/**
+ * True when a dividend row holds the whole cash payment rather than a per-share rate.
+ *
+ * SnapTrade reports a dividend as an amount, not a rate, so the sync stores it as quantity 1 ×
+ * price = the cash received (see providers/snaptrade.ts). Totals built from quantity × price come
+ * out right, but anything printing `price` as a per-share figure claims NVDA paid $64 a share.
+ * Manually added and CSV-imported dividends keep the real shares × rate shape, so the two have to
+ * be told apart before either is displayed.
+ */
+export function isBrokerCashDividend(
+  type: string,
+  dedupeKey: string | null | undefined
+): boolean {
+  return type === "dividend" && !!dedupeKey && dedupeKey.startsWith("ref:snaptrade-act:");
+}

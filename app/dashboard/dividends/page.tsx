@@ -9,6 +9,7 @@ import { buildDividendCalendar, type CalendarPosition } from "@/lib/dividends/ca
 import { estimateNextExDate, inferDivFrequency } from "@/lib/dividends/cadence";
 import { loadSplitsByInstrument } from "@/lib/corporate/load";
 import { adjustDividendPerShare } from "@/lib/corporate/splits";
+import { isBrokerCashDividend } from "@/lib/brokersync/restated";
 import { monthlyDividendHistory, annualDividendSummary, type DividendTx } from "@/lib/dividends/history";
 import SafetyBadge from "@/components/SafetyBadge";
 import { DividendCalendarChart } from "@/components/charts";
@@ -77,12 +78,13 @@ export default async function DividendsPage() {
     quantity: number | null;
     price: number | null;
     currency: string | null;
+    dedupe_key: string | null;
     instruments: { symbol: string } | { symbol: string }[] | null;
   };
   const divTxRows = await fetchAll<DivTxRow>((from, to) =>
     supabase
       .from("transactions")
-      .select("executed_at, quantity, price, currency, instruments(symbol)")
+      .select("executed_at, quantity, price, currency, dedupe_key, instruments(symbol)")
       .eq("type", "dividend")
       .order("executed_at", { ascending: false })
       .range(from, to),
@@ -106,12 +108,14 @@ export default async function DividendsPage() {
   const received24 = receivedMonthly.reduce((s, m) => s + m.total, 0);
 
   const byYear = annualDividendSummary(divTxs, fx, today, annualIncome, 2, 3);
-  const paidRecently = divTxRows.slice(0, 20).map((t) => {
+  const paidRecently: { date: string; symbol: string; perShare: number | null; total: number; currency: string }[] = divTxRows.slice(0, 20).map((t) => {
     const rel = Array.isArray(t.instruments) ? t.instruments[0] : t.instruments;
     return {
       date: t.executed_at ?? "-",
       symbol: rel?.symbol ?? "?",
-      perShare: t.price ?? 0,
+      // null rather than a number when the broker gave us a cash total: there is no per-share rate
+      // to show, and printing the whole payment in that column invents one.
+      perShare: isBrokerCashDividend("dividend", t.dedupe_key) ? null : (t.price ?? 0),
       total: (t.quantity ?? 0) * (t.price ?? 0),
       currency: t.currency ?? base,
     };
@@ -557,7 +561,9 @@ export default async function DividendsPage() {
                     <tr key={i} className="border-t border-slate-100">
                       <td className="py-2.5">{r.date}</td>
                       <td className="py-2.5 font-medium">{r.symbol}</td>
-                      <td className="py-2.5 text-right">{money(r.perShare, r.currency)}</td>
+                      <td className="py-2.5 text-right">
+                        {r.perShare != null ? money(r.perShare, r.currency) : <span className="text-slate-300" title="Your broker reported the total paid, not a per-share rate.">—</span>}
+                      </td>
                       <td className="py-2.5 text-right">{money(r.total, r.currency)}</td>
                     </tr>
                   ))}
