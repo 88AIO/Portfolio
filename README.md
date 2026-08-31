@@ -85,9 +85,10 @@ Supabase dashboard, only re-running the schema or a periodic audit will catch it
 | Market data (provider port: yahoo ⇄ eodhd) | `lib/marketdata/` |
 | Broker sync (SnapTrade, owner-only) | `lib/brokersync/` |
 | Options / wheel / realized-gain / dividend / FX / email engines | `lib/` |
+| Corporate actions (splits) | `lib/corporate/` + `instrument_splits` |
 | Tests | `tests/` |
 
-**Data model:** you record **transactions** (equity, options, cash); current **positions** and option exposure are computed views over that ledger. Pages read cached tables (`price_cache`, `fx_rates`, `price_history`, `dividends`); only the nightly cron talks to the market-data vendor.
+**Data model:** you record **transactions** (equity, options, cash); current **positions** and option exposure are computed views over that ledger. **Stock splits** are held separately in `instrument_splits` and applied when reading, so your ledger keeps saying exactly what your broker statement says while share counts and cost basis stay correct. Pages read cached tables (`price_cache`, `fx_rates`, `price_history`, `dividends`); only the nightly cron talks to the market-data vendor.
 
 ### Market-data provider coverage
 

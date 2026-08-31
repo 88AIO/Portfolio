@@ -4,26 +4,9 @@
 // This is the first screen anyone checks to answer "how am I doing", so a wrong number here is
 // read as fact and acted on. Reconstructed from the ledger on every load — no stored snapshots —
 // so the arithmetic below is the whole story.
+import "./_resolve.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    try {
-      return nextResolve(specifier, context);
-    } catch (err) {
-      if (!specifier.startsWith(".") || !context.parentURL) throw err;
-      for (const ext of [".ts", ".tsx", "/index.ts"]) {
-        const candidate = new URL(specifier + ext, context.parentURL);
-        if (existsSync(fileURLToPath(candidate))) return { url: candidate.href, shortCircuit: true };
-      }
-      throw err;
-    }
-  },
-});
 
 const { buildPerformanceSeries, buildBenchmarkSeries, buildHoldingsBacktest } = await import(
   "../lib/performance/series.ts"

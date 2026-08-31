@@ -8,6 +8,7 @@ import RemoveHoldingButton from "@/components/RemoveHoldingButton";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import { optionActionLabel, legPremium } from "@/lib/options";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
+import { loadSplitsByInstrument } from "@/lib/corporate/load";
 
 export const dynamic = "force-dynamic";
 
@@ -87,10 +88,13 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
 
   // Realized gains (FIFO) on this symbol.
   const ledger: LedgerTx[] = txs.map((t) => ({
-    symbol: instrument.symbol, exchange: instrument.exchange, currency: ccy, type: t.type,
+    instrument_id: id, symbol: instrument.symbol, exchange: instrument.exchange, currency: ccy, type: t.type,
     quantity: t.quantity, price: t.price, fees: t.fees, executed_at: t.executed_at,
   }));
-  const realized = summarizeRealized(computeRealizedLots(ledger), () => 1);
+  // Without splits, a pre-split buy cannot cover a post-split sale: FIFO finds a quarter of the
+  // shares it needs and books the rest as a zero-basis gain, which overstates the realized profit.
+  const holdingSplits = await loadSplitsByInstrument(supabase, [id]);
+  const realized = summarizeRealized(computeRealizedLots(ledger, holdingSplits), () => 1);
 
   const totalIncome = netPremium + divPaid;
 

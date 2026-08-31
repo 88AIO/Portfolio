@@ -1,26 +1,9 @@
 // Dividend income received, and the forward estimate.
 process.env.TZ = "America/New_York";
 
+import "./_resolve.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    try {
-      return nextResolve(specifier, context);
-    } catch (err) {
-      if (!specifier.startsWith(".") || !context.parentURL) throw err;
-      for (const ext of [".ts", ".tsx", "/index.ts"]) {
-        const c = new URL(specifier + ext, context.parentURL);
-        if (existsSync(fileURLToPath(c))) return { url: c.href, shortCircuit: true };
-      }
-      throw err;
-    }
-  },
-});
 
 const { monthlyDividendHistory, annualDividendSummary } = await import("../lib/dividends/history.ts");
 

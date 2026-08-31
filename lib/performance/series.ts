@@ -7,6 +7,8 @@
 //   • Invested — cumulative net cash put into securities (buys − sell proceeds) up to that date.
 // The gap between them is capital appreciation; dividends are tracked separately elsewhere.
 
+import { splitFactor, type Split } from "@/lib/corporate/splits";
+
 export type PerfTransaction = {
   instrument_id: string;
   type: string; // buy | sell | dividend | deposit | withdrawal
@@ -37,13 +39,18 @@ export type PerformanceSeries = {
 /** Cumulative shares held on each transaction date, for one instrument (dates ascending). */
 type ShareStep = { date: string; shares: number };
 
-function buildShareTimeline(txs: PerfTransaction[]): ShareStep[] {
+function buildShareTimeline(txs: PerfTransaction[], splits?: Split[]): ShareStep[] {
   const sorted = [...txs].sort((a, b) => a.executed_at.localeCompare(b.executed_at));
   const steps: ShareStep[] = [];
   let shares = 0;
   for (const t of sorted) {
-    if (t.type === "buy") shares += t.quantity;
-    else if (t.type === "sell") shares -= t.quantity;
+    // Every share count here is expressed in TODAY'S shares, because the closes it will be
+    // multiplied against are split-adjusted (price_history stores the provider's adjusted close —
+    // see providers/yahoo.ts). Mixing an unadjusted share count with an adjusted price is the
+    // classic way to draw a chart that falls off a cliff on the split date and never recovers.
+    const qty = t.quantity * splitFactor(splits, t.executed_at);
+    if (t.type === "buy") shares += qty;
+    else if (t.type === "sell") shares -= qty;
     else continue; // dividends / cash movements don't change share count
     const last = steps[steps.length - 1];
     if (last && last.date === t.executed_at) last.shares = shares;
@@ -174,14 +181,15 @@ export function buildPerformanceSeries(
   currencyById: Map<string, string>,
   fx: (currency: string) => number,
   today: string,
-  currentValueById?: Map<string, number>
+  currentValueById?: Map<string, number>,
+  splitsById?: Map<string, Split[]>
 ): PerformanceSeries {
   const instrumentIds = [...new Set(txs.map((t) => t.instrument_id))];
 
   // Per-instrument share timelines.
   const stepsById = new Map<string, ShareStep[]>();
   for (const id of instrumentIds) {
-    stepsById.set(id, buildShareTimeline(txs.filter((t) => t.instrument_id === id)));
+    stepsById.set(id, buildShareTimeline(txs.filter((t) => t.instrument_id === id), splitsById?.get(id)));
   }
 
   // Date grid: every distinct weekly-close date we have, from the first transaction onward, + today.

@@ -14,6 +14,7 @@ export type {
   DividendInfo,
   DividendHistoryPoint,
   PriceHistoryPoint,
+  SplitPoint,
   InstrumentProfile,
   FundBreakdown,
   OptionQuote,
@@ -110,6 +111,11 @@ export function getDividendInfo(symbol: string, exchange: string) {
 export function getDividendHistory(symbol: string, exchange: string) {
   const provider = getProvider();
   return provider.getDividendHistory ? counted(provider.getDividendHistory(symbol, exchange)) : Promise.resolve([]);
+}
+
+export function getSplitHistory(symbol: string, exchange: string) {
+  const provider = getProvider();
+  return provider.getSplitHistory ? counted(provider.getSplitHistory(symbol, exchange)) : Promise.resolve([]);
 }
 
 export function getPriceHistory(

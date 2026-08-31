@@ -5,6 +5,7 @@
 // Why these two functions are worth pinning: getting a minor-unit divisor wrong makes an LSE
 // holding read 100x its value, and an inconsistent sector label silently splits one slice of the
 // allocation chart into two.
+import "./_resolve.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeCurrency, canonicalSector } from "../lib/marketdata/normalize.ts";

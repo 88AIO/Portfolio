@@ -12,6 +12,7 @@ import {
   type PerfTransaction,
   type PerfClose,
 } from "@/lib/performance/series";
+import { loadSplitsByInstrument } from "@/lib/corporate/load";
 import PerformanceRange from "@/components/PerformanceRange";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 import BackfillButton from "@/components/BackfillButton";
@@ -156,13 +157,18 @@ export default async function PerformancePage() {
   // single "today" snapshot (the broker sends current positions, not each purchase date), which
   // can't reconstruct a true value-over-time. In that case we show an honest "growth of your current
   // holdings" backtest — the basket you hold today, valued back through the price history.
+  // Splits restate historical share counts into today's shares. price_history stores the
+  // provider's ADJUSTED close, so without this the value line drops off a cliff on every split
+  // date and never comes back.
+  const splitsById = await loadSplitsByInstrument(supabase, txs.map((t) => t.instrument_id));
+
   const hasRealHistory = txs.some((t) => (t.type === "buy" || t.type === "sell") && t.executed_at < today);
 
   let chartData: { date: string; value: number; invested: number; benchmark?: number }[];
   let endValue: number, endInvested: number, gain: number, gainPct: number | null, hasData: boolean;
 
   if (hasRealHistory) {
-    const series = buildPerformanceSeries(txs as PerfTransaction[], historyById, currencyById, fx, today, currentValueById);
+    const series = buildPerformanceSeries(txs as PerfTransaction[], historyById, currencyById, fx, today, currentValueById, splitsById);
     endValue = series.endValue; endInvested = series.endInvested; gain = series.gain; gainPct = series.gainPct;
     chartData = series.points.map((p) => ({ date: p.date, value: Math.round(p.value), invested: Math.round(p.invested) }));
     hasData = series.points.length >= 2 && series.endValue > 0;

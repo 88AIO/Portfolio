@@ -5,8 +5,12 @@
 // sales, lot-relief methods other than FIFO, per-share commissions beyond what's on the trade,
 // return-of-capital adjustments, or the special tax treatment of options — the UI says so plainly.
 
+import { splitFactor, type Split } from "@/lib/corporate/splits";
+
 export type LedgerTx = {
   symbol: string;
+  /** Needed only to look up splits; matching still groups by symbol/exchange/currency. */
+  instrument_id?: string | null;
   // Optional, but pass it when you have it: a ticker string alone does not identify an instrument.
   exchange?: string | null;
   currency: string;
@@ -62,7 +66,10 @@ function order(a: LedgerTx, b: LedgerTx): number {
  * Match sells against prior buys FIFO and emit one realized lot per matched slice.
  * Only buy/sell transactions matter; dividends/cash movements are ignored here.
  */
-export function computeRealizedLots(txs: LedgerTx[]): RealizedLot[] {
+export function computeRealizedLots(
+  txs: LedgerTx[],
+  splitsByInstrument?: Map<string, Split[]>
+): RealizedLot[] {
   // Group by INSTRUMENT, not by ticker string. A dual-listed name shares its ticker across venues
   // (a London line in GBP, a US line in USD), and matching a GBP buy against a USD sell produces a
   // cost basis that is arithmetic nonsense — which the tax page then converts at the sell
@@ -81,11 +88,19 @@ export function computeRealizedLots(txs: LedgerTx[]): RealizedLot[] {
   for (const { symbol, txs: list } of byInstrument.values()) {
     const open: OpenLot[] = [];
     for (const t of [...list].sort(order)) {
-      const qty = Math.abs(t.quantity);
+      // Restate into today's shares before matching. Buy 10 pre-split and sell 40 post-split and
+      // the raw rows cannot be matched at all — FIFO would find 10 shares to cover a 40-share sale
+      // and book the other 30 as a zero-basis windfall. Scaling both sides keeps quantity x price
+      // constant, so every money figure below is unchanged; only the share counts become
+      // comparable. Reported lot quantities are therefore in today's shares, which is what the
+      // holding page shows beside them.
+      const factor = t.instrument_id ? splitFactor(splitsByInstrument?.get(t.instrument_id), t.executed_at) : 1;
+      const qty = Math.abs(t.quantity) * factor;
+      const price = t.price / factor;
       if (qty <= 0) continue;
 
       if (t.type === "buy") {
-        const costPerShare = (qty * t.price + (t.fees || 0)) / qty; // fees fold into basis
+        const costPerShare = (qty * price + (t.fees || 0)) / qty; // fees fold into basis
         open.push({ qty, costPerShare, date: t.executed_at });
         continue;
       }
@@ -96,7 +111,7 @@ export function computeRealizedLots(txs: LedgerTx[]): RealizedLot[] {
       while (remaining > 0 && open.length > 0) {
         const lot = open[0];
         const take = Math.min(remaining, lot.qty);
-        const proceeds = take * t.price - take * sellFeePerShare;
+        const proceeds = take * price - take * sellFeePerShare;
         const costBasis = take * lot.costPerShare;
         lots.push({
           symbol,
@@ -116,7 +131,7 @@ export function computeRealizedLots(txs: LedgerTx[]): RealizedLot[] {
       // Oversold with no matching lot (e.g. a short or a data gap): realize with zero basis so
       // the proceeds still appear rather than silently vanishing.
       if (remaining > 1e-9) {
-        const proceeds = remaining * t.price - remaining * sellFeePerShare;
+        const proceeds = remaining * price - remaining * sellFeePerShare;
         lots.push({
           symbol,
           currency: t.currency,

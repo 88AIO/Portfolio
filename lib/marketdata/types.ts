@@ -26,6 +26,12 @@ export type DividendHistoryPoint = {
   amount: number; // per share, in the instrument's currency
 };
 
+// A share split. ratio 4 = 4-for-1 forward, 0.1 = 1-for-10 reverse.
+export type SplitPoint = {
+  exDate: string; // YYYY-MM-DD — the first session that trades at the new share count
+  ratio: number;
+};
+
 // A historical closing price used to draw portfolio value over time.
 export type PriceHistoryPoint = {
   date: string; // YYYY-MM-DD
@@ -88,6 +94,7 @@ export interface MarketDataProvider {
   searchInstrument(symbol: string, exchange: string): Promise<InstrumentMeta | null>;
   getDividendInfo?(symbol: string, exchange: string): Promise<DividendInfo | null>;
   getDividendHistory?(symbol: string, exchange: string): Promise<DividendHistoryPoint[]>;
+  getSplitHistory?(symbol: string, exchange: string): Promise<SplitPoint[]>;
   getPriceHistory?(symbol: string, exchange: string, fromDays: number, knownCurrency?: string | null): Promise<PriceHistoryPoint[]>;
   getProfile?(symbol: string, exchange: string): Promise<InstrumentProfile | null>;
   getFundBreakdown?(symbol: string, exchange: string): Promise<FundBreakdown | null>;

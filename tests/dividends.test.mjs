@@ -3,26 +3,9 @@
 // The safety score is a 0-100 number shown next to a holding, and people will read it as a verdict
 // on whether a dividend is dependable. The calendar answers "what income is coming, and when".
 // Neither had tests.
+import "./_resolve.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    try {
-      return nextResolve(specifier, context);
-    } catch (err) {
-      if (!specifier.startsWith(".") || !context.parentURL) throw err;
-      for (const ext of [".ts", ".tsx", "/index.ts"]) {
-        const candidate = new URL(specifier + ext, context.parentURL);
-        if (existsSync(fileURLToPath(candidate))) return { url: candidate.href, shortCircuit: true };
-      }
-      throw err;
-    }
-  },
-});
 
 const { dividendSafety } = await import("../lib/dividends/safety.ts");
 const { buildDividendCalendar } = await import("../lib/dividends/calendar.ts");

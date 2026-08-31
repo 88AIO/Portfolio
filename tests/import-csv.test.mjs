@@ -6,26 +6,9 @@
 // entire class of date bug that a user's own machine would hit.
 process.env.TZ = "America/New_York";
 
+import "./_resolve.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    try {
-      return nextResolve(specifier, context);
-    } catch (err) {
-      if (!specifier.startsWith(".") || !context.parentURL) throw err;
-      for (const ext of [".ts", ".tsx", "/index.ts"]) {
-        const candidate = new URL(specifier + ext, context.parentURL);
-        if (existsSync(fileURLToPath(candidate))) return { url: candidate.href, shortCircuit: true };
-      }
-      throw err;
-    }
-  },
-});
 
 const { parseTransactionsCsv, transactionDedupeKey, isValidSymbol, isValidExchange } = await import(
   "../lib/import/csv.ts"

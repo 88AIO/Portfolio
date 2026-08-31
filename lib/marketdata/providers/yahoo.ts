@@ -15,6 +15,7 @@ import type {
   OptionQuote,
   PriceHistoryPoint,
   Quote,
+  SplitPoint,
 } from "../types";
 
 // v4 is class-based: instantiate once (server-only; construction is side-effect-free) and reuse.
@@ -216,6 +217,43 @@ async function getDividendHistory(
   }
 }
 
+/**
+ * Share splits, from the same chart endpoint that carries dividends.
+ *
+ * Yahoo reports a split as a numerator/denominator pair ("4:1"), which is the ratio a share count
+ * is multiplied by. A reverse split arrives the same way with the two swapped (1:10 → 0.1), so no
+ * special case is needed — but a zero or missing denominator would produce Infinity or NaN and
+ * silently multiply someone's holding into nonsense, so those rows are dropped.
+ */
+async function getSplitHistory(symbol: string, exchange: string): Promise<SplitPoint[]> {
+  try {
+    // Ten years: far enough back to cover the trade history anyone is likely to import, and a
+    // split missed at the far end is worse than an extra request — it corrupts cost basis.
+    const period1 = new Date(Date.now() - 10 * 365 * 24 * 60 * 60 * 1000);
+    const res = (await yf.chart(toYahoo(symbol, exchange), {
+      period1,
+      interval: "1d",
+      events: "split",
+    })) as unknown as {
+      events?: { splits?: Array<{ date?: Date; numerator?: number; denominator?: number }> };
+    };
+    const out: SplitPoint[] = [];
+    for (const sp of res?.events?.splits ?? []) {
+      const iso = isoDate(sp?.date ?? null);
+      const num = sp?.numerator;
+      const den = sp?.denominator;
+      if (!iso || typeof num !== "number" || typeof den !== "number") continue;
+      const ratio = num / den;
+      if (!Number.isFinite(ratio) || ratio <= 0 || ratio === 1) continue;
+      out.push({ exDate: iso, ratio });
+    }
+    out.sort((a, b) => a.exDate.localeCompare(b.exDate));
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 async function getPriceHistory(
   symbol: string,
   exchange: string,
@@ -378,6 +416,7 @@ export const yahooProvider: MarketDataProvider = {
   searchInstrument,
   getDividendInfo,
   getDividendHistory,
+  getSplitHistory,
   getPriceHistory,
   getProfile,
   getFundBreakdown,

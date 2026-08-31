@@ -18,6 +18,7 @@ import {
 import DeleteActivityButton from "@/components/DeleteActivityButton";
 import { computeWheels, type WheelPosition, type WheelRow, type WheelEvent } from "@/lib/options/wheel";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
+import { loadSplitsByInstrument } from "@/lib/corporate/load";
 import AddOptionForm from "@/components/AddOptionForm";
 import WheelCycles from "@/components/WheelCycles";
 import { MonthlyPremiumChart } from "@/components/charts";
@@ -46,6 +47,7 @@ type PositionLite = {
 // Raw ledger row joined to its instrument symbol, for per-symbol realized-gain math.
 type LedgerRow = {
   id: string;
+  instrument_id: string;
   type: string;
   quantity: number;
   price: number;
@@ -90,7 +92,7 @@ export default async function OptionsPage() {
     fetchAll<LedgerRow>((from, to) =>
       supabase
         .from("transactions")
-        .select("id, type, quantity, price, fees, currency, executed_at, instruments(symbol, exchange)")
+        .select("id, instrument_id, type, quantity, price, fees, currency, executed_at, instruments(symbol, exchange)")
         .order("executed_at", { ascending: true })
         .order("instrument_id", { ascending: true })
         .range(from, to),
@@ -202,10 +204,12 @@ export default async function OptionsPage() {
   // O2 — the wheel as one story: each underlying's option premium + dividends + realized stock P/L,
   // its current phase (selling puts / covered call / holding / idle) and a blended annualized return.
   // Realized stock P/L per symbol comes from FIFO lot-matching the raw equity ledger.
+  const wheelSplits = await loadSplitsByInstrument(supabase, ledger.map((t) => t.instrument_id));
   const realizedLots = computeRealizedLots(
     ledger.map((t): LedgerTx => {
       const rel = Array.isArray(t.instruments) ? t.instruments[0] : t.instruments;
       return {
+        instrument_id: t.instrument_id,
         symbol: rel?.symbol ?? "",
         exchange: rel?.exchange ?? null,
         currency: t.currency,
@@ -215,7 +219,8 @@ export default async function OptionsPage() {
         fees: t.fees ?? 0,
         executed_at: t.executed_at,
       };
-    }).filter((t) => t.symbol)
+    }).filter((t) => t.symbol),
+    wheelSplits
   );
   const realizedBySymbol = new Map<string, number>();
   const lotsBySymbol = new Map<string, typeof realizedLots>();

@@ -3,32 +3,9 @@
 // buildAlerts decides which warnings reach a user's inbox — a miss is silence when something
 // needed saying, a false positive trains people to ignore the emails. computeIvRank produces the
 // IV column in the put finder, which is there to keep risk visible next to a tempting premium.
+import "./_resolve.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith("@/")) {
-      for (const ext of ["", ".ts", ".tsx", "/index.ts"]) {
-        const c = new URL("../" + specifier.slice(2) + ext, import.meta.url);
-        if (existsSync(fileURLToPath(c))) return { url: c.href, shortCircuit: true };
-      }
-    }
-    try {
-      return nextResolve(specifier, context);
-    } catch (err) {
-      if (!specifier.startsWith(".") || !context.parentURL) throw err;
-      for (const ext of [".ts", ".tsx", "/index.ts"]) {
-        const c = new URL(specifier + ext, context.parentURL);
-        if (existsSync(fileURLToPath(c))) return { url: c.href, shortCircuit: true };
-      }
-      throw err;
-    }
-  },
-});
 
 const { buildAlerts } = await import("../lib/notifications/build.ts");
 const { computeIvRank, IV_RANK_MIN_SAMPLES, IV_RANK_MIN_SPAN_DAYS, IV_RANK_WINDOW_DAYS } =

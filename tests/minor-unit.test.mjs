@@ -8,26 +8,9 @@
 // The rule under test: the EXCHANGE says which currency is quoted in a minor unit; the
 // INSTRUMENT'S OWN currency says whether this listing is that currency. London is the case that
 // forces the distinction — it carries USD- and EUR-denominated lines next to its pence ones.
+import "./_resolve.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    try {
-      return nextResolve(specifier, context);
-    } catch (err) {
-      if (!specifier.startsWith(".") || !context.parentURL) throw err;
-      for (const ext of [".ts", ".tsx", "/index.ts"]) {
-        const candidate = new URL(specifier + ext, context.parentURL);
-        if (existsSync(fileURLToPath(candidate))) return { url: candidate.href, shortCircuit: true };
-      }
-      throw err;
-    }
-  },
-});
 
 const { eodhdProvider } = await import("../lib/marketdata/providers/eodhd.ts");
 

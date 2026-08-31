@@ -2,33 +2,9 @@
 // These two functions produced the option legs currently in the database, from a feed that
 // SnapTrade types as `[key: string]: any`. A parsing slip here doesn't show a wrong number, it
 // stores one permanently.
+import "./_resolve.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    // The app's "@/..." path alias, plus TypeScript's extensionless relative imports.
-    if (specifier.startsWith("@/")) {
-      for (const ext of ["", ".ts", ".tsx", "/index.ts"]) {
-        const c = new URL("../" + specifier.slice(2) + ext, import.meta.url);
-        if (existsSync(fileURLToPath(c))) return { url: c.href, shortCircuit: true };
-      }
-    }
-    try {
-      return nextResolve(specifier, context);
-    } catch (err) {
-      if (!specifier.startsWith(".") || !context.parentURL) throw err;
-      for (const ext of [".ts", ".tsx", "/index.ts"]) {
-        const c = new URL(specifier + ext, context.parentURL);
-        if (existsSync(fileURLToPath(c))) return { url: c.href, shortCircuit: true };
-      }
-      throw err;
-    }
-  },
-});
 
 const { normalizeSnaptradeActivity, normalizeSnaptradeOptionPosition, isOptionPosition } =
   await import("../lib/brokersync/options.ts");

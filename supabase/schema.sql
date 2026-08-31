@@ -172,6 +172,42 @@ create table if not exists public.dividends (
   unique (instrument_id, ex_date)
 );
 
+-- 7c. SPLITS (corporate actions) ------------------------------
+-- Shared reference data, like dividends: the nightly sync writes it with the service role and
+-- clients only read.
+--
+-- Splits are NOT applied by rewriting the user's transactions. Their ledger has to keep saying
+-- what their broker statement says ("bought 10 @ $500"), or reconciliation breaks and the import
+-- dedupe key stops matching, which would re-import every pre-split trade as a new row. Instead
+-- the raw rows stay verbatim and the positions view scales them at query time — the same rule the
+-- rest of the schema follows: transactions are the source of truth, everything else is computed.
+create table if not exists public.instrument_splits (
+  id uuid primary key default gen_random_uuid(),
+  instrument_id uuid not null references public.instruments(id) on delete cascade,
+  ex_date date not null,       -- first session that trades at the new share count
+  ratio numeric not null,      -- 4 = 4-for-1 forward; 0.1 = 1-for-10 reverse
+  source text not null default 'provider',  -- provider | manual
+  created_at timestamptz not null default now(),
+  unique (instrument_id, ex_date),
+  -- A zero or negative ratio would multiply every historical share count into nonsense, so it is
+  -- rejected at the table rather than defended against in each reader.
+  constraint instrument_splits_ratio_positive check (ratio > 0)
+);
+create index if not exists instrument_splits_instrument_idx on public.instrument_splits(instrument_id);
+
+-- Exact product aggregate. Two splits on one holding have to compose (a 2-for-1 then a 3-for-1 is
+-- 6x), and Postgres has no built-in product. The obvious exp(sum(ln(x))) trick returns a float
+-- with rounding dust — 4.000000000000001 shares is not a share count anyone should see — so this
+-- multiplies numerics exactly instead.
+create or replace function public.numeric_mul(a numeric, b numeric)
+  returns numeric language sql immutable strict as $$ select a * b $$;
+drop aggregate if exists public.product(numeric) cascade;
+create aggregate public.product(numeric) (
+  sfunc = public.numeric_mul,
+  stype = numeric,
+  initcond = '1'
+);
+
 -- 7b. OPTION TRANSACTIONS (options-selling layer O1) ----------
 -- Sold puts/calls, the wheel, rolls. Underlying = instrument_id.
 -- Declared BEFORE the positions view because that view folds net
@@ -229,12 +265,27 @@ agg as (
   select
     t.portfolio_id,
     t.instrument_id,
-    sum(case when t.type='buy' then t.quantity when t.type='sell' then -t.quantity else 0 end) as shares,
+    -- Share counts are restated in TODAY'S shares: a quantity recorded before a split is scaled by
+    -- every split that has happened since. Money columns are deliberately NOT scaled — a split
+    -- changes how many pieces you hold, never what you paid or what you were paid. So buy_value
+    -- (quantity x price) and div_paid are split-invariant by construction, and avg_cost falls out
+    -- correctly because only its denominator moves: pay $5,000 for 10 shares, then split 4-for-1,
+    -- and you hold 40 shares at $125 with the same $5,000 basis.
+    --
+    -- The strict inequality on ex_date matters: a trade executed ON the ex-date already prices and
+    -- counts in post-split shares, so only splits strictly AFTER a row apply to it.
+    sum(case when t.type='buy' then t.quantity*sf.factor when t.type='sell' then -t.quantity*sf.factor else 0 end) as shares,
     sum(case when t.type='buy' then t.quantity*t.price + t.fees else 0 end)                     as buy_value,
-    sum(case when t.type='buy' then t.quantity else 0 end)                                       as buy_shares,
+    sum(case when t.type='buy' then t.quantity*sf.factor else 0 end)                            as buy_shares,
     sum(t.fees)                                                                                  as commission_paid,
     sum(case when t.type='dividend' then t.quantity*t.price else 0 end)                          as div_paid
   from public.transactions t
+  left join lateral (
+    select public.product(s.ratio) as factor
+    from public.instrument_splits s
+    where s.instrument_id = t.instrument_id
+      and s.ex_date > t.executed_at
+  ) sf on true
   group by t.portfolio_id, t.instrument_id
 )
 select
@@ -356,6 +407,7 @@ alter table public.instruments  enable row level security;
 alter table public.price_cache  enable row level security;
 alter table public.price_history enable row level security;
 alter table public.dividends    enable row level security;
+alter table public.instrument_splits enable row level security;
 
 drop policy if exists "own profile" on public.profiles;
 create policy "own profile" on public.profiles for all using (auth.uid() = id) with check (auth.uid() = id);
@@ -421,6 +473,8 @@ drop policy if exists "read fx_rates" on public.fx_rates;
 create policy "read fx_rates" on public.fx_rates for select using (auth.role() = 'authenticated');
 drop policy if exists "read dividends" on public.dividends;
 create policy "read dividends" on public.dividends for select using (auth.role() = 'authenticated');
+drop policy if exists "read instrument_splits" on public.instrument_splits;
+create policy "read instrument_splits" on public.instrument_splits for select using (auth.role() = 'authenticated');
 
 -- ============================================================
 -- 8. BROKER SYNC (SnapTrade) — see docs/SPEC_broker-sync.md

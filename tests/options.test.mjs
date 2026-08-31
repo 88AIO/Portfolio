@@ -7,6 +7,7 @@
 // Runs offline with no env: `npm test`. lib/options.ts is TypeScript, so the helper is re-declared
 // here from its documented contract; if the two ever disagree, THIS file is the spec.
 
+import "./_resolve.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 

@@ -7,6 +7,7 @@ import {
   getDividendInfo,
   getDividendHistory,
   getPriceHistory,
+  getSplitHistory,
   getQuote,
   getOptionChain,
   providerSupportsOptions,
@@ -79,6 +80,32 @@ export async function syncInstrumentPriceHistory(
       { onConflict: "instrument_id,d" }
     );
   }
+}
+
+// Sync an instrument's share splits.
+//
+// Written once and then left alone: a split that happened is a fact about the past, so rows are
+// upserted on (instrument_id, ex_date) and old ones are never deleted. Deleting on a provider's
+// empty response would be the dangerous move — a bad day at the vendor would silently un-split
+// every holding and restate everyone's cost basis.
+export async function syncInstrumentSplits(
+  admin: Admin,
+  instrumentId: string,
+  symbol: string,
+  exchange: string
+) {
+  const splits = await getSplitHistory(symbol, exchange);
+  if (!splits.length) return 0;
+  await admin.from("instrument_splits").upsert(
+    splits.map((s) => ({
+      instrument_id: instrumentId,
+      ex_date: s.exDate,
+      ratio: s.ratio,
+      source: "provider",
+    })),
+    { onConflict: "instrument_id,ex_date" }
+  );
+  return splits.length;
 }
 
 // Sync an instrument's dividend reference + history from the market-data provider.

@@ -18,6 +18,7 @@ import type {
   MarketDataProvider,
   PriceHistoryPoint,
   Quote,
+  SplitPoint,
 } from "../types";
 import { normalizeCurrency, canonicalSector } from "../normalize";
 
@@ -234,6 +235,31 @@ async function getDividendHistory(
   return out;
 }
 
+/**
+ * Share splits. EODHD returns them as the string "4.000000/1.000000" — numerator over denominator,
+ * the factor a share count is multiplied by. A malformed or non-positive ratio is dropped rather
+ * than defaulted: multiplying a holding by a wrong number is worse than not knowing about a split,
+ * because the wrong number looks like a real position.
+ */
+async function getSplitHistory(symbol: string, exchange: string): Promise<SplitPoint[]> {
+  const rows = await get<Array<{ date?: string; split?: unknown }>>(
+    `/splits/${encodeURIComponent(ticker(symbol, exchange))}?from=${daysAgo(10 * 365)}`,
+    86_400
+  );
+  if (!Array.isArray(rows)) return [];
+  const out: SplitPoint[] = [];
+  for (const r of rows) {
+    const exDate = ymd(r.date);
+    if (!exDate || typeof r.split !== "string") continue;
+    const [a, b] = r.split.split("/").map((x) => Number(x));
+    const ratio = a / b;
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio === 1) continue;
+    out.push({ exDate, ratio });
+  }
+  out.sort((a, b) => a.exDate.localeCompare(b.exDate));
+  return out;
+}
+
 async function getPriceHistory(
   symbol: string,
   exchange: string,
@@ -303,6 +329,7 @@ export const eodhdProvider: MarketDataProvider = {
   searchInstrument,
   getDividendInfo,
   getDividendHistory,
+  getSplitHistory,
   getPriceHistory,
   getProfile,
   getFundBreakdown,

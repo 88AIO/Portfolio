@@ -7,6 +7,8 @@ import { money, pct } from "@/lib/format";
 import { dividendSafety, type DividendSafety } from "@/lib/dividends/safety";
 import { buildDividendCalendar, type CalendarPosition } from "@/lib/dividends/calendar";
 import { estimateNextExDate, inferDivFrequency } from "@/lib/dividends/cadence";
+import { loadSplitsByInstrument } from "@/lib/corporate/load";
+import { adjustDividendPerShare } from "@/lib/corporate/splits";
 import { monthlyDividendHistory, annualDividendSummary, type DividendTx } from "@/lib/dividends/history";
 import SafetyBadge from "@/components/SafetyBadge";
 import { DividendCalendarChart } from "@/components/charts";
@@ -157,6 +159,21 @@ export default async function DividendsPage() {
   // orders newest-first for the "recent payments" list, so this is a reversed view of the same rows.
   const historyAsc = (id: string) => (historyById.get(id) ?? []).slice().reverse();
 
+  // Per-share payouts restated in today's shares, for the safety score only.
+  //
+  // A provider reports each payout as it was announced, so a pre-split $0.82 sits in the same
+  // series as a post-split $0.24. Left alone a 4-for-1 split reads as a 75% dividend cut — exactly
+  // the signal the safety score exists to detect — and it would confidently mark a healthy payer
+  // as at-risk. The "Announced payouts" table below deliberately keeps the raw figures: it says
+  // what these companies declared, and that is what was declared.
+  const splitsById = await loadSplitsByInstrument(supabase, ids);
+  const safetyHistory = (id: string) => {
+    const splits = splitsById.get(id);
+    const hist = historyAsc(id);
+    if (!splits?.length) return hist;
+    return hist.map((h) => ({ ...h, amount: adjustDividendPerShare(h.amount, splits, h.exDate) }));
+  };
+
   // Fill in the missing next-payout dates ourselves.
   //
   // The provider declares a next ex-date for only a minority of tickers — for most of a real
@@ -231,7 +248,7 @@ export default async function DividendsPage() {
     .filter((p) => (p.annual_div_per_share ?? 0) > 0)
     .map((p) => ({
       p,
-      safety: dividendSafety(historyById.get(p.instrument_id) ?? [], p.div_yield_current),
+      safety: dividendSafety(safetyHistory(p.instrument_id), p.div_yield_current),
     }))
     .sort((a, b) => (b.safety.score ?? -1) - (a.safety.score ?? -1));
   const safetyById = new Map<string, DividendSafety>(

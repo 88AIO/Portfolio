@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   syncInstrumentQuote,
   syncInstrumentDividends,
+  syncInstrumentSplits,
   syncInstrumentPriceHistory,
   syncIvSample,
 } from "@/lib/marketdata/sync";
@@ -142,6 +143,9 @@ export async function GET(request: Request) {
         try {
           await syncInstrumentQuote(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
           await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
+          // Splits before price history: both feed the value chart, and a chart drawn from
+          // adjusted closes against unadjusted share counts has a cliff in it on the split date.
+          await syncInstrumentSplits(admin, p.instrument_id, p.symbol, p.exchange);
           await syncInstrumentPriceHistory(admin, p.instrument_id, p.symbol, p.exchange, undefined, p.currency);
 
           if (!p.sector && !p.sector_weights) {

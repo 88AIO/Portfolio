@@ -3,26 +3,9 @@
 // These numbers go on a user's tax return. A wrong option-premium figure is annoying; a wrong
 // realized gain is filed with the IRS. The engine had no tests at all before this file, so each
 // case below pins a rule the engine is *claiming* to implement, not just its current output.
+import "./_resolve.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    try {
-      return nextResolve(specifier, context);
-    } catch (err) {
-      if (!specifier.startsWith(".") || !context.parentURL) throw err;
-      for (const ext of [".ts", ".tsx", "/index.ts"]) {
-        const candidate = new URL(specifier + ext, context.parentURL);
-        if (existsSync(fileURLToPath(candidate))) return { url: candidate.href, shortCircuit: true };
-      }
-      throw err;
-    }
-  },
-});
 
 const { computeRealizedLots, summarizeRealized, lotsInYear, realizedYears } = await import(
   "../lib/tax/realized.ts"
