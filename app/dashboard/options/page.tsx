@@ -121,15 +121,14 @@ export default async function OptionsPage() {
   const computed: ComputedOption[] = rawOptions.map(computeOption);
   const totals = computeOptionTotals(computed, fx);
 
-  // Income integration: realized dividends + net option premium = total income.
-  let dividendsReceived = 0;
+  // Premium only. Dividends belong on the Dividends page: blending them into a headline here made
+  // this page answer a question it isn't for, and made the number impossible to check against a
+  // broker's options activity. The wheel below still tells the whole-position story per underlying
+  // — that view is deliberately about total return on a wheeled stock, and is left intact.
   let costBasisReduction = 0;
   for (const p of positions) {
-    const r = fx(p.currency);
-    dividendsReceived += (p.div_paid ?? 0) * r;
-    costBasisReduction += Math.max(p.option_premium ?? 0, 0) * r;
+    costBasisReduction += Math.max(p.option_premium ?? 0, 0) * fx(p.currency);
   }
-  const totalIncome = dividendsReceived + totals.premiumIncome;
 
   const open = computed
     .filter((o) => o.isOpen)
@@ -319,17 +318,17 @@ export default async function OptionsPage() {
         {/* Cockpit tiles */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Tile
-            label="Total income"
-            hint="All the cash you've earned from options premium plus dividends, in your base currency."
-            value={money(totalIncome, base)}
-            sub={`${money(dividendsReceived, base)} dividends · ${money(totals.premiumIncome, base)} premium`}
+            label="Premium earned"
+            hint="Cash you kept from selling options, in your base currency. Green the moment you sell. It's yours to keep."
+            value={money(totals.premiumIncome, base)}
+            sub={`${money(totals.openPremium, base)} from still-open trades`}
             accent
           />
           <Tile
-            label="Premium earned"
-            hint="Cash you kept from selling options. Green the moment you sell. It's yours to keep."
-            value={money(totals.premiumIncome, base)}
-            sub={`${money(totals.openPremium, base)} from still-open trades`}
+            label="Open contracts"
+            hint="Option positions still live right now, and the collateral they tie up."
+            value={String(totals.openCount)}
+            sub={`${money(totals.totalCollateral, base)} set aside`}
           />
           <Tile
             label="Return per year"

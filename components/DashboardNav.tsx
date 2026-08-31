@@ -5,14 +5,13 @@ import Link from "next/link";
 import BrandMark from "@/components/BrandMark";
 import { signOut } from "@/app/dashboard/actions";
 
-type NavKey = "overview" | "performance" | "dividends" | "options" | "tax" | "cash" | "broker" | "settings";
+type NavKey = "overview" | "performance" | "dividends" | "options" | "cash" | "broker" | "settings";
 
 const NAV: [NavKey, string, string][] = [
   ["overview", "Overview", "/dashboard"],
   ["performance", "Performance", "/dashboard/performance"],
   ["dividends", "Dividends", "/dashboard/dividends"],
   ["options", "Options", "/dashboard/options"],
-  ["tax", "Tax", "/dashboard/tax"],
   ["cash", "Cash", "/dashboard/cash"],
   ["broker", "Brokers", "/dashboard/broker"],
   ["settings", "Settings", "/dashboard/settings"],
