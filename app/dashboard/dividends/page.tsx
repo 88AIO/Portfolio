@@ -83,6 +83,7 @@ export default async function DividendsPage() {
     short: m.label.slice(0, 3),
     total: m.total,
     count: m.events.length,
+    note: undefined as string | undefined,
   }));
   const peakMonth = calendar.months.reduce(
     (best, m) => (m.total > best.total ? m : best),
@@ -124,6 +125,17 @@ export default async function DividendsPage() {
     count: 0,
   }));
   const received24 = receivedMonthly.reduce((s, m) => s + m.total, 0);
+
+  // The calendar is forward-looking, so late in the month its first bar is empty: everything due
+  // has already been paid. An empty leading bar reads as "you get nothing in August" when the truth
+  // is the opposite, and it happens every month-end. Fill it with what was actually received and
+  // say so on the bar, so the twelve months read as one continuous income picture.
+  const paidThisMonth = receivedMonthly[receivedMonthly.length - 1]?.total ?? 0;
+  const currentMonthAlreadyPaid = calendarChart[0] && calendarChart[0].total === 0 && paidThisMonth > 0;
+  if (currentMonthAlreadyPaid) {
+    calendarChart[0].total = paidThisMonth;
+    calendarChart[0].note = "Already paid this month";
+  }
   const byYear = annualDividendSummary(divTxs, fx, today, annualIncome, 2, 3);
   const paidRecently = divTxRows.slice(0, 20).map((t) => {
     const rel = Array.isArray(t.instruments) ? t.instruments[0] : t.instruments;
@@ -228,6 +240,8 @@ export default async function DividendsPage() {
           <p className="mb-4 text-xs text-slate-400">
             What you can expect to collect each month, projected from when each holding usually pays and
             how often.
+            {currentMonthAlreadyPaid &&
+              " This month's payments have already been made, so its bar shows what you received rather than what's still due."}
             {calendar.untimedCount > 0 &&
               ` ${calendar.untimedCount} payer${calendar.untimedCount === 1 ? "" : "s"} with no known next date ${calendar.untimedCount === 1 ? "is" : "are"} not shown.`}
           </p>

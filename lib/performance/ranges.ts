@@ -105,3 +105,39 @@ export function tickFormatterFor(points: { date: string }[]): (d: string) => str
   // Longer: the year alone. minTickGap thins the repeats.
   return (d) => d.slice(0, 4);
 }
+
+export type RangeChange = {
+  from: string;
+  to: string;
+  valueFrom: number;
+  valueTo: number;
+  /** Change in portfolio value across the window. Includes any money added — see gainAbs. */
+  valueAbs: number;
+  /** null when the window opens at zero: there is no percentage change from nothing. */
+  valuePct: number | null;
+  /**
+   * Change in (value − net invested) across the window: what the market did, with contributions
+   * netted out. A month where you deposited 10k and the market did nothing shows a large valueAbs
+   * and a gainAbs near zero, which is the honest read of "how did my investments do".
+   */
+  gainAbs: number;
+};
+
+/** Movement across the visible window. null when there is nothing to compare. */
+export function rangeChange(
+  points: { date: string; value: number; invested: number }[]
+): RangeChange | null {
+  if (points.length < 2) return null;
+  const a = points[0];
+  const b = points[points.length - 1];
+  const valueAbs = b.value - a.value;
+  return {
+    from: a.date,
+    to: b.date,
+    valueFrom: a.value,
+    valueTo: b.value,
+    valueAbs,
+    valuePct: a.value > 0 ? (valueAbs / a.value) * 100 : null,
+    gainAbs: (b.value - b.invested) - (a.value - a.invested),
+  };
+}

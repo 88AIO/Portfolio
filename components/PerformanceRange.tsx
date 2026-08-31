@@ -10,9 +10,11 @@ import { PerformanceChart } from "@/components/charts";
 import {
   RANGE_PRESETS,
   filterByRange,
+  rangeChange,
   tickFormatterFor,
   type RangeKey,
 } from "@/lib/performance/ranges";
+import { money, pct } from "@/lib/format";
 
 type Point = { date: string; value: number; invested: number; benchmark?: number };
 
@@ -40,6 +42,7 @@ export default function PerformanceRange({
     [data, range, today, from, to]
   );
   const tickFormatter = useMemo(() => tickFormatterFor(shown), [shown]);
+  const change = useMemo(() => rangeChange(shown), [shown]);
 
   const btn = (active: boolean) =>
     [
@@ -51,7 +54,8 @@ export default function PerformanceRange({
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-1" role="group" aria-label="Chart time range">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Chart time range">
         {RANGE_PRESETS.map((r) => (
           <button
             key={r.key}
@@ -99,6 +103,31 @@ export default function PerformanceRange({
               className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:ring-2 focus:ring-slate-300 focus:outline-none"
             />
           </span>
+        )}
+      </div>
+
+        {change && (
+          <div className="text-right">
+            <div
+              className={`text-sm font-semibold tabular-nums ${
+                change.valueAbs >= 0 ? "text-emerald-600" : "text-rose-600"
+              }`}
+            >
+              {change.valueAbs >= 0 ? "+" : "−"}
+              {money(Math.abs(change.valueAbs), currency)}
+              {change.valuePct != null && <> ({pct(change.valuePct)})</>}
+            </div>
+            <div className="text-xs text-slate-400">
+              value over this range
+              {Math.abs(change.valueAbs - change.gainAbs) > 1 && (
+                <>
+                  {" · "}
+                  {change.gainAbs >= 0 ? "+" : "−"}
+                  {money(Math.abs(change.gainAbs), currency)} from the market
+                </>
+              )}
+            </div>
+          </div>
         )}
       </div>
 

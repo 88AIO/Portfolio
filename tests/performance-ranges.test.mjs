@@ -138,3 +138,59 @@ test("a multi-year window labels the year alone", () => {
 test("an empty series gets a formatter that does not crash", () => {
   assert.equal(tickFormatterFor([])("2026-01-01"), "2026-01-01");
 });
+
+// --- Movement across the window ------------------------------------------------------------------
+
+const { rangeChange } = await import("../lib/performance/ranges.ts");
+
+test("value change and percent are measured across the visible window", () => {
+  const c = rangeChange([
+    { date: "2026-01-01", value: 1000, invested: 1000 },
+    { date: "2026-06-01", value: 1250, invested: 1000 },
+  ]);
+  assert.equal(c.valueAbs, 250);
+  assert.equal(c.valuePct, 25);
+  assert.equal(c.from, "2026-01-01");
+  assert.equal(c.to, "2026-06-01");
+});
+
+test("a fall reports negative, not an absolute value", () => {
+  const c = rangeChange([
+    { date: "2026-01-01", value: 1000, invested: 1000 },
+    { date: "2026-06-01", value: 800, invested: 1000 },
+  ]);
+  assert.equal(c.valueAbs, -200);
+  assert.equal(c.valuePct, -20);
+});
+
+test("money added inflates the value change but not the gain", () => {
+  // Deposited 10,000 and the market did nothing: value is up 10,000, the investments did 0.
+  const c = rangeChange([
+    { date: "2026-01-01", value: 1000, invested: 1000 },
+    { date: "2026-06-01", value: 11000, invested: 11000 },
+  ]);
+  assert.equal(c.valueAbs, 10000, "value rose by the deposit");
+  assert.equal(c.gainAbs, 0, "but nothing was earned");
+});
+
+test("gain isolates the market move when contributions are flat", () => {
+  const c = rangeChange([
+    { date: "2026-01-01", value: 1000, invested: 1000 },
+    { date: "2026-06-01", value: 1250, invested: 1000 },
+  ]);
+  assert.equal(c.gainAbs, 250);
+});
+
+test("a window opening at zero has no percentage to report", () => {
+  const c = rangeChange([
+    { date: "2026-01-01", value: 0, invested: 0 },
+    { date: "2026-06-01", value: 500, invested: 400 },
+  ]);
+  assert.equal(c.valueAbs, 500);
+  assert.equal(c.valuePct, null, "there is no percent change from nothing");
+});
+
+test("fewer than two points is not a change", () => {
+  assert.equal(rangeChange([]), null);
+  assert.equal(rangeChange([{ date: "2026-01-01", value: 100, invested: 100 }]), null);
+});

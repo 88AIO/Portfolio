@@ -3,7 +3,14 @@
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from "recharts";
 import { CHART } from "@/lib/chartColors";
 
-type MonthBar = { label: string; short: string; total: number; count: number };
+type MonthBar = {
+  label: string;
+  short: string;
+  total: number;
+  count: number;
+  /** Overrides valueLabel for this bar — lets one chart mix money already paid with a forecast. */
+  note?: string;
+};
 
 /** Calm monthly income bars for the next 12 months. The current month is tinted to anchor "now". */
 export default function DividendCalendarChart({
@@ -32,7 +39,7 @@ export default function DividendCalendarChart({
           <YAxis tickFormatter={fmt} tickLine={false} axisLine={false} fontSize={11} stroke={CHART.axis} width={64} />
           <Tooltip
             cursor={{ fill: "rgba(32,93,74,0.06)" }}
-            formatter={(value) => [fmt(Number(value)), valueLabel]}
+            formatter={(value, _name, item) => [fmt(Number(value)), item?.payload?.note ?? valueLabel]}
             labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
             contentStyle={{ borderRadius: 12, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 12 }}
           />
