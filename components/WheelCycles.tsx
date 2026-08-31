@@ -102,7 +102,16 @@ function FragmentRow({
           {w.annualizedReturn != null ? (
             <span className={w.annualizedReturn >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(w.annualizedReturn)}</span>
           ) : (
-            <span className="text-slate-300">-</span>
+            <span
+              className="text-slate-300"
+              title={
+                w.daysActive < 30
+                  ? `Only ${w.daysActive} day${w.daysActive === 1 ? "" : "s"} of activity — too early to annualize meaningfully.`
+                  : "No capital at risk to measure a return against."
+              }
+            >
+              -
+            </span>
           )}
         </td>
         <td className="py-2.5 pl-2 text-right text-[11px] text-slate-400">

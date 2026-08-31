@@ -112,7 +112,7 @@ export default function Home() {
             <Feature title="Honest, timestamped prices" body="Every price shows when it was last updated. We would rather show a number we can stand behind than a confident wrong one." />
             <Feature title="Performance vs. the S&P 500" body="See your value over time reconstructed from your trades, benchmarked dollar-for-dollar against the same money in SPY." />
             <Feature title="US and international" body="Hold Apple and 0700.HK side by side. Everything rolls up into your base currency with server-side FX, no spreadsheets." />
-            <Feature title="Realized gains & a tax view" body="FIFO-matched realized sales, short vs. long term, dividends, and option premium for the year, ready for filing season." />
+            <Feature title="Realized gains, FIFO-matched" body="Every closed lot matched first-in-first-out, short vs. long term, beside the dividends and option premium you collected. An honest record of what you made — not a tax document." />
             <Feature title="Your data, no lock-in" body="Import a CSV or broker export (de-duplicated), and export everything any time. It's your data, and it round-trips cleanly." />
             <Feature title="Calm by default" body="The home screen answers what you own, what it's worth, and what income is coming. The deep analytics are one tap away, off by default." />
           </div>

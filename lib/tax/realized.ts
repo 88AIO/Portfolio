@@ -75,7 +75,7 @@ export function computeRealizedLots(
 ): RealizedLot[] {
   // Group by INSTRUMENT, not by ticker string. A dual-listed name shares its ticker across venues
   // (a London line in GBP, a US line in USD), and matching a GBP buy against a USD sell produces a
-  // cost basis that is arithmetic nonsense — which the tax page then converts at the sell
+  // cost basis that is arithmetic nonsense — which the caller then converts at the sell
   // currency's FX rate, compounding it. Currency is the field that always distinguishes them;
   // exchange refines it further when the caller supplies it.
   const byInstrument = new Map<string, { symbol: string; txs: LedgerTx[] }>();

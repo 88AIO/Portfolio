@@ -280,7 +280,10 @@ export default async function Dashboard({
           <p className="mt-3 text-xs text-slate-500">
             {unpricedCount} holding{unpricedCount === 1 ? "" : "s"} {unpricedCount === 1 ? "doesn't" : "don't"} have a
             price yet, so {unpricedCount === 1 ? "it isn't" : "they aren't"} counted in the value or gain/loss above.
-            Prices usually arrive within a day.
+            {" "}Free cash is worked out as your broker&apos;s account total minus the holdings we can
+            price, so {unpricedCount === 1 ? "that holding's" : "those holdings'"} value is sitting in
+            the cash figure for now — your total is still right, the split between cash and holdings
+            isn&apos;t. Prices usually arrive within a day.
           </p>
         )}
 

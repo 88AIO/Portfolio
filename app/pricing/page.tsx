@@ -16,7 +16,7 @@ const freeIncludes = [
   "Options-seller cockpit (the wheel, premium over time)",
   "Performance with S&P 500 benchmark",
   "US & international, multi-account rollup",
-  "Realized gains & tax view",
+  "Realized gains (FIFO), short vs. long term",
   "CSV import/export, no lock-in",
   "Nightly price & dividend refresh",
 ];
@@ -26,7 +26,7 @@ const proIncludes = [
   "Advanced analytics & backtesting",
   "Email alerts: assignment, expiry, ex-dividend",
   "Weekly income digest",
-  "Deeper tax reporting",
+  "Rebalancing tools",
   "Priority support",
 ];
 

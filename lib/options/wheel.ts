@@ -14,6 +14,9 @@ export type WheelPosition = {
 
 export type WheelPhase = "selling_puts" | "covered_call" | "holding" | "idle";
 
+/** Below this, an annualized return says more about the calendar than the position. */
+export const MIN_DAYS_TO_ANNUALIZE = 30;
+
 export type WheelRow = {
   symbol: string;
   currency: string;
@@ -28,7 +31,8 @@ export type WheelRow = {
   openCalls: number; // open short call contracts
   capital: number; // representative capital at risk (base currency)
   daysActive: number;
-  annualizedReturn: number | null; // totalProfit / capital, annualized, as a percent
+  /** totalProfit / capital, annualized, as a percent. null under MIN_DAYS_TO_ANNUALIZE. */
+  annualizedReturn: number | null;
 };
 
 // One dated entry in a ticker's full wheel history — an option leg, a share assignment/trade,
@@ -113,7 +117,13 @@ export function computeWheels(
     // Capital at risk: shares tie up their cost; short puts tie up their collateral.
     const capital = Math.max(shares > 0 ? avgCost * shares * r : 0, openPutCollateral);
     const daysActive = Math.max(1, Math.round((todayMs - new Date(`${earliest}T00:00:00Z`).getTime()) / 86_400_000));
-    const annualizedReturn = capital > 0 ? (totalProfit / capital) * (365 / daysActive) * 100 : null;
+    // Annualizing a few days of activity manufactures a headline number. Two days of premium on a
+    // cash-secured put scales by 182x, so a 1.5% credit reads as "+273% a year" — a figure nobody
+    // should plan around and this product should not print. Below a month, say nothing instead.
+    const annualizedReturn =
+      capital > 0 && daysActive >= MIN_DAYS_TO_ANNUALIZE
+        ? (totalProfit / capital) * (365 / daysActive) * 100
+        : null;
 
     rows.push({
       symbol, currency, phase, premium, dividends, realizedStock, unrealizedStock, totalProfit,
