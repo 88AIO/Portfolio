@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../../actions";
 import DashboardNav from "@/components/DashboardNav";
 import DeleteActivityButton from "@/components/DeleteActivityButton";
+import RemoveHoldingButton from "@/components/RemoveHoldingButton";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import { optionActionLabel, legPremium } from "@/lib/options";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
@@ -218,7 +219,10 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
 
         {/* Full activity timeline */}
         <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="mb-4 font-semibold">Everything on {instrument.symbol}</h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold">Everything on {instrument.symbol}</h2>
+            <RemoveHoldingButton instrumentId={id} symbol={instrument.symbol} />
+          </div>
           <ul className="space-y-1">
             {timeline.map((item) => (
               <li key={`${item.source}:${item.id}`} className="group flex items-center justify-between gap-3 border-b border-slate-50 py-2.5 last:border-0">

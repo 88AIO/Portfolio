@@ -373,8 +373,9 @@ export default async function DividendsPage() {
             </span>
           </div>
           <p className="mb-4 max-w-2xl text-xs text-slate-400">
-            Dividends actually paid into your account, month by month, from your own transactions —
-            not an estimate. Months with no payout are shown as gaps rather than skipped.
+            Dividend payments actually paid into your account, month by month, from your own
+            transactions — not an estimate, and no option premium. Months with no payout are shown
+            as gaps rather than skipped.
           </p>
           {received24 > 0 ? (
             <DividendCalendarChart data={receivedChart} currency={base} valueLabel="Received" highlight="last" />
@@ -389,9 +390,11 @@ export default async function DividendsPage() {
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
           <h2 className="font-semibold">Income by year</h2>
           <p className="mb-4 max-w-2xl text-xs text-slate-400">
-            Future years assume you hold what you hold today and each company keeps paying its
-            current rate. Nothing is grown — a rising payout would be a guess compounded into a
-            number you might plan around.
+            <strong className="font-medium text-slate-500">Dividend payouts only.</strong> Option
+            premium is never counted here — it lives on the Options page, and mixing the two would
+            make this number impossible to check against a broker statement. Future years assume you
+            hold what you hold today and each company keeps paying its current rate. Nothing is
+            grown — a rising payout would be a guess compounded into a number you might plan around.
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

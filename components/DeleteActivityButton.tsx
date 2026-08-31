@@ -29,7 +29,7 @@ export default function DeleteActivityButton({
         type="submit"
         aria-label={`Delete ${label}`}
         title="Delete"
-        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-xs text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-xs text-slate-400 transition hover:bg-rose-50 hover:text-rose-500"
       >
         ✕
       </button>

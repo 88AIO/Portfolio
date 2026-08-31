@@ -293,6 +293,38 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
   };
 }
 
+/**
+ * Remove a holding outright: every share transaction, dividend and option leg on one instrument.
+ *
+ * Deleting a position row by row through the activity list is fine for correcting one mistyped
+ * trade, but it is the wrong tool for "I added this to try it out and want it gone" — which is how
+ * most first positions end. Both deletes are RLS-scoped, so they can only ever touch rows in a
+ * portfolio the signed-in user owns; the instrument row itself is shared reference data and stays.
+ */
+export async function deleteHolding(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const instrumentId = String(formData.get("instrument_id") || "");
+  if (!instrumentId) return;
+
+  const [tx, opt] = await Promise.all([
+    supabase.from("transactions").delete().eq("instrument_id", instrumentId),
+    supabase.from("option_transactions").delete().eq("instrument_id", instrumentId),
+  ]);
+  // Surface a failure instead of bouncing the user to a dashboard that still shows the holding.
+  if (tx.error || opt.error) {
+    throw new Error("We couldn't remove that holding just now. Please try again.");
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/performance");
+  revalidatePath("/dashboard/options");
+  revalidatePath("/dashboard/dividends");
+  redirect("/dashboard");
+}
+
 export async function signOut() {
   const supabase = await createClient();
   // "local" clears this device's session and cookies without waiting on a round trip to revoke the
