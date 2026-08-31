@@ -136,6 +136,11 @@ export async function GET(request: Request) {
   let ok = 0;
   let failed = 0;
   const failedSymbols: string[] = [];
+  // Splits are counted apart from `synced`: a split that was fetched but couldn't be stored leaves
+  // the instrument otherwise fine, so failing it outright would be wrong — but so is staying quiet,
+  // because an unwritten split misstates cost basis on every page that reads it.
+  let splitsWritten = 0;
+  let splitsUnstored = 0;
   const BATCH = 6;
   for (let i = 0; i < held.length; i += BATCH) {
     await Promise.all(
@@ -145,7 +150,9 @@ export async function GET(request: Request) {
           await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
           // Splits before price history: both feed the value chart, and a chart drawn from
           // adjusted closes against unadjusted share counts has a cliff in it on the split date.
-          await syncInstrumentSplits(admin, p.instrument_id, p.symbol, p.exchange);
+          const written = await syncInstrumentSplits(admin, p.instrument_id, p.symbol, p.exchange);
+          if (written == null) splitsUnstored++;
+          else splitsWritten += written;
           await syncInstrumentPriceHistory(admin, p.instrument_id, p.symbol, p.exchange, undefined, p.currency);
 
           if (!p.sector && !p.sector_weights) {
@@ -214,6 +221,9 @@ export async function GET(request: Request) {
     // brokerOwners answers "did it even try" — brokerOptionLegs of 0 never distinguished a
     // clean run with no new legs from a sync that never ran at all.
     brokerOwners, brokerOptionLegs: brokerSynced, valueSnapshots, fxUpdated,
+    // splitsUnstored > 0 means the provider returned splits that did not reach the database —
+    // most likely supabase/schema.sql has not been applied since the splits feature shipped.
+    splitsWritten, splitsUnstored,
     providerCalls: takeProviderCallCount(),
     // Whether the failure email below could actually be delivered. A dead notification path is
     // worth knowing about on a GOOD night, not discovered on the bad one.

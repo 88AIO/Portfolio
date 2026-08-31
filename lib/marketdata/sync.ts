@@ -93,10 +93,10 @@ export async function syncInstrumentSplits(
   instrumentId: string,
   symbol: string,
   exchange: string
-) {
+): Promise<number | null> {
   const splits = await getSplitHistory(symbol, exchange);
   if (!splits.length) return 0;
-  await admin.from("instrument_splits").upsert(
+  const { error } = await admin.from("instrument_splits").upsert(
     splits.map((s) => ({
       instrument_id: instrumentId,
       ex_date: s.exDate,
@@ -105,6 +105,15 @@ export async function syncInstrumentSplits(
     })),
     { onConflict: "instrument_id,ex_date" }
   );
+  if (error) {
+    // Deliberately does NOT fail the instrument: its quote, dividends and price history are
+    // already stored and are worth keeping. But it must not vanish either — an unwritten split
+    // silently misstates cost basis, and the first run after this feature shipped fetched every
+    // symbol's splits and stored none of them (the table did not exist yet) while the summary
+    // reported a clean night. null means "fetched, not stored"; the caller counts it.
+    console.error(`[cron:sync] splits ${symbol}.${exchange} not stored:`, error.message);
+    return null;
+  }
   return splits.length;
 }
 
