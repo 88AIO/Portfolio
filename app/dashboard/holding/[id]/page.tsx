@@ -23,6 +23,9 @@ type Instrument = {
 type Tx = {
   id: string; portfolio_id: string; type: string; quantity: number; price: number;
   fees: number; currency: string; executed_at: string; note: string | null;
+  // Nullable in the type, not the column: a database that predates the column returns undefined
+  // for it, and that must read as "not a reinvestment" rather than crash the page.
+  drip?: boolean | null;
 };
 type OptTx = {
   id: string; portfolio_id: string; action: string; option_type: string; strike: number;
@@ -39,7 +42,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
     await Promise.all([
       supabase.from("instruments").select("id, symbol, exchange, name, type, currency, sector, country_iso, annual_div_per_share, div_yield_ttm, next_dividend_date").eq("id", id).maybeSingle(),
       supabase.from("price_cache").select("price, change_pct, as_of").eq("instrument_id", id).maybeSingle(),
-      supabase.from("transactions").select("id, portfolio_id, type, quantity, price, fees, currency, executed_at, note").eq("instrument_id", id).order("executed_at", { ascending: false }),
+      supabase.from("transactions").select("id, portfolio_id, type, quantity, price, fees, currency, executed_at, note, drip").eq("instrument_id", id).order("executed_at", { ascending: false }),
       supabase.from("option_transactions").select("id, portfolio_id, action, option_type, strike, expiration, contracts, premium, fee, currency, trade_date, note").eq("instrument_id", id).order("trade_date", { ascending: false }),
       supabase.from("portfolios").select("id, name"),
     ]);
@@ -105,7 +108,8 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   for (const t of txs) {
     const portfolio = pfName.get(t.portfolio_id) ?? "Portfolio";
     if (t.type === "buy" || t.type === "sell") {
-      const drip = isDripBuy(t.type, t.note);
+      const fromNote = isDripBuy(t.type, t.note);
+      const drip = isDripBuy(t.type, t.note, t.drip);
       if (drip) {
         dripShares += t.quantity;
         dripCost += t.quantity * t.price + (t.fees ?? 0);
@@ -116,8 +120,8 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
         detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`,
         amount: t.type === "buy" ? -(t.quantity * t.price + t.fees) : t.quantity * t.price - t.fees,
         portfolio,
-        badge: drip ? "DRIP" : undefined,
-        badgeTitle: drip ? `Reinvested dividend — your broker described this as: ${t.note}` : undefined,
+        // Only buys can be reinvestments; a sell has nothing to toggle.
+        drip: t.type === "buy" ? { isDrip: drip, locked: fromNote } : undefined,
       });
     } else if (t.type === "dividend") {
       dividendsReceived += t.quantity * t.price;
@@ -303,7 +307,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
                 ({money(dripCost, ccy)}), marked DRIP.
               </>
             ) : (
-              " A purchase is marked DRIP when your broker's own description says it was a reinvested dividend."
+              " Hover a purchase and click DRIP to mark it as a reinvested dividend. Imports mark themselves when your broker's description says so."
             )}
           </p>
           <ActivityList

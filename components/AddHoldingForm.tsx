@@ -39,6 +39,10 @@ export default function AddHoldingForm() {
         <input name="price" type="number" step="any" min="0" aria-label="Price per share" placeholder="Price" className="w-1/2 rounded-lg border border-slate-300 px-2 py-1.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
       </div>
       <input name="executed_at" type="date" aria-label="Trade date" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-slate-500 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+      <label className="flex items-center gap-2 text-xs text-slate-500">
+        <input name="drip" type="checkbox" className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-200" />
+        Bought with dividend money (DRIP)
+      </label>
       <button disabled={pending} className="w-full rounded-lg bg-indigo-600 py-2 font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
         {pending ? "Adding…" : "Add transaction"}
       </button>

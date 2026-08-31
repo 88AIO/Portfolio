@@ -1,5 +1,6 @@
 import DeleteActivityButton from "@/components/DeleteActivityButton";
 import { money } from "@/lib/format";
+import DripToggle from "@/components/DripToggle";
 
 // One activity row, shared by the three sections on a holding page (options, dividends, share
 // trades). They used to be a single mixed timeline; the markup stayed in one place when they split
@@ -15,9 +16,8 @@ export type ActivityItem = {
   /** Cash flow in the instrument's currency (+ in, − out). */
   amount: number | null;
   portfolio: string;
-  /** Small tag after the title, e.g. DRIP. */
-  badge?: string;
-  badgeTitle?: string;
+  /** Renders the DRIP control after the title. Only set on share purchases. */
+  drip?: { isDrip: boolean; locked: boolean };
 };
 
 function dot(kind: ActivityItem["kind"]): string {
@@ -56,13 +56,13 @@ export default function ActivityList({
             <div>
               <div className="flex items-center gap-1.5 text-sm font-medium">
                 {item.title}
-                {item.badge && (
-                  <span
-                    title={item.badgeTitle}
-                    className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700"
-                  >
-                    {item.badge}
-                  </span>
+                {item.drip && (
+                  <DripToggle
+                    id={item.id}
+                    instrumentId={instrumentId}
+                    isDrip={item.drip.isDrip}
+                    locked={item.drip.locked}
+                  />
                 )}
               </div>
               <div className="text-xs text-slate-400">{item.detail}</div>

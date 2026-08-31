@@ -134,6 +134,10 @@ create table if not exists public.transactions (
 );
 -- Backfill-safe for databases created before dedupe_key existed:
 alter table public.transactions add column if not exists dedupe_key text;
+-- A purchase made with dividend money rather than new cash. Kept as its own column rather than
+-- inferred: matching small fractional buys against nearby dividend dates mislabels ordinary
+-- purchases, and a wrongly tagged buy is worse than an untagged one.
+alter table public.transactions add column if not exists drip boolean not null default false;
 create index if not exists tx_portfolio_idx on public.transactions(portfolio_id);
 -- The holding-detail page and delete guards filter by instrument_id (also serves the FK side).
 create index if not exists tx_instrument_idx on public.transactions(instrument_id);

@@ -49,6 +49,8 @@ export async function addTransaction(formData: FormData) {
   const quantity = Number(formData.get("quantity") || 0);
   const price = Number(formData.get("price") || 0);
   const executed_at = String(formData.get("executed_at") || "") || undefined;
+  // Only meaningful on a buy: the dividend row is the payout, not the purchase it funded.
+  const drip = type === "buy" && formData.get("drip") != null;
   // Throw (don't silently return) on bad input so the form's catch shows an error instead of
   // resetting to a false "success" — the user must know nothing was added.
   if (!symbol || quantity <= 0) throw new Error("Enter a symbol and a quantity greater than zero.");
@@ -79,7 +81,7 @@ export async function addTransaction(formData: FormData) {
   await supabase.from("transactions").upsert(
     {
       portfolio_id: portfolio.id, instrument_id: inst.id, type,
-      quantity, price, fees: 0, currency: inst.currency, executed_at: date, dedupe_key,
+      quantity, price, fees: 0, currency: inst.currency, executed_at: date, dedupe_key, drip,
     },
     { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true }
   );
@@ -375,4 +377,34 @@ export async function deleteOptionLeg(formData: FormData) {
   if (!id) return;
   await supabase.from("option_transactions").delete().eq("id", id);
   await revalidateAfterActivityDelete(supabase, instrumentId);
+}
+
+
+// Mark an existing purchase as a reinvested dividend, or unmark it.
+//
+// The add form covers what you record from now on; this covers the ledger you already imported,
+// which is where the need actually is — a broker export that dropped its description column leaves
+// every past reinvestment indistinguishable from an ordinary buy.
+export async function toggleDrip(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const id = String(formData.get("id") || "");
+  const instrumentId = String(formData.get("instrument_id") || "");
+  const next = formData.get("next") === "1";
+  if (!id) return;
+
+  // RLS scopes this to the user's own transactions, and the type guard keeps the flag off rows
+  // where it would be meaningless — a dividend tagged DRIP would double the reinvested share
+  // count anyone reads off the page.
+  const { error } = await supabase
+    .from("transactions")
+    .update({ drip: next })
+    .eq("id", id)
+    .eq("type", "buy");
+  if (error) throw new Error("We couldn't update that transaction just now. Please try again.");
+
+  if (instrumentId) revalidatePath(`/dashboard/holding/${instrumentId}`);
+  revalidatePath("/dashboard");
 }
