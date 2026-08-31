@@ -208,6 +208,28 @@ create aggregate public.product(numeric) (
   initcond = '1'
 );
 
+-- 7d. PORTFOLIO SPLITS (a user's own corrections) --------------
+-- instrument_splits above is SHARED reference data. A user-entered split must never go in it: one
+-- person recording a mistaken 10-for-1 would restate the cost basis of every other holder of that
+-- ticker. User entries live here instead, scoped by portfolio and enforced by RLS.
+--
+-- These also OVERRIDE a provider row on the same ex-date, which is what makes the feature useful
+-- beyond filling gaps: if a vendor reported the wrong ratio, entering the right one replaces it,
+-- and entering a ratio of 1 cancels a split the vendor invented.
+create table if not exists public.portfolio_splits (
+  id uuid primary key default gen_random_uuid(),
+  portfolio_id uuid not null references public.portfolios(id) on delete cascade,
+  instrument_id uuid not null references public.instruments(id) on delete cascade,
+  ex_date date not null,
+  ratio numeric not null,   -- 4 = 4-for-1; 0.1 = 1-for-10 reverse; 1 = cancel a provider's row
+  note text,
+  created_at timestamptz not null default now(),
+  unique (portfolio_id, instrument_id, ex_date),
+  constraint portfolio_splits_ratio_positive check (ratio > 0)
+);
+create index if not exists portfolio_splits_lookup_idx
+  on public.portfolio_splits(portfolio_id, instrument_id);
+
 -- 7b. OPTION TRANSACTIONS (options-selling layer O1) ----------
 -- Sold puts/calls, the wheel, rolls. Underlying = instrument_id.
 -- Declared BEFORE the positions view because that view folds net
@@ -281,10 +303,27 @@ agg as (
     sum(case when t.type='dividend' then t.quantity*t.price else 0 end)                          as div_paid
   from public.transactions t
   left join lateral (
+    -- The shared provider rows, plus this portfolio's own entries. A user row on the same ex-date
+    -- REPLACES the provider's rather than compounding with it — two rows for one split would
+    -- multiply the share count twice, which is a worse error than the gap it was added to fill.
     select public.product(s.ratio) as factor
-    from public.instrument_splits s
-    where s.instrument_id = t.instrument_id
-      and s.ex_date > t.executed_at
+    from (
+      select g.ex_date, g.ratio
+        from public.instrument_splits g
+       where g.instrument_id = t.instrument_id
+         and not exists (
+           select 1 from public.portfolio_splits o
+            where o.portfolio_id = t.portfolio_id
+              and o.instrument_id = t.instrument_id
+              and o.ex_date = g.ex_date
+         )
+      union all
+      select o.ex_date, o.ratio
+        from public.portfolio_splits o
+       where o.portfolio_id = t.portfolio_id
+         and o.instrument_id = t.instrument_id
+    ) s
+    where s.ex_date > t.executed_at
   ) sf on true
   group by t.portfolio_id, t.instrument_id
 )
@@ -408,6 +447,7 @@ alter table public.price_cache  enable row level security;
 alter table public.price_history enable row level security;
 alter table public.dividends    enable row level security;
 alter table public.instrument_splits enable row level security;
+alter table public.portfolio_splits enable row level security;
 
 drop policy if exists "own profile" on public.profiles;
 create policy "own profile" on public.profiles for all using (auth.uid() = id) with check (auth.uid() = id);
@@ -427,6 +467,13 @@ create policy "own transactions" on public.transactions for all using (
   exists (select 1 from public.portfolios p where p.id = transactions.portfolio_id and p.user_id = auth.uid())
 ) with check (
   exists (select 1 from public.portfolios p where p.id = transactions.portfolio_id and p.user_id = auth.uid())
+);
+
+drop policy if exists "own portfolio_splits" on public.portfolio_splits;
+create policy "own portfolio_splits" on public.portfolio_splits for all using (
+  exists (select 1 from public.portfolios p where p.id = portfolio_splits.portfolio_id and p.user_id = auth.uid())
+) with check (
+  exists (select 1 from public.portfolios p where p.id = portfolio_splits.portfolio_id and p.user_id = auth.uid())
 );
 
 drop policy if exists "own option_transactions" on public.option_transactions;

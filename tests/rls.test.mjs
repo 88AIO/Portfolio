@@ -104,6 +104,12 @@ describe("RLS cross-tenant isolation", { skip }, () => {
           action: "sell_to_open", option_type: "put",
           strike: 90, expiration: "2099-01-15", contracts: 1, premium: 1.25, currency: "USD",
         }),
+        // A user's own corporate-action correction. It restates share counts and cost basis, so
+        // leaking or cross-writing one would silently rewrite another tenant's portfolio.
+        db.from("portfolio_splits").insert({
+          portfolio_id: p.id, instrument_id: instrumentId,
+          ex_date: "2024-06-10", ratio: 2,
+        }),
       ]);
       for (const r of seed) assert.equal(r.error, null, `seed row: ${r.error?.message}`);
     }
@@ -177,6 +183,9 @@ describe("RLS cross-tenant isolation", { skip }, () => {
 
   it("option_transactions: a user cannot see another tenant's rows", () =>
     assertScoped(clientA, "option_transactions", A.portfolioId, B.portfolioId));
+
+  it("portfolio_splits: a user cannot see another tenant's corporate actions", () =>
+    assertScoped(clientA, "portfolio_splits", A.portfolioId, B.portfolioId));
 
   // The computed views are the subtle risk: if any weren't `security_invoker`, they'd
   // run with the definer's rights and bypass RLS entirely.

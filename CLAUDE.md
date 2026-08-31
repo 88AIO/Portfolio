@@ -32,7 +32,7 @@ Behind the `lib/marketdata` provider port (**done** — `lib/marketdata/index.ts
 
 ## What already exists (current state)
 - Auth (email/password + OAuth-ready), session handling in `proxy.ts`; password reset; self-serve account deletion.
-- `supabase/schema.sql` — v2, modeled on the blueprint: `profiles, portfolios (full config), categories, instruments, transactions, option_transactions, cash_ledger, price_cache, price_history, dividends, instrument_splits, fx_rates, iv_history, sync_runs, finder_scans`, plus `positions`/`portfolio_totals`/`option_positions` computed views. RLS throughout; live-vs-reserved columns annotated in the file.
+- `supabase/schema.sql` — v2, modeled on the blueprint: `profiles, portfolios (full config), categories, instruments, transactions, option_transactions, cash_ledger, price_cache, price_history, dividends, instrument_splits, portfolio_splits, fx_rates, iv_history, sync_runs, finder_scans`, plus `positions`/`portfolio_totals`/`option_positions` computed views. RLS throughout; live-vs-reserved columns annotated in the file.
 - Full dashboard suite: overview, performance (with SPY benchmark + time-range selector), dividends (income received, by-year with projections, calendar, safety), options cockpit + wheel + put finder, cash, broker sync (owner-only), settings. Marketing site + blog/changelog + legal pages.
 - **There is deliberately no tax page.** It was removed after a walkthrough against a live broker: E*TRADE's Gains & Losses reports realized P/L on closed positions INCLUDING options and with wash-sale accounting, while `lib/tax/realized.ts` is FIFO on equities only, models no wash sales and excludes options. The page invited a comparison it could not win, under a heading that invites someone to file from it. **Do not re-add it without reframing** (an estimate, not a tax document). The engine itself stays and is tested — the wheel's per-underlying realized stock P/L and the holding detail page both compute from it.
 - Three Vercel crons (`vercel.json`): nightly market-data sync, daily alerts, weekly digest — each records its run into `sync_runs`.
@@ -59,9 +59,12 @@ LATER — advanced analytics (opt-in), rebalancing, US tax report,
 
 ## Conventions
 - Transactions are the source of truth; positions/totals are computed views.
-- **Corporate actions are applied at read time, never by rewriting the ledger.** Splits live in
-  `instrument_splits` and are folded in by the `positions` view and by `lib/corporate/splits.ts`
-  (the SQL and the TypeScript are twins — change both together). Rewriting a user's transactions
+- **Corporate actions are applied at read time, never by rewriting the ledger.** Provider splits
+  live in shared `instrument_splits`; a user's own corrections live in RLS-scoped
+  `portfolio_splits` and **override** a provider row on the same ex-date (never compound with it).
+  A user entry must never be written to the shared table — one person's correction would restate
+  every other holder's cost basis. Both are folded in by the `positions` view and by
+  `lib/corporate/splits.ts` (the SQL and the TypeScript are twins — change both together). Rewriting a user's transactions
   would break reconciliation against their broker statement and invalidate the import dedupe key,
   re-importing every pre-split trade as a duplicate.
 - Shared reference tables (`instruments`, `price_cache`, `dividends`) are written server-side with the Supabase service role; clients read only. RLS scopes all user data by `auth.uid()`.

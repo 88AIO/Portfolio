@@ -8,7 +8,8 @@ import RemoveHoldingButton from "@/components/RemoveHoldingButton";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import { optionActionLabel, legPremium } from "@/lib/options";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
-import { loadSplitsByInstrument } from "@/lib/corporate/load";
+import { loadSplitRecords } from "@/lib/corporate/load";
+import SplitsSection from "@/components/SplitsSection";
 
 export const dynamic = "force-dynamic";
 
@@ -93,7 +94,8 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   }));
   // Without splits, a pre-split buy cannot cover a post-split sale: FIFO finds a quarter of the
   // shares it needs and books the rest as a zero-basis gain, which overstates the realized profit.
-  const holdingSplits = await loadSplitsByInstrument(supabase, [id]);
+  const splitRecords = (await loadSplitRecords(supabase, [id])).get(id) ?? [];
+  const holdingSplits = new Map([[id, splitRecords.map((r) => ({ exDate: r.exDate, ratio: r.ratio }))]]);
   const realized = summarizeRealized(computeRealizedLots(ledger, holdingSplits), () => 1);
 
   const totalIncome = netPremium + divPaid;
@@ -220,6 +222,8 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
             </div>
           </section>
         )}
+
+        <SplitsSection instrumentId={id} symbol={instrument.symbol} splits={splitRecords} />
 
         {/* Full activity timeline */}
         <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">

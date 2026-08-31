@@ -88,7 +88,7 @@ Supabase dashboard, only re-running the schema or a periodic audit will catch it
 | Corporate actions (splits) | `lib/corporate/` + `instrument_splits` |
 | Tests | `tests/` |
 
-**Data model:** you record **transactions** (equity, options, cash); current **positions** and option exposure are computed views over that ledger. **Stock splits** are held separately in `instrument_splits` and applied when reading, so your ledger keeps saying exactly what your broker statement says while share counts and cost basis stay correct. Pages read cached tables (`price_cache`, `fx_rates`, `price_history`, `dividends`); only the nightly cron talks to the market-data vendor.
+**Data model:** you record **transactions** (equity, options, cash); current **positions** and option exposure are computed views over that ledger. **Stock splits** are held separately and applied when reading, so your ledger keeps saying exactly what your broker statement says while share counts and cost basis stay correct. The nightly sync fills them in from the data provider; you can add or correct one by hand on a holding's page, and your entry overrides the provider's for your portfolio only. Pages read cached tables (`price_cache`, `fx_rates`, `price_history`, `dividends`); only the nightly cron talks to the market-data vendor.
 
 ### Market-data provider coverage
 

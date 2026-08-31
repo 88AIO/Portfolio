@@ -234,3 +234,101 @@ test("net invested is untouched by a split, because no money moved", () => {
   );
   near(series.endInvested, 5000, "still the $5,000 that actually left the account");
 });
+
+// --- entering a split by hand --------------------------------------------------------------------
+
+const { parseSplitRatio, MIN_RATIO, MAX_RATIO } = await import("../lib/corporate/splits.ts");
+const { mergeSplits } = await import("../lib/corporate/splits.ts");
+
+test("a split is accepted the way it is announced", () => {
+  for (const input of ["4-for-1", "4 for 1", "4:1", "4/1", "4", "4-FOR-1"]) {
+    near(parseSplitRatio(input), 4, `"${input}"`);
+  }
+});
+
+test("a reverse split parses to a fraction, not its inverse", () => {
+  // The whole reason the field takes text. Someone converting "1-for-10" to a decimal in their
+  // head is one slip away from multiplying their holding by ten instead of dividing it.
+  near(parseSplitRatio("1-for-10"), 0.1, "1-for-10");
+  near(parseSplitRatio("1:10"), 0.1, "1:10");
+});
+
+test("an uneven ratio is kept exactly", () => {
+  near(parseSplitRatio("3-for-2"), 1.5, "3-for-2");
+});
+
+test("nonsense is rejected rather than coerced to something plausible", () => {
+  for (const input of ["", "  ", "abc", "0", "-4", "4-for-0", "0-for-4", "4-for-", "1/0"]) {
+    assert.equal(parseSplitRatio(input), null, `"${input}" must not parse`);
+  }
+});
+
+test("the sanity range excludes typos but admits every real split", () => {
+  for (const real of ["4-for-1", "3-for-1", "20-for-1", "1-for-10", "1-for-100", "3-for-2"]) {
+    const r = parseSplitRatio(real);
+    assert.ok(r >= MIN_RATIO && r <= MAX_RATIO, `${real} should be allowed`);
+  }
+  assert.ok(parseSplitRatio("100000") > MAX_RATIO, "a fat-fingered ratio is out of range");
+});
+
+// --- merging provider rows with the user's own ---------------------------------------------------
+
+const g = (ex_date, ratio, instrument_id = "i1") => ({ instrument_id, ex_date, ratio });
+const own = (ex_date, ratio, o = {}) =>
+  ({ instrument_id: "i1", ex_date, ratio, id: `m-${ex_date}`, created_at: "2026-01-01", note: null, ...o });
+
+test("a user entry fills a gap the provider missed", () => {
+  const merged = mergeSplits([], [own("2020-08-31", 4)]);
+  assert.equal(merged.get("i1").length, 1);
+  assert.equal(merged.get("i1")[0].source, "manual");
+});
+
+test("a user entry on the same date REPLACES the provider's, it does not compound", () => {
+  // Applying both would scale the share count twice — 160 shares where there are 40 — which is a
+  // worse error than the missing split the entry was made to fix.
+  const merged = mergeSplits([g("2020-08-31", 4)], [own("2020-08-31", 7)]);
+  const rows = merged.get("i1");
+  assert.equal(rows.length, 1, "one split on one date");
+  near(rows[0].ratio, 7, "the user's ratio wins");
+  assert.equal(rows[0].source, "manual");
+});
+
+test("a ratio of 1 cancels a split the provider invented", () => {
+  const merged = mergeSplits([g("2020-08-31", 4)], [own("2020-08-31", 1)]);
+  near(splitFactor(merged.get("i1"), "2019-01-01"), 1, "no scaling at all");
+});
+
+test("provider rows on other dates survive an override", () => {
+  const merged = mergeSplits(
+    [g("2020-08-31", 4), g("2024-06-10", 2)],
+    [own("2020-08-31", 1)]
+  );
+  const rows = merged.get("i1");
+  assert.equal(rows.length, 2);
+  near(splitFactor(rows, "2019-01-01"), 2, "only the untouched 2-for-1 applies");
+});
+
+test("the merged list is sorted and split by instrument", () => {
+  const merged = mergeSplits(
+    [g("2024-06-10", 2), g("2020-08-31", 4), g("2021-01-01", 3, "i2")],
+    []
+  );
+  assert.deepEqual(merged.get("i1").map((r) => r.exDate), ["2020-08-31", "2024-06-10"]);
+  assert.equal(merged.get("i2").length, 1);
+});
+
+test("a later user entry wins over an earlier one for the same date", () => {
+  const merged = mergeSplits([], [
+    own("2020-08-31", 4, { created_at: "2026-01-01" }),
+    own("2020-08-31", 5, { created_at: "2026-02-01" }),
+  ]);
+  near(merged.get("i1")[0].ratio, 5, "the newer correction");
+});
+
+test("unusable rows are dropped from either source", () => {
+  const merged = mergeSplits(
+    [g(null, 4), g("2020-01-01", null), g("2020-02-01", 0)],
+    [own(null, 4), own("2021-01-01", -1)]
+  );
+  assert.equal(merged.size, 0, "nothing usable");
+});
