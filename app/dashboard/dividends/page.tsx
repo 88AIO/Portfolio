@@ -117,8 +117,9 @@ export default async function DividendsPage() {
     }));
   const receivedMonthly = monthlyDividendHistory(divTxs, fx, today, 24);
   const receivedChart = receivedMonthly.map((m) => ({
-    label: m.key,
-    short: m.label.slice(0, 3),
+    // "Aug" alone repeats twice across 24 months with nothing to tell the years apart.
+    label: m.label,
+    short: m.label,
     total: m.total,
     count: 0,
   }));
@@ -376,7 +377,7 @@ export default async function DividendsPage() {
             not an estimate. Months with no payout are shown as gaps rather than skipped.
           </p>
           {received24 > 0 ? (
-            <DividendCalendarChart data={receivedChart} currency={base} valueLabel="Received" />
+            <DividendCalendarChart data={receivedChart} currency={base} valueLabel="Received" highlight="last" />
           ) : (
             <p className="py-10 text-center text-sm text-slate-400">
               No dividend payments recorded yet. They appear here once you import or add them.

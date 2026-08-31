@@ -10,11 +10,17 @@ export default function DividendCalendarChart({
   data,
   currency = "USD",
   valueLabel = "Est. income",
+  highlight = "first",
 }: {
   data: MonthBar[];
   currency?: string;
   /** What the bars are. The same chart shows a forward estimate and money already received. */
   valueLabel?: string;
+  /**
+   * Which end is "now". A forward calendar starts at the current month; a trailing history ends
+   * there. Tinting the wrong end silently emphasises the oldest month as if it were today.
+   */
+  highlight?: "first" | "last";
 }) {
   const fmt = (v: number) =>
     Number(v).toLocaleString("en-US", { style: "currency", currency, maximumFractionDigits: 0 });
@@ -31,9 +37,10 @@ export default function DividendCalendarChart({
             contentStyle={{ borderRadius: 12, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 12 }}
           />
           <Bar dataKey="total" radius={[4, 4, 0, 0]} isAnimationActive={false}>
-            {data.map((d, i) => (
-              <Cell key={i} fill={i === 0 ? CHART.value : CHART.valueSoft} />
-            ))}
+            {data.map((d, i) => {
+              const isNow = highlight === "last" ? i === data.length - 1 : i === 0;
+              return <Cell key={i} fill={isNow ? CHART.value : CHART.valueSoft} />;
+            })}
           </Bar>
         </BarChart>
       </ResponsiveContainer>

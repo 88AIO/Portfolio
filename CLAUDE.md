@@ -33,7 +33,8 @@ Behind the `lib/marketdata` provider port (**done** — `lib/marketdata/index.ts
 ## What already exists (current state)
 - Auth (email/password + OAuth-ready), session handling in `proxy.ts`; password reset; self-serve account deletion.
 - `supabase/schema.sql` — v2, modeled on the blueprint: `profiles, portfolios (full config), categories, instruments, transactions, option_transactions, cash_ledger, price_cache, price_history, dividends, fx_rates, iv_history, sync_runs, finder_scans`, plus `positions`/`portfolio_totals`/`option_positions` computed views. RLS throughout; live-vs-reserved columns annotated in the file.
-- Full dashboard suite: overview, performance (with SPY benchmark), dividends, options cockpit + wheel + put finder, tax (FIFO realized gains), cash, broker sync (owner-only), settings. Marketing site + blog/changelog + legal pages.
+- Full dashboard suite: overview, performance (with SPY benchmark + time-range selector), dividends (income received, by-year with projections, calendar, safety), options cockpit + wheel + put finder, cash, broker sync (owner-only), settings. Marketing site + blog/changelog + legal pages.
+- **There is deliberately no tax page.** It was removed after a walkthrough against a live broker: E*TRADE's Gains & Losses reports realized P/L on closed positions INCLUDING options and with wash-sale accounting, while `lib/tax/realized.ts` is FIFO on equities only, models no wash sales and excludes options. The page invited a comparison it could not win, under a heading that invites someone to file from it. **Do not re-add it without reframing** (an estimate, not a tax document). The engine itself stays and is tested — the wheel's per-underlying realized stock P/L and the holding detail page both compute from it.
 - Three Vercel crons (`vercel.json`): nightly market-data sync, daily alerts, weekly digest — each records its run into `sync_runs`.
 - Tests: `npm test` (offline money-math), `npm run test:rls` (cross-tenant isolation; runs in CI when secrets are set).
 - Verified: `npm run build`, `tsc`, and `eslint` all pass.
@@ -52,7 +53,7 @@ LATER — advanced analytics (opt-in), corporate actions, rebalancing, US tax re
 
 ## Improvements over Snowball (the "adjust their flaws" layer)
 - Fresher, honest price data with "prices as of…" transparency (delayed prices are their #1 user complaint).
-- Tax reporting + realized-gain tracking (they have none).
+- Realized-gain tracking (they have none) — the engine exists and feeds the wheel and holding pages, but is deliberately NOT presented as tax reporting; see the note above.
 - Looser free tier than their 10-holding cap.
 - The signature wedge no rival owns: dividends **+** option premium in one calm income picture for options sellers.
 

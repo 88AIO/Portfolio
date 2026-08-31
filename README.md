@@ -58,12 +58,12 @@ npm run test:rls # cross-tenant RLS isolation test (needs Supabase env vars; ski
 |---|---|
 | Database schema + RLS + views | `supabase/schema.sql` |
 | Auth session handling | `proxy.ts` (Next 16's middleware) |
-| Dashboard / performance / dividends / options / tax / cash | `app/dashboard/**` |
+| Dashboard / performance / dividends / options / cash | `app/dashboard/**` |
 | Server actions (add, import, refresh, delete) | `app/dashboard/**/actions.ts` |
 | Scheduled jobs | `app/api/cron/{sync,alerts,digest}` + `vercel.json` |
 | Market data (provider port: yahoo ⇄ eodhd) | `lib/marketdata/` |
 | Broker sync (SnapTrade, owner-only) | `lib/brokersync/` |
-| Options / wheel / tax / FX / email engines | `lib/` |
+| Options / wheel / realized-gain / dividend / FX / email engines | `lib/` |
 | Tests | `tests/` |
 
 **Data model:** you record **transactions** (equity, options, cash); current **positions** and option exposure are computed views over that ledger. Pages read cached tables (`price_cache`, `fx_rates`, `price_history`, `dividends`); only the nightly cron talks to the market-data vendor.
