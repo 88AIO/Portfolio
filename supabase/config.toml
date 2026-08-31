@@ -1,0 +1,44 @@
+# Config for the local Supabase stack (`supabase start`).
+#
+# It exists for one job: CI boots a throwaway Postgres + Auth + PostgREST in the runner so the
+# cross-tenant RLS test (tests/rls.test.mjs) runs against a REAL database. The alternative was
+# storing a service-role key in GitHub Secrets, which is a bad trade — this stack's keys are the
+# CLI's fixed public dev constants, worthless to anyone, and the whole thing is destroyed with
+# the runner. See .github/workflows/ci.yml.
+#
+# It is equally usable locally: `supabase start`, then apply supabase/schema.sql.
+
+project_id = "snowfolio"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = false
+
+[storage]
+enabled = false
+
+[realtime]
+enabled = false
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+# The test provisions its two tenants through the admin API with email_confirm, so no mail is
+# ever sent. Confirmations stay off so a local `supabase start` is usable for hand-testing too.
+enable_confirmations = false

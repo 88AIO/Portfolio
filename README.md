@@ -41,9 +41,30 @@ npm run dev
 Open http://localhost:3000 → sign up → you're in the dashboard. Add a holding (e.g. `AAPL` / `US`), import a CSV, or connect a broker (owner only).
 
 ```bash
-npm test        # offline unit tests (money math)
-npm run test:rls # cross-tenant RLS isolation test (needs Supabase env vars; skips cleanly without)
+npm test         # offline unit tests (money math)
+npm run test:rls # cross-tenant RLS isolation — needs a real database (see below)
 ```
+
+`test:rls` proves one signed-in user cannot read another's rows. That guarantee lives in Postgres
+RLS policies and `security_invoker` views, so it cannot be mocked — point it at a database with
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`, or run
+a throwaway stack locally:
+
+```bash
+supabase start                                   # needs Docker + the Supabase CLI
+eval "$(supabase status -o env)"
+psql "$DB_URL" -f supabase/schema.sql
+NEXT_PUBLIC_SUPABASE_URL="$API_URL" \
+NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
+SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" npm run test:rls
+```
+
+CI does exactly this on every push (`.github/workflows/ci.yml`), which is why **no Supabase secrets
+are stored in GitHub**. The local stack's keys are the CLI's fixed public dev constants and the
+database dies with the runner. Note what this does and doesn't prove: it verifies
+`supabase/schema.sql` as written, so a bad policy is caught before it ships. It cannot tell you
+whether your *live* project still matches that file — if something was changed by hand in the
+Supabase dashboard, only re-running the schema or a periodic audit will catch it.
 
 ### 4. Deploy to Vercel
 - Push to GitHub → Vercel **New Project** → import the repo.

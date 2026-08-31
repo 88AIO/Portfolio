@@ -29,11 +29,15 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
 
   rls-isolation:
-    # The cross-tenant RLS test — Snowfolio's #1 security guarantee. It runs against a
-    # real Supabase instance when the three secrets below are configured, and SKIPS
-    # cleanly (still green) when they're not, so forks without secrets aren't blocked.
-    # Set these repo secrets to a STAGING Supabase project to enable it:
-    #   SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
+    # The cross-tenant RLS test — Snowfolio's #1 security guarantee: one signed-in user must never
+    # be able to read another's rows. That guarantee lives entirely in Postgres RLS policies and
+    # `security_invoker` views, which cannot be tested with mocks; it needs a real database.
+    #
+    # It used to need three GitHub Secrets pointed at a live Supabase project, so in practice it
+    # was never enabled and this job was green while verifying nothing. Instead the runner now
+    # boots its own throwaway Supabase stack. No secrets exist to leak: the local stack's keys are
+    # the CLI's fixed, public, documented dev constants, and the whole database is destroyed with
+    # the runner.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,24 +46,40 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # Say plainly, in the run summary, whether this job actually verified anything. A green
-      # check next to "rls-isolation" otherwise reads as "tenant isolation confirmed" when the
-      # suite in fact skipped — a check that proves nothing is worse than no check at all.
-      # The expression compares the secret to empty and yields a boolean; it never exposes it.
-      - name: Report whether the security test can run
-        env:
-          HAS_SECRETS: ${{ secrets.SUPABASE_URL != '' }}
+
+      # `latest` rather than a pin: a stale pin silently rots, and this stack is disposable — the
+      # thing under test is our schema, not the CLI. If a CLI release ever breaks the boot, this
+      # job fails loudly, which is the correct outcome for a security test.
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Boot a throwaway Supabase stack
+        run: supabase start
+
+      # The schema IS the thing under test — every policy and every `security_invoker` view comes
+      # from this file, so it is applied exactly as a fresh project would apply it.
+      - name: Apply supabase/schema.sql
         run: |
-          if [ "$HAS_SECRETS" = "true" ]; then
-            echo "### Cross-tenant RLS test: RUNNING against a live project" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "### :warning: Cross-tenant RLS test SKIPPED — nothing was verified" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "This job is green because the suite skipped, **not** because tenant isolation passed." >> "$GITHUB_STEP_SUMMARY"
-            echo "Set \`SUPABASE_URL\`, \`SUPABASE_ANON_KEY\` and \`SUPABASE_SERVICE_ROLE_KEY\` (staging project) to enable it." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - run: npm run test:rls
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          eval "$(supabase status -o env)"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f supabase/schema.sql
+
+      - name: Cross-tenant RLS isolation
+        run: |
+          eval "$(supabase status -o env)"
+          # tests/rls.test.mjs SKIPS when these are unset. A skip here would put us back to a
+          # green check that proves nothing, so refuse to run at all rather than pass vacuously.
+          for v in API_URL ANON_KEY SERVICE_ROLE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is empty - the local stack did not come up, refusing to report a pass"
+              exit 1
+            fi
+          done
+          NEXT_PUBLIC_SUPABASE_URL="$API_URL" \
+          NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
+          SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
+          npm run test:rls
+
+      - name: Tear the stack down
+        if: always()
+        run: supabase stop --no-backup || true
