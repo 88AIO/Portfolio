@@ -14,7 +14,7 @@ import { snapshotPortfolioValues } from "@/lib/snapshots";
 import { syncFxRates } from "@/lib/fx";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { takeProviderCallCount } from "@/lib/marketdata";
-import { recordSyncRun } from "@/lib/cron";
+import { recordSyncRun, listAllUserEmails } from "@/lib/cron";
 import { sendEmail, emailShell, emailConfig, reportEmailFailure } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
@@ -83,24 +83,34 @@ export async function GET(request: Request) {
   }
 
   // --- Brokerage auto-sync (runs first, so newly-synced holdings get priced in the same run) ---
-  // Candidates are the users with a broker_connections row (only the owner-gated connect flow can
-  // create one), then each is re-verified against BROKER_SYNC_OWNER_EMAILS before syncing — the
-  // personal SnapTrade key only reads the owner's accounts, so we must only ever sync into an
-  // owner's own portfolios. Deliberately NOT a bare auth.admin.listUsers() scan: its default
-  // pagination silently drops users beyond page 1 past ~50 signups, which would quietly kill the
-  // founder's own nightly sync as the user base grows. Failures here never abort the run.
+  // Candidates are exactly the accounts on the BROKER_SYNC_OWNER_EMAILS allowlist: the SnapTrade
+  // integration authenticates with a single PERSONAL key, so syncing anyone else would pull the
+  // key owner's real brokerage accounts into a stranger's dashboard.
+  //
+  // Resolve those emails to user ids through the paginated helper. Two wrong ways to do this, both
+  // of which this avoids: a bare auth.admin.listUsers() silently drops everyone past page 1 once
+  // the app has ~50 signups, and reading broker_connections finds nobody at all — that table backs
+  // a future per-user connect flow and nothing writes to it today, so discovering candidates from
+  // it meant the nightly broker sync quietly did nothing while the market-data sync kept working.
+  // Failures here never abort the run.
   let brokerSynced = 0;
+  let brokerOwners = 0;
   try {
-    const { data: conns } = await admin.from("broker_connections").select("user_id");
-    const candidateIds = [...new Set((conns ?? []).map((c: { user_id: string }) => c.user_id))];
-    for (const uid of candidateIds) {
-      const { data: u } = await admin.auth.admin.getUserById(uid);
-      if (!isBrokerSyncOwner(u?.user?.email)) continue;
+    const emails = await listAllUserEmails(admin);
+    const owners = [...emails.entries()].filter(([, email]) => isBrokerSyncOwner(email));
+    if (!owners.length) {
+      // Not an error — broker sync is off unless an owner is configured — but it must be visible,
+      // because "nothing synced" and "nothing to sync" look identical from the outside.
+      console.log("[cron:sync] broker sync: no account matches BROKER_SYNC_OWNER_EMAILS — skipped");
+    }
+    for (const [uid] of owners) {
+      brokerOwners++;
       const res = await runBrokerSyncForUser(uid);
       if (res.ok) brokerSynced += res.options ?? 0;
+      else console.error(`[cron:sync] broker sync failed: ${res.message}`);
     }
   } catch (e) {
-    console.error("[cron:sync] broker sync failed:", e); // isolate — market-data sync still runs
+    console.error("[cron:sync] broker sync threw:", e); // isolate — market-data sync still runs
   }
 
   // The positions view is security_invoker; the service-role client bypasses RLS, so this returns
@@ -197,7 +207,9 @@ export async function GET(request: Request) {
     // read back from sync_runs after the first night on a new provider.
     provider: providerName(),
     synced: ok, failed, total: held.length, ivCaptured: ivOk,
-    brokerOptionLegs: brokerSynced, valueSnapshots, fxUpdated,
+    // brokerOwners answers "did it even try" — brokerOptionLegs of 0 never distinguished a
+    // clean run with no new legs from a sync that never ran at all.
+    brokerOwners, brokerOptionLegs: brokerSynced, valueSnapshots, fxUpdated,
     providerCalls: takeProviderCallCount(),
     // Whether the failure email below could actually be delivered. A dead notification path is
     // worth knowing about on a GOOD night, not discovered on the bad one.
