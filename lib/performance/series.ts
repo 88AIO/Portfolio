@@ -8,6 +8,7 @@
 // The gap between them is capital appreciation; dividends are tracked separately elsewhere.
 
 import { splitFactor, type Split } from "@/lib/corporate/splits";
+import { isBrokerRestated } from "@/lib/brokersync/restated";
 
 export type PerfTransaction = {
   instrument_id: string;
@@ -17,6 +18,8 @@ export type PerfTransaction = {
   fees: number;
   currency: string;
   executed_at: string; // YYYY-MM-DD
+  /** Identifies broker-restated rows, which are already in today's shares. */
+  dedupe_key?: string | null;
 };
 
 export type PerfClose = { date: string; close: number };
@@ -48,7 +51,7 @@ function buildShareTimeline(txs: PerfTransaction[], splits?: Split[]): ShareStep
     // multiplied against are split-adjusted (price_history stores the provider's adjusted close —
     // see providers/yahoo.ts). Mixing an unadjusted share count with an adjusted price is the
     // classic way to draw a chart that falls off a cliff on the split date and never recovers.
-    const qty = t.quantity * splitFactor(splits, t.executed_at);
+    const qty = t.quantity * (isBrokerRestated(t.dedupe_key) ? 1 : splitFactor(splits, t.executed_at));
     if (t.type === "buy") shares += qty;
     else if (t.type === "sell") shares -= qty;
     else continue; // dividends / cash movements don't change share count

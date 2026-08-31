@@ -11,6 +11,7 @@ import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax
 import { loadSplitRecords } from "@/lib/corporate/load";
 import SplitsSection from "@/components/SplitsSection";
 import { isDripBuy } from "@/lib/dividends/drip";
+import { isBrokerRestated } from "@/lib/brokersync/restated";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,7 @@ type Tx = {
   // Nullable in the type, not the column: a database that predates the column returns undefined
   // for it, and that must read as "not a reinvestment" rather than crash the page.
   drip?: boolean | null;
+  dedupe_key?: string | null;
 };
 type OptTx = {
   id: string; portfolio_id: string; action: string; option_type: string; strike: number;
@@ -42,7 +44,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
     await Promise.all([
       supabase.from("instruments").select("id, symbol, exchange, name, type, currency, sector, country_iso, annual_div_per_share, div_yield_ttm, next_dividend_date").eq("id", id).maybeSingle(),
       supabase.from("price_cache").select("price, change_pct, as_of").eq("instrument_id", id).maybeSingle(),
-      supabase.from("transactions").select("id, portfolio_id, type, quantity, price, fees, currency, executed_at, note, drip").eq("instrument_id", id).order("executed_at", { ascending: false }),
+      supabase.from("transactions").select("id, portfolio_id, type, quantity, price, fees, currency, executed_at, note, drip, dedupe_key").eq("instrument_id", id).order("executed_at", { ascending: false }),
       supabase.from("option_transactions").select("id, portfolio_id, action, option_type, strike, expiration, contracts, premium, fee, currency, trade_date, note").eq("instrument_id", id).order("trade_date", { ascending: false }),
       supabase.from("portfolios").select("id, name"),
     ]);
@@ -82,7 +84,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
 
   // Realized gains (FIFO) on this symbol.
   const ledger: LedgerTx[] = txs.map((t) => ({
-    instrument_id: id, symbol: instrument.symbol, exchange: instrument.exchange, currency: ccy, type: t.type,
+    instrument_id: id, dedupe_key: t.dedupe_key, symbol: instrument.symbol, exchange: instrument.exchange, currency: ccy, type: t.type,
     quantity: t.quantity, price: t.price, fees: t.fees, executed_at: t.executed_at,
   }));
   // Without splits, a pre-split buy cannot cover a post-split sale: FIFO finds a quarter of the
@@ -101,6 +103,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   const dividendActivity: ActivityItem[] = [];
   const optionActivity: ActivityItem[] = [];
 
+  let restatedShares = 0;
   let dripShares = 0;
   let dripCost = 0;
   let dividendsReceived = 0;
@@ -108,20 +111,28 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   for (const t of txs) {
     const portfolio = pfName.get(t.portfolio_id) ?? "Portfolio";
     if (t.type === "buy" || t.type === "sell") {
+      // A broker-reconciled lot is not a trade anyone made. It is the gap between the trades the
+      // broker's feed could still see and the position it reports today, booked at the broker's
+      // average cost on the earliest date we know about. Labelling it "Bought shares" invites
+      // someone to read a real purchase — at a price and on a date that never happened.
+      const restated = isBrokerRestated(t.dedupe_key);
       const fromNote = isDripBuy(t.type, t.note);
-      const drip = isDripBuy(t.type, t.note, t.drip);
+      const drip = !restated && isDripBuy(t.type, t.note, t.drip);
       if (drip) {
         dripShares += t.quantity;
         dripCost += t.quantity * t.price + (t.fees ?? 0);
       }
+      if (restated) restatedShares += t.quantity;
       shareActivity.push({
         id: t.id, source: "tx", date: t.executed_at, kind: t.type,
-        title: t.type === "buy" ? "Bought shares" : "Sold shares",
-        detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`,
+        title: restated ? "Opening balance" : t.type === "buy" ? "Bought shares" : "Sold shares",
+        detail: restated
+          ? `${num(t.quantity, 4)} shares at your broker's average cost of ${money(t.price, ccy)} — shares you already held before ${t.executed_at}, not a trade on that date`
+          : `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${t.fees ? ` · ${money(t.fees, ccy)} fee` : ""}`,
         amount: t.type === "buy" ? -(t.quantity * t.price + t.fees) : t.quantity * t.price - t.fees,
         portfolio,
-        // Only buys can be reinvestments; a sell has nothing to toggle.
-        drip: t.type === "buy" ? { isDrip: drip, locked: fromNote } : undefined,
+        // Only real buys can be reinvestments; a sell or a reconciling lot has nothing to toggle.
+        drip: t.type === "buy" && !restated ? { isDrip: drip, locked: fromNote } : undefined,
       });
     } else if (t.type === "dividend") {
       dividendsReceived += t.quantity * t.price;
@@ -298,6 +309,17 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
           </div>
           <p className="mb-4 text-xs text-slate-400">
             Every share bought and sold, newest first.
+            {restatedShares > 0 && (
+              <>
+                {" "}
+                <span className="font-medium text-slate-500">
+                  {num(restatedShares, 4)} shares show as an opening balance
+                </span>{" "}
+                — your broker&apos;s records don&apos;t reach back far enough to itemise those
+                purchases, so they&apos;re entered once at its average cost. The date is the
+                earliest one the broker gave us, not when you bought them.
+              </>
+            )}
             {dripShares > 0 ? (
               <>
                 {" "}

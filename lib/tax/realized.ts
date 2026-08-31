@@ -6,11 +6,14 @@
 // return-of-capital adjustments, or the special tax treatment of options — the UI says so plainly.
 
 import { splitFactor, type Split } from "@/lib/corporate/splits";
+import { isBrokerRestated } from "@/lib/brokersync/restated";
 
 export type LedgerTx = {
   symbol: string;
   /** Needed only to look up splits; matching still groups by symbol/exchange/currency. */
   instrument_id?: string | null;
+  /** Identifies broker-restated rows, which are already in today's shares. */
+  dedupe_key?: string | null;
   // Optional, but pass it when you have it: a ticker string alone does not identify an instrument.
   exchange?: string | null;
   currency: string;
@@ -94,7 +97,10 @@ export function computeRealizedLots(
       // constant, so every money figure below is unchanged; only the share counts become
       // comparable. Reported lot quantities are therefore in today's shares, which is what the
       // holding page shows beside them.
-      const factor = t.instrument_id ? splitFactor(splitsByInstrument?.get(t.instrument_id), t.executed_at) : 1;
+      const factor =
+        t.instrument_id && !isBrokerRestated(t.dedupe_key)
+          ? splitFactor(splitsByInstrument?.get(t.instrument_id), t.executed_at)
+          : 1;
       const qty = Math.abs(t.quantity) * factor;
       const price = t.price / factor;
       if (qty <= 0) continue;

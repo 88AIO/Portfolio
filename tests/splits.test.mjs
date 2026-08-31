@@ -332,3 +332,63 @@ test("unusable rows are dropped from either source", () => {
   );
   assert.equal(merged.size, 0, "nothing usable");
 });
+
+// --- broker-reconciled rows -----------------------------------------------------------------------
+
+const { isBrokerRestated } = await import("../lib/brokersync/restated.ts");
+
+test("a broker's opening-balance lot is recognised", () => {
+  assert.equal(isBrokerRestated("ref:snaptrade-recon:abc"), true);
+  assert.equal(isBrokerRestated("ref:snaptrade-pos:abc"), true);
+});
+
+test("a real imported trade is not", () => {
+  // The distinction the whole exemption rests on: activity rows are as-traded and DO need
+  // adjusting; only the synthetic reconciling lot is already restated.
+  assert.equal(isBrokerRestated("ref:snaptrade-act:xyz"), false);
+  assert.equal(isBrokerRestated("csv:something"), false);
+  assert.equal(isBrokerRestated(null), false);
+  assert.equal(isBrokerRestated(undefined), false);
+});
+
+test("an opening balance is never split-adjusted a second time", () => {
+  // It already equals the broker's CURRENT share count, splits included. Adjusting it again turns
+  // a real 402-share position into a fictional 4,020-share one.
+  const splits = new Map([["i1", [{ exDate: "2024-06-10", ratio: 10 }]]]);
+  const lots = computeRealizedLots(
+    [tx({ type: "buy", quantity: 400, price: 31, executed_at: "2024-01-02", dedupe_key: "ref:snaptrade-recon:i1" }),
+     tx({ type: "sell", quantity: 400, price: 40, executed_at: "2026-03-01" })],
+    splits
+  );
+  near(lots.reduce((s, l) => s + l.quantity, 0), 400, "400 shares closed, not 4,000");
+  near(lots.reduce((s, l) => s + l.gain, 0), 400 * 40 - 400 * 31, "gain on the real position");
+});
+
+test("a real pre-split trade beside an opening balance is still adjusted", () => {
+  // The exemption must be surgical: exempting everything would reintroduce the original bug.
+  const splits = new Map([["i1", [{ exDate: "2024-06-10", ratio: 10 }]]]);
+  const lots = computeRealizedLots(
+    [tx({ type: "buy", quantity: 10, price: 300, executed_at: "2024-01-02", dedupe_key: "ref:snaptrade-act:1" }),
+     tx({ type: "sell", quantity: 100, price: 40, executed_at: "2026-03-01" })],
+    splits
+  );
+  near(lots.reduce((s, l) => s + l.quantity, 0), 100, "10 pre-split shares became 100");
+  near(lots.reduce((s, l) => s + l.gain, 0), 100 * 40 - 3000, "basis preserved");
+});
+
+test("the value chart does not re-adjust an opening balance either", () => {
+  const txs = [{
+    instrument_id: "i1", type: "buy", quantity: 400, price: 31, fees: 0,
+    currency: "USD", executed_at: "2024-01-02", dedupe_key: "ref:snaptrade-recon:i1",
+  }];
+  const series = buildPerformanceSeries(
+    txs,
+    new Map([["i1", [{ date: "2026-03-01", close: 40 }]]]),
+    new Map([["i1", "USD"]]),
+    () => 1,
+    "2026-03-01",
+    undefined,
+    new Map([["i1", [{ exDate: "2024-06-10", ratio: 10 }]]])
+  );
+  near(series.endValue, 400 * 40, "valued at 400 shares, not 4,000");
+});

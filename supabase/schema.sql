@@ -328,6 +328,12 @@ agg as (
          and o.instrument_id = t.instrument_id
     ) s
     where s.ex_date > t.executed_at
+      -- Broker-reconciled rows are ALREADY in today's shares: the sync writes one opening-balance
+      -- lot per held instrument to absorb transfers-in, pre-window shares and past splits, sized to
+      -- the broker's current position. Adjusting it again would multiply a real holding by the
+      -- split a second time. Twin of lib/brokersync/restated.ts.
+      and coalesce(t.dedupe_key, '') not like 'ref:snaptrade-recon:%'
+      and coalesce(t.dedupe_key, '') not like 'ref:snaptrade-pos:%'
   ) sf on true
   group by t.portfolio_id, t.instrument_id
 )
