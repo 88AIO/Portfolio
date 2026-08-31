@@ -210,9 +210,15 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
                 <Stat label="After dividends too" value={money(effectiveCostAfterIncome, ccy)} accent />
               )}
               {price != null && effectiveCost !== 0 && (
+                // Named for what it measures. "Break-even vs. now" described neither a break-even
+                // price nor a break-even percentage, and sitting to the right of the
+                // after-dividends figure it invited the assumption that it used that one — it uses
+                // the premium-only effective cost, so the sub-line names the number outright.
                 <Stat
-                  label="Break-even vs. now"
+                  label="Return on effective cost"
                   value={pct(((price - effectiveCost) / effectiveCost) * 100)}
+                  sub={`vs. ${money(effectiveCost, ccy)}`}
+                  hint={`Today's price of ${money(price, ccy)} against your effective cost of ${money(effectiveCost, ccy)} — what you paid, less option premium. Dividends are not included here.`}
                   tone={price >= effectiveCost ? "up" : "down"}
                 />
               )}
@@ -363,12 +369,16 @@ function Card({ label, value, sub, tone }: { label: string; value: string; sub?:
   );
 }
 
-function Stat({ label, value, strike, accent, tone }: { label: string; value: string; strike?: boolean; accent?: boolean; tone?: "up" | "down" }) {
+function Stat({ label, value, strike, accent, tone, sub, hint }: { label: string; value: string; strike?: boolean; accent?: boolean; tone?: "up" | "down"; sub?: string; hint?: string }) {
   const t = tone === "up" ? "text-emerald-600" : tone === "down" ? "text-rose-600" : accent ? "text-indigo-600" : "text-slate-900";
   return (
     <div>
-      <div className="text-xs uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="flex items-center gap-1 text-xs uppercase tracking-wide text-slate-400">
+        {label}
+        {hint && <span title={hint} aria-label={hint} className="cursor-help text-slate-300">ⓘ</span>}
+      </div>
       <div className={`mt-0.5 text-xl font-semibold ${t} ${strike ? "line-through decoration-slate-300" : ""}`}>{value}</div>
+      {sub && <div className="mt-0.5 text-xs text-slate-400">{sub}</div>}
     </div>
   );
 }
