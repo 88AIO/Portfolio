@@ -19,6 +19,7 @@ import DeleteActivityButton from "@/components/DeleteActivityButton";
 import { computeWheels, type WheelPosition, type WheelRow, type WheelEvent } from "@/lib/options/wheel";
 import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
 import { loadSplitsByInstrument } from "@/lib/corporate/load";
+import { isBrokerCashDividend } from "@/lib/brokersync/restated";
 import AddOptionForm from "@/components/AddOptionForm";
 import WheelCycles from "@/components/WheelCycles";
 import { MonthlyPremiumChart } from "@/components/charts";
@@ -48,6 +49,7 @@ type PositionLite = {
 type LedgerRow = {
   id: string;
   instrument_id: string;
+  dedupe_key: string | null;
   type: string;
   quantity: number;
   price: number;
@@ -92,7 +94,7 @@ export default async function OptionsPage() {
     fetchAll<LedgerRow>((from, to) =>
       supabase
         .from("transactions")
-        .select("id, instrument_id, type, quantity, price, fees, currency, executed_at, instruments(symbol, exchange)")
+        .select("id, instrument_id, type, quantity, price, fees, currency, executed_at, dedupe_key, instruments(symbol, exchange)")
         .order("executed_at", { ascending: true })
         .order("instrument_id", { ascending: true })
         .range(from, to),
@@ -285,7 +287,7 @@ export default async function OptionsPage() {
     } else if (t.type === "sell") {
       pushEvent(symbol, { id: t.id, source: "tx", date: t.executed_at, kind: "sell", currency: ccy, amount: t.quantity * t.price - fees, title: "Sold shares", detail: `${num(t.quantity, 4)} @ ${money(t.price, ccy)}${fees ? ` · ${money(fees, ccy)} fee` : ""}` });
     } else if (t.type === "dividend") {
-      pushEvent(symbol, { id: t.id, source: "tx", date: t.executed_at, kind: "dividend", currency: ccy, amount: t.quantity * t.price, title: "Dividend received", detail: `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}` });
+      pushEvent(symbol, { id: t.id, source: "tx", date: t.executed_at, kind: "dividend", currency: ccy, amount: t.quantity * t.price, title: "Dividend received", detail: isBrokerCashDividend(t.type, t.dedupe_key) ? "Cash dividend, as reported by your broker" : `${money(t.price, ccy)}/sh × ${num(t.quantity, 4)}` });
     }
   }
   for (const sym of Object.keys(historyBySymbol)) {
