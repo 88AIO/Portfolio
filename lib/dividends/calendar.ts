@@ -1,9 +1,12 @@
 // Forward dividend calendar — projects the next 12 months of expected payouts per holding
 // and rolls them up by month, so "what income is coming, and when" is answerable at a glance.
 //
-// Honest by design: every event is an *estimate* projected from the known next ex/pay date
-// stepped by the payout frequency. Holdings with no known next date can't be placed on a
-// month, so they're counted separately rather than guessed onto the wrong month.
+// Honest by design: every event is an *estimate* projected from a next ex/pay date stepped by the
+// payout frequency. That anchor date is either declared (the provider told us) or inferred from the
+// holding's own payout history — see lib/dividends/cadence.ts. Which one it was travels with the
+// event as `estimated`, because "December, because they declared it" and "December, because they
+// have paid every December for six years" are different claims and the UI should not blur them.
+// Holdings we can place neither way are counted separately rather than guessed onto a month.
 
 export type CalendarPosition = {
   instrument_id: string;
@@ -14,6 +17,8 @@ export type CalendarPosition = {
   div_frequency: number | null; // payments per year
   next_dividend_date: string | null; // YYYY-MM-DD
   next_dividend_per_share: number | null;
+  /** True when next_dividend_date was inferred from payout history rather than declared. */
+  next_date_estimated?: boolean;
 };
 
 export type CalendarEvent = {
@@ -24,18 +29,26 @@ export type CalendarEvent = {
   currency: string;
   amount: number; // perShare * shares, in the holding's own currency
   amountBase: number; // converted to the base currency
+  /** The anchor date was inferred from this holding's own history, not declared by anyone. */
+  estimated: boolean;
 };
 
 export type CalendarMonth = {
   key: string; // YYYY-MM
   label: string; // e.g. "Sep 2026"
   total: number; // base currency
+  /** Portion of `total` resting on an inferred anchor date. */
+  estimatedTotal: number;
   events: CalendarEvent[];
 };
 
 export type DividendCalendar = {
   months: CalendarMonth[]; // exactly 12, chronological, starting this month
   total: number; // base currency, summed across the window
+  /** Portion of `total` placed from inferred dates rather than declared ones. */
+  estimatedTotal: number;
+  /** Payers placed on the calendar by inference rather than a declared date. */
+  estimatedCount: number;
   untimedCount: number; // dividend payers we couldn't place (no known next date)
 };
 
@@ -81,12 +94,20 @@ export function buildDividendCalendar(
     const dt = new Date(Date.UTC(startYear, startMonth + i, 1));
     const key = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
     indexByKey.set(key, months.length);
-    months.push({ key, label: `${MONTH_NAMES[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`, total: 0, events: [] });
+    months.push({
+      key,
+      label: `${MONTH_NAMES[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`,
+      total: 0,
+      estimatedTotal: 0,
+      events: [],
+    });
   }
   const windowEnd = addMonths(`${months[11].key}-01`, 1); // exclusive upper bound (first day after last month)
 
   let untimedCount = 0;
+  let estimatedCount = 0;
   let total = 0;
+  let estimatedTotal = 0;
 
   for (const p of positions) {
     const annual = p.annual_div_per_share ?? 0;
@@ -100,6 +121,9 @@ export function buildDividendCalendar(
 
     const perShare = p.next_dividend_per_share ?? annual / freq;
     if (perShare <= 0) continue;
+
+    const estimated = p.next_date_estimated === true;
+    if (estimated) estimatedCount++;
 
     // Step by the real payout interval. Monthly-or-slower payers step in whole months
     // (preserves day-of-month for quarterly/semi/annual); higher-frequency payers (weekly,
@@ -132,9 +156,14 @@ export function buildDividendCalendar(
           currency: p.currency,
           amount,
           amountBase,
+          estimated,
         });
         months[idx].total += amountBase;
         total += amountBase;
+        if (estimated) {
+          months[idx].estimatedTotal += amountBase;
+          estimatedTotal += amountBase;
+        }
       }
       date = advance(date);
     }
@@ -142,5 +171,5 @@ export function buildDividendCalendar(
 
   for (const m of months) m.events.sort((a, b) => a.date.localeCompare(b.date));
 
-  return { months, total, untimedCount };
+  return { months, total, estimatedTotal, estimatedCount, untimedCount };
 }

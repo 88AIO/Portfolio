@@ -5,7 +5,8 @@ import { getCachedRates } from "@/lib/fx";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { money, pct } from "@/lib/format";
 import { dividendSafety, type DividendSafety } from "@/lib/dividends/safety";
-import { buildDividendCalendar } from "@/lib/dividends/calendar";
+import { buildDividendCalendar, type CalendarPosition } from "@/lib/dividends/calendar";
+import { estimateNextExDate, inferDivFrequency } from "@/lib/dividends/cadence";
 import { monthlyDividendHistory, annualDividendSummary, type DividendTx } from "@/lib/dividends/history";
 import SafetyBadge from "@/components/SafetyBadge";
 import { DividendCalendarChart } from "@/components/charts";
@@ -64,31 +65,7 @@ export default async function DividendsPage() {
   }
   const yieldOnValue = marketValue > 0 ? (annualIncome / marketValue) * 100 : 0;
 
-  // Upcoming payouts: holdings with a future next-dividend date; estimate the amount when we can.
   const today = new Date().toISOString().slice(0, 10);
-  const upcoming = rows
-    .filter((p) => p.next_dividend_date && p.next_dividend_date >= today && p.shares > 0)
-    .map((p) => {
-      const perShare =
-        p.next_dividend_per_share ??
-        (p.annual_div_per_share && p.div_frequency ? p.annual_div_per_share / p.div_frequency : null);
-      return { p, perShare, amount: perShare != null ? perShare * p.shares : null, date: p.next_dividend_date as string };
-    })
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  // Forward 12-month dividend calendar — projected income rolled up by month (base currency).
-  const calendar = buildDividendCalendar(rows, fx, today);
-  const calendarChart = calendar.months.map((m) => ({
-    label: m.label,
-    short: m.label.slice(0, 3),
-    total: m.total,
-    count: m.events.length,
-    note: undefined as string | undefined,
-  }));
-  const peakMonth = calendar.months.reduce(
-    (best, m) => (m.total > best.total ? m : best),
-    calendar.months[0]
-  );
 
   // What the user was actually PAID, from their own ledger. This is a different number from the
   // instrument's payout history below: a 2024 payout multiplied by the shares held TODAY is not
@@ -126,16 +103,6 @@ export default async function DividendsPage() {
   }));
   const received24 = receivedMonthly.reduce((s, m) => s + m.total, 0);
 
-  // The calendar is forward-looking, so late in the month its first bar is empty: everything due
-  // has already been paid. An empty leading bar reads as "you get nothing in August" when the truth
-  // is the opposite, and it happens every month-end. Fill it with what was actually received and
-  // say so on the bar, so the twelve months read as one continuous income picture.
-  const paidThisMonth = receivedMonthly[receivedMonthly.length - 1]?.total ?? 0;
-  const currentMonthAlreadyPaid = calendarChart[0] && calendarChart[0].total === 0 && paidThisMonth > 0;
-  if (currentMonthAlreadyPaid) {
-    calendarChart[0].total = paidThisMonth;
-    calendarChart[0].note = "Already paid this month";
-  }
   const byYear = annualDividendSummary(divTxs, fx, today, annualIncome, 2, 3);
   const paidRecently = divTxRows.slice(0, 20).map((t) => {
     const rel = Array.isArray(t.instruments) ? t.instruments[0] : t.instruments;
@@ -184,6 +151,79 @@ export default async function DividendsPage() {
         currency: d.currency ?? p?.currency ?? base,
       };
     });
+  }
+
+  // Payout history ascending, which is what the cadence and safety maths read. The query above
+  // orders newest-first for the "recent payments" list, so this is a reversed view of the same rows.
+  const historyAsc = (id: string) => (historyById.get(id) ?? []).slice().reverse();
+
+  // Fill in the missing next-payout dates ourselves.
+  //
+  // The provider declares a next ex-date for only a minority of tickers — for most of a real
+  // portfolio it returns nothing, which left those holdings off the calendar entirely and made
+  // projected income look a fraction of the annual figure printed right beside it. A holding that
+  // has paid every March, June, September and December for six years is not a mystery, so we
+  // project its next date from its own history and mark it as inferred. estimateNextExDate refuses
+  // to guess where the history can't support it (too few payments, or a payer that has missed two
+  // cycles and may have stopped), so those stay off the calendar and stay disclosed as untimed.
+  const calendarRows: CalendarPosition[] = rows.map((p) => {
+    if (p.next_dividend_date && p.next_dividend_date >= today) return p;
+    const history = historyAsc(p.instrument_id);
+    const estimate = estimateNextExDate(history, today);
+    if (!estimate) return p;
+    return {
+      ...p,
+      next_dividend_date: estimate,
+      div_frequency: p.div_frequency ?? inferDivFrequency(history),
+      next_date_estimated: true,
+    };
+  });
+  const estimatedDates = new Map(
+    calendarRows
+      .filter((p) => p.next_date_estimated)
+      .map((p) => [p.instrument_id, p.next_dividend_date as string])
+  );
+
+  // Upcoming payouts: the next dividend from each holding, declared or inferred.
+  const upcoming = calendarRows
+    .filter((p) => p.next_dividend_date && p.next_dividend_date >= today && p.shares > 0)
+    .map((p) => {
+      const perShare =
+        p.next_dividend_per_share ??
+        (p.annual_div_per_share && p.div_frequency ? p.annual_div_per_share / p.div_frequency : null);
+      return {
+        p,
+        perShare,
+        amount: perShare != null ? perShare * p.shares : null,
+        date: p.next_dividend_date as string,
+        estimated: estimatedDates.has(p.instrument_id),
+      };
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Forward 12-month dividend calendar — projected income rolled up by month (base currency).
+  const calendar = buildDividendCalendar(calendarRows, fx, today);
+  const calendarChart = calendar.months.map((m) => ({
+    label: m.label,
+    short: m.label.slice(0, 3),
+    total: m.total,
+    count: m.events.length,
+    note: undefined as string | undefined,
+  }));
+  const peakMonth = calendar.months.reduce(
+    (best, m) => (m.total > best.total ? m : best),
+    calendar.months[0]
+  );
+
+  // The calendar is forward-looking, so late in the month its first bar is empty: everything due
+  // has already been paid. An empty leading bar reads as "you get nothing in August" when the truth
+  // is the opposite, and it happens every month-end. Fill it with what was actually received and
+  // say so on the bar, so the twelve months read as one continuous income picture.
+  const paidThisMonth = receivedMonthly[receivedMonthly.length - 1]?.total ?? 0;
+  const currentMonthAlreadyPaid = calendarChart[0] && calendarChart[0].total === 0 && paidThisMonth > 0;
+  if (currentMonthAlreadyPaid) {
+    calendarChart[0].total = paidThisMonth;
+    calendarChart[0].note = "Already paid this month";
   }
 
   // Dividend safety per dividend-paying holding, sorted by score (unrated last).
@@ -242,8 +282,10 @@ export default async function DividendsPage() {
             how often.
             {currentMonthAlreadyPaid &&
               " This month's payments have already been made, so its bar shows what you received rather than what's still due."}
+            {calendar.estimatedCount > 0 &&
+              ` ${calendar.estimatedCount} of these payer${calendar.estimatedCount === 1 ? " has" : "s have"} no declared next date, so ${calendar.estimatedCount === 1 ? "its" : "their"} timing (${money(calendar.estimatedTotal, base)} of the total) is worked out from ${calendar.estimatedCount === 1 ? "its" : "their"} own payment history and marked “est.” below.`}
             {calendar.untimedCount > 0 &&
-              ` ${calendar.untimedCount} payer${calendar.untimedCount === 1 ? "" : "s"} with no known next date ${calendar.untimedCount === 1 ? "is" : "are"} not shown.`}
+              ` ${calendar.untimedCount} payer${calendar.untimedCount === 1 ? "" : "s"} whose history can't support even an estimate ${calendar.untimedCount === 1 ? "is" : "are"} left out.`}
           </p>
 
           {calendar.total <= 0 ? (
@@ -276,6 +318,14 @@ export default async function DividendsPage() {
                             <span>
                               <span className="font-medium text-slate-600">{e.symbol}</span>
                               <span className="text-slate-400"> · {e.date.slice(5)}</span>
+                              {e.estimated && (
+                                <span
+                                  className="text-slate-300"
+                                  title="No declared date — timing estimated from this holding's own payment history."
+                                >
+                                  {" "}est.
+                                </span>
+                              )}
                             </span>
                             <span className="tabular-nums">{money(e.amount, e.currency)}</span>
                           </li>
@@ -292,18 +342,32 @@ export default async function DividendsPage() {
           {/* Upcoming */}
           <section className="rounded-2xl border border-slate-200 bg-white p-5">
             <h2 className="font-semibold">Coming up</h2>
-            <p className="mb-4 text-xs text-slate-400">The next dividend from each holding, with your estimated payout.</p>
+            <p className="mb-4 text-xs text-slate-400">
+              The next dividend from each holding, with your estimated payout. Dates marked{" "}
+              <span className="text-slate-500">est.</span> were worked out from the holding&apos;s own
+              payment history because nobody has declared one yet.
+            </p>
             {upcoming.length === 0 ? (
               <p className="py-8 text-center text-sm text-slate-400">
                 No upcoming ex-dividend dates yet. Add holdings and hit “Refresh prices”.
               </p>
             ) : (
               <ul className="divide-y divide-slate-100 text-sm">
-                {upcoming.map(({ p, amount, date }) => (
+                {upcoming.map(({ p, amount, date, estimated }) => (
                   <li key={p.instrument_id} className="flex items-center justify-between py-2.5">
                     <div>
                       <div className="font-medium">{p.symbol}</div>
-                      <div className="text-xs text-slate-400">{date}</div>
+                      <div className="text-xs text-slate-400">
+                        {date}
+                        {estimated && (
+                          <span
+                            className="text-slate-300"
+                            title="No declared date — estimated from this holding's own payment history."
+                          >
+                            {" "}est.
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="text-right">
                       {amount != null ? money(amount, p.currency) : <span className="text-slate-300">-</span>}

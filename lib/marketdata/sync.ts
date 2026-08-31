@@ -11,6 +11,7 @@ import {
   getOptionChain,
   providerSupportsOptions,
 } from "@/lib/marketdata";
+import { inferDivFrequency } from "@/lib/dividends/cadence";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -78,25 +79,6 @@ export async function syncInstrumentPriceHistory(
       { onConflict: "instrument_id,d" }
     );
   }
-}
-
-// Infer payout frequency from the spacing between recent ex-dates, snapped to a standard cadence —
-// more stable than counting payments in a rolling 366-day window (which flickers between e.g.
-// 3/4/5 for a quarterly payer as the boundary crosses a payment).
-export function inferDivFrequency(history: { exDate: string; amount: number }[]): number | null {
-  if (history.length < 2) return history.length || null;
-  const recent = history.slice(-9); // up to 8 gaps
-  const gaps: number[] = [];
-  for (let i = 1; i < recent.length; i++) {
-    const days = (Date.parse(recent[i].exDate) - Date.parse(recent[i - 1].exDate)) / 86_400_000;
-    if (days > 0) gaps.push(days);
-  }
-  if (!gaps.length) return null;
-  gaps.sort((a, b) => a - b);
-  const medianGap = gaps[Math.floor(gaps.length / 2)];
-  const perYear = 365 / medianGap;
-  const cadences = [1, 2, 4, 6, 12, 26, 52];
-  return cadences.reduce((best, c) => (Math.abs(c - perYear) < Math.abs(best - perYear) ? c : best), cadences[0]);
 }
 
 // Sync an instrument's dividend reference + history from the market-data provider.

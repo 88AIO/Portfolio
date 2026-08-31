@@ -207,6 +207,38 @@ test("a payment earlier this month is already paid and is not counted as coming"
   assert.ok(c.months[0].events.every((e) => e.date >= TODAY), "August 1st has passed");
 });
 
+test("an inferred anchor date is carried through to every event it generates", () => {
+  // The calendar can't tell the difference on its own, and the UI must: "December, because they
+  // declared it" and "December, because they always do" are different claims.
+  const c = buildDividendCalendar([pos({ next_date_estimated: true })], usd, TODAY);
+  const events = c.months.flatMap((m) => m.events);
+  assert.ok(events.length > 0);
+  assert.ok(events.every((e) => e.estimated), "every projection inherits the anchor's provenance");
+  assert.equal(c.estimatedCount, 1);
+  near(c.estimatedTotal, c.total, "all of it rests on an inferred date");
+});
+
+test("declared and inferred payers are totalled together but tallied apart", () => {
+  const c = buildDividendCalendar(
+    [pos(), pos({ instrument_id: "i2", symbol: "BBB", next_date_estimated: true })],
+    usd, TODAY
+  );
+  assert.equal(c.estimatedCount, 1, "one of the two");
+  near(c.total, 800, "both payers' income counts");
+  near(c.estimatedTotal, 400, "half of it is inferred timing");
+  for (const m of c.months) {
+    near(m.estimatedTotal, m.events.filter((e) => e.estimated).reduce((s, e) => s + e.amountBase, 0),
+      `${m.key} splits its own total`);
+  }
+});
+
+test("a declared payer is never marked as estimated", () => {
+  const c = buildDividendCalendar([pos()], usd, TODAY);
+  assert.equal(c.estimatedCount, 0);
+  near(c.estimatedTotal, 0, "nothing inferred");
+  assert.ok(c.months.flatMap((m) => m.events).every((e) => e.estimated === false));
+});
+
 test("payers with no known next date or no frequency are counted, not guessed onto a month", () => {
   const c = buildDividendCalendar(
     [pos({ next_dividend_date: null }), pos({ div_frequency: null }), pos()], usd, TODAY);
