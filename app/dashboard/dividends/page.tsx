@@ -6,6 +6,7 @@ import { fetchAll } from "@/lib/supabase/paginate";
 import { money, pct } from "@/lib/format";
 import { dividendSafety, type DividendSafety } from "@/lib/dividends/safety";
 import { buildDividendCalendar } from "@/lib/dividends/calendar";
+import { monthlyDividendHistory, annualDividendSummary, type DividendTx } from "@/lib/dividends/history";
 import SafetyBadge from "@/components/SafetyBadge";
 import { DividendCalendarChart } from "@/components/charts";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
@@ -87,6 +88,52 @@ export default async function DividendsPage() {
     (best, m) => (m.total > best.total ? m : best),
     calendar.months[0]
   );
+
+  // What the user was actually PAID, from their own ledger. This is a different number from the
+  // instrument's payout history below: a 2024 payout multiplied by the shares held TODAY is not
+  // what landed in the account, and shows income for a holding that may not have been owned yet.
+  type DivTxRow = {
+    executed_at: string | null;
+    quantity: number | null;
+    price: number | null;
+    currency: string | null;
+    instruments: { symbol: string } | { symbol: string }[] | null;
+  };
+  const divTxRows = await fetchAll<DivTxRow>((from, to) =>
+    supabase
+      .from("transactions")
+      .select("executed_at, quantity, price, currency, instruments(symbol)")
+      .eq("type", "dividend")
+      .order("executed_at", { ascending: false })
+      .range(from, to),
+  );
+  const divTxs: DividendTx[] = divTxRows
+    .filter((t) => t.executed_at)
+    .map((t) => ({
+      executed_at: t.executed_at as string,
+      quantity: t.quantity ?? 0,
+      price: t.price ?? 0,
+      currency: t.currency ?? base,
+    }));
+  const receivedMonthly = monthlyDividendHistory(divTxs, fx, today, 24);
+  const receivedChart = receivedMonthly.map((m) => ({
+    label: m.key,
+    short: m.label.slice(0, 3),
+    total: m.total,
+    count: 0,
+  }));
+  const received24 = receivedMonthly.reduce((s, m) => s + m.total, 0);
+  const byYear = annualDividendSummary(divTxs, fx, today, annualIncome, 2, 3);
+  const paidRecently = divTxRows.slice(0, 20).map((t) => {
+    const rel = Array.isArray(t.instruments) ? t.instruments[0] : t.instruments;
+    return {
+      date: t.executed_at ?? "-",
+      symbol: rel?.symbol ?? "?",
+      perShare: t.price ?? 0,
+      total: (t.quantity ?? 0) * (t.price ?? 0),
+      currency: t.currency ?? base,
+    };
+  });
 
   // Full synced dividend history for the held instruments — powers both the recent list
   // and the per-holding dividend-safety score (computed from cuts / track record / growth).
@@ -316,9 +363,119 @@ export default async function DividendsPage() {
           )}
         </section>
 
-        {/* Recent history */}
+        {/* What actually landed, over two years */}
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="mb-4 font-semibold">Recent dividends</h2>
+          <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-semibold">Income received</h2>
+            <span className="text-sm text-slate-500">
+              {money(received24, base)} over 24 months
+            </span>
+          </div>
+          <p className="mb-4 max-w-2xl text-xs text-slate-400">
+            Dividends actually paid into your account, month by month, from your own transactions —
+            not an estimate. Months with no payout are shown as gaps rather than skipped.
+          </p>
+          {received24 > 0 ? (
+            <DividendCalendarChart data={receivedChart} currency={base} valueLabel="Received" />
+          ) : (
+            <p className="py-10 text-center text-sm text-slate-400">
+              No dividend payments recorded yet. They appear here once you import or add them.
+            </p>
+          )}
+        </section>
+
+        {/* Year by year, past and projected */}
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+          <h2 className="font-semibold">Income by year</h2>
+          <p className="mb-4 max-w-2xl text-xs text-slate-400">
+            Future years assume you hold what you hold today and each company keeps paying its
+            current rate. Nothing is grown — a rising payout would be a guess compounded into a
+            number you might plan around.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs uppercase text-slate-400">
+                <tr>
+                  <th className="pb-2">Year</th>
+                  <th className="pb-2">Basis</th>
+                  <th className="pb-2 text-right">Income</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byYear.map((y) => (
+                  <tr key={y.year} className="border-t border-slate-100">
+                    <td className="py-2.5 font-medium text-slate-900">{y.year}</td>
+                    <td className="py-2.5">
+                      <span
+                        className={
+                          y.basis === "actual"
+                            ? "rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700"
+                            : y.basis === "partial"
+                              ? "rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600"
+                              : "rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
+                        }
+                        title={
+                          y.basis === "actual"
+                            ? "Paid and recorded."
+                            : y.basis === "partial"
+                              ? "Received so far this year, plus the rest of the year at today's rate."
+                              : "Estimate: today's holdings at today's payout rates."
+                        }
+                      >
+                        {y.basis === "actual" ? "Received" : y.basis === "partial" ? "So far + rest of year" : "Estimate"}
+                      </span>
+                    </td>
+                    <td className={`py-2.5 text-right tabular-nums ${y.basis === "estimate" ? "text-slate-500" : "font-medium"}`}>
+                      {money(y.total, base)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Recent payments */}
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+          <h2 className="mb-4 font-semibold">Recent payments</h2>
+          {paidRecently.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">
+              No dividend payments recorded yet.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase text-slate-400">
+                  <tr>
+                    <th className="pb-2">Paid</th>
+                    <th className="pb-2">Stock</th>
+                    <th className="pb-2 text-right">Per share</th>
+                    <th className="pb-2 text-right">You received</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paidRecently.map((r, i) => (
+                    <tr key={i} className="border-t border-slate-100">
+                      <td className="py-2.5">{r.date}</td>
+                      <td className="py-2.5 font-medium">{r.symbol}</td>
+                      <td className="py-2.5 text-right">{money(r.perShare, r.currency)}</td>
+                      <td className="py-2.5 text-right">{money(r.total, r.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* Announced payouts for the stocks you hold — reference data, not your income */}
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+          <h2 className="mb-1 font-semibold">Announced payouts</h2>
+          <p className="mb-4 max-w-2xl text-xs text-slate-400">
+            What these companies declared per share, from the synced dividend history. &ldquo;At your
+            shares&rdquo; applies your <em>current</em> holding, so it is a what-if for older rows,
+            not what you were paid — see Recent payments above for that.
+          </p>
           {recent.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-400">
               No dividend history synced yet. It populates when you add holdings or refresh prices.
@@ -331,7 +488,7 @@ export default async function DividendsPage() {
                     <th className="pb-2" title="Ex-dividend date: you had to own the stock before this day to receive the payout.">Ex-date</th>
                     <th className="pb-2">Stock</th>
                     <th className="pb-2 text-right" title="The dividend paid for each share.">Per share</th>
-                    <th className="pb-2 text-right" title="Per-share amount × the shares you hold today.">Your total</th>
+                    <th className="pb-2 text-right" title="Per-share amount × the shares you hold TODAY — a what-if, not what you were paid.">At your shares</th>
                   </tr>
                 </thead>
                 <tbody>

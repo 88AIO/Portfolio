@@ -9,9 +9,12 @@ type MonthBar = { label: string; short: string; total: number; count: number };
 export default function DividendCalendarChart({
   data,
   currency = "USD",
+  valueLabel = "Est. income",
 }: {
   data: MonthBar[];
   currency?: string;
+  /** What the bars are. The same chart shows a forward estimate and money already received. */
+  valueLabel?: string;
 }) {
   const fmt = (v: number) =>
     Number(v).toLocaleString("en-US", { style: "currency", currency, maximumFractionDigits: 0 });
@@ -23,7 +26,7 @@ export default function DividendCalendarChart({
           <YAxis tickFormatter={fmt} tickLine={false} axisLine={false} fontSize={11} stroke={CHART.axis} width={64} />
           <Tooltip
             cursor={{ fill: "rgba(32,93,74,0.06)" }}
-            formatter={(value) => [fmt(Number(value)), "Est. income"]}
+            formatter={(value) => [fmt(Number(value)), valueLabel]}
             labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
             contentStyle={{ borderRadius: 12, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 12 }}
           />
