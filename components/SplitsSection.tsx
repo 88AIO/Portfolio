@@ -1,5 +1,6 @@
 import { addSplit, deleteSplit } from "@/app/dashboard/holding/[id]/split-actions";
 import type { SplitRecord } from "@/lib/corporate/load";
+import CheckSplitsButton from "@/components/CheckSplitsButton";
 
 // Corporate actions on one holding.
 //
@@ -29,7 +30,10 @@ export default function SplitsSection({
 }) {
   return (
     <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
-      <h2 className="font-semibold">Splits on {symbol}</h2>
+      <div className="mb-1 flex flex-wrap items-start justify-between gap-3">
+        <h2 className="font-semibold">Splits on {symbol}</h2>
+        <CheckSplitsButton instrumentId={instrumentId} />
+      </div>
       <p className="mb-4 max-w-2xl text-xs text-slate-400">
         A split changes how many shares you hold, never what you paid. Your transactions are left
         exactly as your broker recorded them — the share count and average cost above are

@@ -13,6 +13,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { syncInstrumentSplits } from "@/lib/marketdata/sync";
 import { ensurePortfolio } from "../../actions";
 import { parseSplitRatio, MIN_RATIO, MAX_RATIO } from "@/lib/corporate/splits";
 
@@ -85,4 +87,53 @@ function revalidateAffected(instrumentId: string) {
   revalidatePath("/dashboard/performance");
   revalidatePath("/dashboard/options");
   revalidatePath("/dashboard/dividends");
+}
+
+/**
+ * Fetch this holding's split history from the market-data provider, now.
+ *
+ * The nightly sync already does this, but "now" matters twice: after a provider corrects its data
+ * there is otherwise no way to pick that up before the next run, and a holding added today would
+ * show an empty Splits section until tomorrow, which reads as "this stock never split" rather than
+ * "we haven't looked yet".
+ *
+ * Reading the instrument through the user's own client IS the authorization check: the instruments
+ * policy only returns rows they actually hold, so a guessed id cannot drive provider fan-out or
+ * write into the shared splits table on someone else's behalf.
+ */
+export async function checkSplits(instrumentId: string): Promise<{ ok: boolean; message: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, message: "Please sign in again." };
+  if (!instrumentId) return { ok: false, message: "Missing holding." };
+
+  const { data: inst } = await supabase
+    .from("instruments")
+    .select("id, symbol, exchange")
+    .eq("id", instrumentId)
+    .maybeSingle();
+  if (!inst) return { ok: false, message: "That holding isn't in your portfolio." };
+
+  let written: number | null;
+  try {
+    // Service role: instrument_splits is shared reference data, written server-side like prices
+    // and dividends. Clients only ever read it.
+    written = await syncInstrumentSplits(createAdminClient(), inst.id, inst.symbol, inst.exchange);
+  } catch {
+    return { ok: false, message: "The market-data provider didn't answer. Try again in a minute." };
+  }
+
+  if (written === null) {
+    return { ok: false, message: "Found splits but couldn't save them. Check that supabase/schema.sql has been applied." };
+  }
+
+  revalidateAffected(instrumentId);
+  if (written === 0) {
+    // An honest empty answer, distinct from never having asked.
+    return { ok: true, message: `No splits on record for ${inst.symbol}. You can still add one below.` };
+  }
+  return {
+    ok: true,
+    message: `Found ${written} split${written === 1 ? "" : "s"} for ${inst.symbol}. Refresh to see the updated share count.`,
+  };
 }
