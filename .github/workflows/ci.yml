@@ -50,7 +50,7 @@ jobs:
       # `latest` rather than a pin: a stale pin silently rots, and this stack is disposable — the
       # thing under test is our schema, not the CLI. If a CLI release ever breaks the boot, this
       # job fails loudly, which is the correct outcome for a security test.
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: latest
 
