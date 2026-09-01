@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import BrandMark from "@/components/BrandMark";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -9,14 +9,52 @@ import { MIN_AGE } from "@/lib/legal";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "mfa">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [agreed, setAgreed] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
   const [msg, setMsg] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   const [loading, setLoading] = useState(false);
   const note = (text: string, tone: "error" | "info" = "info") => setMsg({ text, tone });
+
+  // Lands here two ways: fresh from the password form below, or bounced back by proxy.ts because
+  // an already-signed-in session hasn't cleared its second factor yet (e.g. a bookmark straight to
+  // /dashboard). Either way, an unmet aal2 requirement means "ask for the code," not "ask again for
+  // the password" — checking on mount is what makes the bounce-back land on the right step.
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.mfa.getAuthenticatorAssuranceLevel().then(({ data }) => {
+      if (data && data.nextLevel === "aal2" && data.currentLevel !== data.nextLevel) {
+        setMode("mfa");
+      }
+    });
+  }, []);
+
+  async function submitMfa(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setMsg(null);
+    const supabase = createClient();
+    const { data: factors, error: listError } = await supabase.auth.mfa.listFactors();
+    const factor = factors?.totp.find((f) => f.status === "verified");
+    if (listError || !factor) {
+      note("Couldn't find your authenticator setup. Try signing in again.", "error");
+      setLoading(false);
+      return;
+    }
+    const { error } = await supabase.auth.mfa.challengeAndVerify({
+      factorId: factor.id,
+      code: mfaCode.trim(),
+    });
+    setLoading(false);
+    if (error) {
+      note("That code didn't match — check the time on your phone and try again.", "error");
+      return;
+    }
+    router.push("/dashboard");
+  }
 
   async function sendReset() {
     if (!email) {
@@ -72,12 +110,19 @@ export default function LoginPage() {
       }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) note(error.message, "error");
-      else {
-        // push() alone: /dashboard is force-dynamic, so it always renders fresh on arrival.
-        // Following it with refresh() rendered the whole dashboard a second time — every query
-        // twice — which is most of what made signing in feel slow.
-        router.push("/dashboard");
+      if (error) {
+        note(error.message, "error");
+      } else {
+        const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+        if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== aal.nextLevel) {
+          setMsg(null);
+          setMode("mfa");
+        } else {
+          // push() alone: /dashboard is force-dynamic, so it always renders fresh on arrival.
+          // Following it with refresh() rendered the whole dashboard a second time — every query
+          // twice — which is most of what made signing in feel slow.
+          router.push("/dashboard");
+        }
       }
     }
     setLoading(false);
@@ -95,76 +140,105 @@ export default function LoginPage() {
           <span className="text-lg font-semibold tracking-tight text-slate-900">Snowfolio</span>
         </div>
         <h1 className="font-display mb-1.5 text-2xl font-medium tracking-tight text-slate-900">
-          {mode === "signin" ? "Welcome back" : "Create your account"}
+          {mode === "signin" ? "Welcome back" : mode === "signup" ? "Create your account" : "Enter your code"}
         </h1>
-        <p className="mb-6 text-sm text-slate-500">Track your portfolio, dividends, and option income.</p>
+        <p className="mb-6 text-sm text-slate-500">
+          {mode === "mfa"
+            ? "Open your authenticator app and enter the current 6-digit code."
+            : "Track your portfolio, dividends, and option income."}
+        </p>
 
-        <form onSubmit={submit} className="space-y-3">
-          <input
-            type="email" required placeholder="you@email.com" value={email}
-            autoComplete="email"
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
-          />
-          <div className="relative">
+        {mode === "mfa" ? (
+          <form onSubmit={submitMfa} className="space-y-3">
             <input
-              type={showPassword ? "text" : "password"}
-              required placeholder="Password" value={password} minLength={6}
-              autoComplete={mode === "signin" ? "current-password" : "new-password"}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 pr-16 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="6-digit code"
+              required
+              autoFocus
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value)}
+              maxLength={6}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-center text-lg tracking-[0.4em] text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
             />
             <button
-              type="button"
-              onClick={() => setShowPassword((s) => !s)}
-              className="absolute inset-y-0 right-0 flex items-center px-3 text-xs font-medium text-slate-500 hover:text-slate-700"
-              aria-label={showPassword ? "Hide password" : "Show password"}
+              type="submit" disabled={loading || mfaCode.trim().length !== 6}
+              className="w-full rounded-xl bg-slate-900 py-2.5 text-sm font-medium text-[#f7f4ec] shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
             >
-              {showPassword ? "Hide" : "Show"}
+              {loading ? "…" : "Verify"}
             </button>
-          </div>
-          {mode === "signup" && (
-            <label className="flex items-start gap-2 pt-1 text-xs text-slate-500">
+          </form>
+        ) : (
+          <form onSubmit={submit} className="space-y-3">
+            <input
+              type="email" required placeholder="you@email.com" value={email}
+              autoComplete="email"
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+            />
+            <div className="relative">
               <input
-                type="checkbox"
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"
+                type={showPassword ? "text" : "password"}
+                required placeholder="Password" value={password} minLength={6}
+                autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 pr-16 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
               />
-              <span>
-                I&rsquo;m {MIN_AGE} or older and agree to the{" "}
-                <Link href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Terms</Link>{" "}
-                and{" "}
-                <Link href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Privacy Policy</Link>.
-              </span>
-            </label>
-          )}
-          <button
-            type="submit" disabled={loading}
-            className="w-full rounded-xl bg-slate-900 py-2.5 text-sm font-medium text-[#f7f4ec] shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
-          >
-            {loading ? "…" : mode === "signin" ? "Sign in" : "Sign up"}
-          </button>
-          {mode === "signin" && (
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-xs font-medium text-slate-500 hover:text-slate-700"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
+            {mode === "signup" && (
+              <label className="flex items-start gap-2 pt-1 text-xs text-slate-500">
+                <input
+                  type="checkbox"
+                  checked={agreed}
+                  onChange={(e) => setAgreed(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"
+                />
+                <span>
+                  I&rsquo;m {MIN_AGE} or older and agree to the{" "}
+                  <Link href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Terms</Link>{" "}
+                  and{" "}
+                  <Link href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Privacy Policy</Link>.
+                </span>
+              </label>
+            )}
             <button
-              type="button"
-              onClick={sendReset}
-              disabled={loading}
-              className="w-full text-center text-xs text-slate-500 hover:text-slate-700 disabled:opacity-60"
+              type="submit" disabled={loading}
+              className="w-full rounded-xl bg-slate-900 py-2.5 text-sm font-medium text-[#f7f4ec] shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
             >
-              Forgot password?
+              {loading ? "…" : mode === "signin" ? "Sign in" : "Sign up"}
             </button>
-          )}
-        </form>
+            {mode === "signin" && (
+              <button
+                type="button"
+                onClick={sendReset}
+                disabled={loading}
+                className="w-full text-center text-xs text-slate-500 hover:text-slate-700 disabled:opacity-60"
+              >
+                Forgot password?
+              </button>
+            )}
+          </form>
+        )}
 
         {msg && <p className={`mt-4 text-sm ${msg.tone === "error" ? "text-rose-600" : "text-amber-600"}`}>{msg.text}</p>}
 
-        <button
-          onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMsg(null); }}
-          className="mt-6 text-sm text-indigo-600 hover:underline"
-        >
-          {mode === "signin" ? "Need an account? Sign up" : "Have an account? Sign in"}
-        </button>
+        {mode !== "mfa" && (
+          <button
+            onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMsg(null); }}
+            className="mt-6 text-sm text-indigo-600 hover:underline"
+          >
+            {mode === "signin" ? "Need an account? Sign up" : "Have an account? Sign in"}
+          </button>
+        )}
 
         <div className="mt-6 flex justify-center gap-4 border-t border-slate-100 pt-4 text-xs text-slate-400">
           <Link href="/legal/disclaimer" className="hover:text-indigo-600">Disclaimer</Link>
