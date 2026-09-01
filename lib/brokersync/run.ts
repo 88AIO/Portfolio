@@ -8,6 +8,7 @@ import { getBrokerProvider } from "@/lib/brokersync";
 import type { BrokerAccount, BrokerPosition, BrokerOptionLeg, BrokerEquityTxn } from "@/lib/brokersync";
 import { enrichInstrumentProfile } from "@/lib/enrich";
 import { snapshotPortfolioValues } from "@/lib/snapshots";
+import { assertUniformRowShape } from "@/lib/supabase/rowShape";
 import { todayIso } from "@/lib/date";
 
 export type BrokerSyncResult = {
@@ -193,7 +194,11 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
   ): Promise<{ count: number; error?: string }> {
     type Row = {
       portfolio_id: string; instrument_id: string; type: string; quantity: number; price: number;
-      fees: number; currency: string; executed_at: string; dedupe_key: string; note?: string;
+      fees: number; currency: string; executed_at: string; dedupe_key: string;
+      // Also required for the same reason as drip: a row that includes `note` only sometimes turns
+      // every row that omits it into an explicit NULL for the whole batch. `note` is nullable in the
+      // schema, so NULL itself is fine — the point is that every row must SEND the key.
+      note: string | null;
       // REQUIRED, not optional. `drip` is NOT NULL in the schema, and PostgREST unions the columns
       // across a batch insert: if one row carries the key and another omits it, the omitted ones
       // are sent as NULL rather than falling back to the default, and the whole batch is rejected.
@@ -203,7 +208,6 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     // Dedupe rows by dedupe_key: SnapTrade can emit several legs sharing one reference id, and a
     // single INSERT … ON CONFLICT cannot touch the same key twice — one dup would fail the whole batch.
     const byKey = new Map<string, Row>();
-    const reclassified: string[] = [];
     const computedByInst = new Map<string, number>();
     const earliestByInst = new Map<string, string>();
     const metaByInst = new Map<string, { firstPrice: number; currency: string }>();
@@ -246,12 +250,8 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
         quantity: tx.quantity, price: tx.price, fees: Number.isFinite(tx.fee) ? tx.fee : 0,
         currency: tx.currency, executed_at: tx.tradeDate, dedupe_key: dk,
         drip: !!tx.drip,
-        ...(tx.drip ? { note: "Dividend reinvestment" } : {}),
+        note: tx.drip ? "Dividend reinvestment" : null,
       });
-      // Rows the provider fix reclassified: they already exist as dividend income under this exact
-      // key from an earlier sync, and the upsert below ignores duplicates, so the stale row would
-      // outlive the fix. Collect them to clear first.
-      if (tx.drip) reclassified.push(dk);
       if (tx.txnType === "buy") computedByInst.set(instId, (computedByInst.get(instId) ?? 0) + tx.quantity);
       else if (tx.txnType === "sell") computedByInst.set(instId, (computedByInst.get(instId) ?? 0) - tx.quantity);
       if (tx.txnType !== "dividend") {
@@ -265,24 +265,34 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     const rows = [...byKey.values()];
     if (!rows.length) return { count: 0 };
 
-    // Only NOW touch the DB. Drop the legacy today-snapshot and prior reconciling lots (both recomputed
-    // here); the accumulated real trades (ref:snaptrade-act:*) are left untouched.
-    const delPos = await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-pos:%");
-    if (delPos.error) return { count: 0, error: `del pos: ${delPos.error.message}` };
-    await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-recon:%");
-
-    // Clear rows whose classification changed before re-inserting them. Only these keys — the
-    // accumulated real trades are otherwise never deleted, so history persists.
-    for (let i = 0; i < reclassified.length; i += 200) {
-      await admin.from("transactions").delete()
-        .eq("portfolio_id", portfolioId).in("dedupe_key", reclassified.slice(i, i + 200));
-    }
-
+    // Write the real transactions FIRST, before touching anything already in the database. A batch
+    // failure here — a bad row, a transient network error, a future NOT-NULL column added the same
+    // way `drip` was — must leave existing history exactly as it was. Deleting the old "opening
+    // balance" lot and then discovering the replacement can't be written is how one bad row destroys
+    // an account's entire recorded history; this exact sequence did that on a real account.
+    //
+    // A genuine UPSERT (merge on conflict), not ignoreDuplicates: a row whose classification changed
+    // since the last sync (e.g. a reinvestment corrected from "dividend" to "buy") overwrites the
+    // stale row under the same dedupe_key in place. That removes the separate delete-before-insert
+    // step this used to need for a reclassified row — a step that was itself part of the destructive
+    // sequence, since it deleted before knowing the replacement would actually be written.
     for (let i = 0; i < rows.length; i += 500) {
+      const batch = rows.slice(i, i + 500);
+      try {
+        assertUniformRowShape(batch, "equity upsert");
+      } catch (e) {
+        return { count: 0, error: e instanceof Error ? e.message : String(e) };
+      }
       const { error } = await admin.from("transactions")
-        .upsert(rows.slice(i, i + 500), { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true });
+        .upsert(batch, { onConflict: "portfolio_id,dedupe_key" });
       if (error) return { count: 0, error: `equity upsert: ${error.message}` };
     }
+
+    // Only now, with the real transactions safely written, replace the synthetic scaffolding around
+    // them: the "opening balance" reconciliation lot (recomputed below) and any stale no-activity
+    // snapshot for this account. Never before a successful write, and never unconditionally.
+    await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-pos:%");
+    await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-recon:%");
 
     // Reconcile EVERY instrument the trades touched (held + activity-only) to the broker's current
     // shares: held → broker shares; activity-only (fully exited, or a phantom from a wrong exchange)
@@ -308,6 +318,11 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
       });
     }
     if (reconRows.length) {
+      try {
+        assertUniformRowShape(reconRows, "recon insert");
+      } catch (e) {
+        return { count: rows.length, error: e instanceof Error ? e.message : String(e) };
+      }
       const { error } = await admin.from("transactions").insert(reconRows);
       if (error) return { count: rows.length, error: `recon: ${error.message}` };
     }
@@ -436,15 +451,17 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
       optionLegs += await importOptionLegs(portfolioId, act.optionLegs, "snaptrade-act", "accumulate");
 
       // Real dated equity history (buys/sells/dividends) + reconciliation to the broker snapshot.
+      // `equityFromActivities` means ONE thing: did the provider give us real dated history for
+      // this account. It must never also mean "did writing it succeed" — that conflation is exactly
+      // what turned a write failure into data loss. On error below, holdings simply isn't bumped for
+      // this account this sync; nothing existing is touched, and the next sync retries from a clean
+      // slate. The snapshot fallback later in this function is reserved for the genuine case: no
+      // activity history exists at all, not "it exists but couldn't be written this time".
       equityFromActivities = act.equityRows > 0;
       if (equityFromActivities) {
         const eq = await importEquityHistory(portfolioId, act.equityTxns, heldByInst, heldTickers, brokerIsCrypto);
         holdings += eq.count;
-        if (eq.error) {
-          // Don't lose the account's holdings on an import error — surface it and fall back to the snapshot.
-          debug.push(`${acctLabel}: equity import error — ${eq.error}`);
-          equityFromActivities = false;
-        }
+        if (eq.error) debug.push(`${acctLabel}: equity import error — ${eq.error}`);
       }
       // How this broker actually shapes its DIVIDEND rows. Shown only in the owner's own sync
       // panel, never logged — it is the evidence for telling a reinvestment from a payout.
@@ -454,14 +471,23 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     // Equity snapshot FALLBACK — only when the activity feed gave us no real equity history. A
     // synthetic "today" buy at the broker's cost basis, snapshot-refreshed each sync.
     if (!equityFromActivities) {
-      await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-pos:%");
       const rows = [...heldByInst.entries()].map(([instId, h]) => ({
         portfolio_id: portfolioId, instrument_id: instId, type: "buy",
         quantity: h.shares, price: h.avgCost, fees: 0, currency: h.currency, executed_at: today,
         dedupe_key: `ref:snaptrade-pos:${account.id}:${h.symbol}`,
+        drip: false, note: null as string | null,
       }));
-      if (rows.length) await admin.from("transactions").insert(rows);
-      holdings += rows.length;
+      if (rows.length) {
+        try {
+          assertUniformRowShape(rows, "pos snapshot insert");
+          await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-pos:%");
+          const { error } = await admin.from("transactions").insert(rows);
+          if (error) debug.push(`${acctLabel}: pos snapshot insert error — ${error.message}`);
+          else holdings += rows.length;
+        } catch (e) {
+          debug.push(`${acctLabel}: pos snapshot insert error — ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
     }
 
     if (provider.getOptionPositions) {

@@ -18,6 +18,7 @@ import {
 } from "@/lib/import/csv";
 import type { ImportResult } from "@/lib/import/types";
 import { isValidYmd, todayIso } from "@/lib/date";
+import { assertUniformRowShape } from "@/lib/supabase/rowShape";
 
 // Get the user's default portfolio, creating one on first use.
 export async function ensurePortfolio() {
@@ -248,6 +249,14 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
 
   let imported = 0;
   if (toInsert.length) {
+    try {
+      assertUniformRowShape(toInsert, "CSV import");
+    } catch (e) {
+      return {
+        imported: 0, duplicates: 0, failed: rows.length, total: rows.length,
+        errors: [...errors, { line: 0, message: e instanceof Error ? e.message : String(e) }],
+      };
+    }
     const { data: inserted, error } = await supabase
       .from("transactions")
       .upsert(toInsert, { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true })
