@@ -44,7 +44,14 @@ export default function LoginPage() {
     setMsg(null);
     const supabase = createClient();
     if (mode === "signup") {
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      // These land in auth.users.raw_user_meta_data, where the handle_new_user trigger reads them
+      // into consent_log — the durable record that the age/Terms/Privacy checkbox was actually
+      // checked for this specific signup, not just that an account exists.
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { min_age_confirmed: true, agreed_terms_and_privacy: true } },
+      });
       if (error) {
         // Don't leak whether an email is already registered (account enumeration). Surface a
         // generic, actionable message for the common "already registered" case; show real errors

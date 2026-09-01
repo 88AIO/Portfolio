@@ -12,11 +12,32 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now()
 );
 
+-- 1b. CONSENT LOG — evidence that the signup age/Terms/Privacy attestation happened.
+-- The signup checkbox (app/login/page.tsx) already blocks submission until it's checked; this is
+-- what proves it afterward — a DSAR reply, a regulator inquiry, or a dispute needs a record that
+-- survives, not just a client-side gate. Append-only: one row per signup, written by the same
+-- trigger that creates the profile, from the flags the client passed into signUp()'s options.data
+-- (so it's tied to that specific attestation, not just "an account was created at time T").
+create table if not exists public.consent_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  min_age_confirmed boolean not null default false,
+  agreed_terms_and_privacy boolean not null default false,
+  agreed_at timestamptz not null default now()
+);
+
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
   insert into public.profiles (id, display_name)
   values (new.id, coalesce(new.raw_user_meta_data->>'display_name', split_part(new.email,'@',1)));
+  insert into public.consent_log (user_id, min_age_confirmed, agreed_terms_and_privacy, agreed_at)
+  values (
+    new.id,
+    coalesce((new.raw_user_meta_data->>'min_age_confirmed')::boolean, false),
+    coalesce((new.raw_user_meta_data->>'agreed_terms_and_privacy')::boolean, false),
+    new.created_at
+  );
   return new;
 end; $$;
 
@@ -460,6 +481,7 @@ where l.sold_contracts > 0;
 -- ROW LEVEL SECURITY
 -- ============================================================
 alter table public.profiles     enable row level security;
+alter table public.consent_log  enable row level security;
 alter table public.portfolios   enable row level security;
 alter table public.categories   enable row level security;
 alter table public.transactions enable row level security;
@@ -476,6 +498,11 @@ alter table public.portfolio_splits enable row level security;
 -- at scale. Keep new policies wrapped the same way.
 drop policy if exists "own profile" on public.profiles;
 create policy "own profile" on public.profiles for all using ((select auth.uid()) = id) with check ((select auth.uid()) = id);
+
+-- Read-only: the row is evidence of what was attested, not a setting to edit. Written only by the
+-- handle_new_user trigger (security definer), so no insert/update/delete policy is needed.
+drop policy if exists "own consent_log read" on public.consent_log;
+create policy "own consent_log read" on public.consent_log for select using ((select auth.uid()) = user_id);
 
 drop policy if exists "own portfolios" on public.portfolios;
 create policy "own portfolios" on public.portfolios for all using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);

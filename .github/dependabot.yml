@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # Patch/minor bumps land as one PR instead of dozens; a major bump (more likely to break
+      # something) still gets its own PR to review on its own.
+      dev-dependencies:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+      production-dependencies:
+        dependency-type: "production"
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
