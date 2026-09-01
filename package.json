@@ -12,14 +12,14 @@
     "verify:eodhd": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-eodhd.mjs"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.12.4",
+    "@supabase/ssr": "^0.12.5",
     "@supabase/supabase-js": "^2.111.0",
-    "next": "16.2.12",
-    "papaparse": "^5.6.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "next": "16.3.3",
+    "papaparse": "^5.7.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "recharts": "^3.10.1",
-    "snaptrade-typescript-sdk": "^12.1.2",
+    "snaptrade-typescript-sdk": "^12.1.12",
     "yahoo-finance2": "^4.0.2"
   },
   "devDependencies": {
