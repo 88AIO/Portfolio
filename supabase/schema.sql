@@ -203,8 +203,13 @@ create index if not exists instrument_splits_instrument_idx on public.instrument
 -- 6x), and Postgres has no built-in product. The obvious exp(sum(ln(x))) trick returns a float
 -- with rounding dust — 4.000000000000001 shares is not a share count anyone should see — so this
 -- multiplies numerics exactly instead.
+-- search_path pinned empty: closes the Supabase security-advisor "function search_path mutable"
+-- lint. Harmless here either way (a * b resolves through pg_catalog regardless), but cheap to fix.
+-- The product() aggregate below can't take the same fix directly (Postgres rejects `alter function`
+-- on an aggregate) — it's not independently exploitable since sfunc is bound to numeric_mul's OID
+-- at creation time, not looked up by name per call, so pinning numeric_mul secures both.
 create or replace function public.numeric_mul(a numeric, b numeric)
-  returns numeric language sql immutable strict as $$ select a * b $$;
+  returns numeric language sql immutable strict set search_path = '' as $$ select a * b $$;
 drop aggregate if exists public.product(numeric) cascade;
 create aggregate public.product(numeric) (
   sfunc = public.numeric_mul,
