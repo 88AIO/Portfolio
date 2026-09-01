@@ -194,7 +194,11 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     type Row = {
       portfolio_id: string; instrument_id: string; type: string; quantity: number; price: number;
       fees: number; currency: string; executed_at: string; dedupe_key: string; note?: string;
-      drip?: boolean;
+      // REQUIRED, not optional. `drip` is NOT NULL in the schema, and PostgREST unions the columns
+      // across a batch insert: if one row carries the key and another omits it, the omitted ones
+      // are sent as NULL rather than falling back to the default, and the whole batch is rejected.
+      // One DRIP row was enough to fail an entire account's equity import.
+      drip: boolean;
     };
     // Dedupe rows by dedupe_key: SnapTrade can emit several legs sharing one reference id, and a
     // single INSERT … ON CONFLICT cannot touch the same key twice — one dup would fail the whole batch.
@@ -241,7 +245,8 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
         portfolio_id: portfolioId, instrument_id: instId, type: tx.txnType,
         quantity: tx.quantity, price: tx.price, fees: Number.isFinite(tx.fee) ? tx.fee : 0,
         currency: tx.currency, executed_at: tx.tradeDate, dedupe_key: dk,
-        ...(tx.drip ? { drip: true, note: "Dividend reinvestment" } : {}),
+        drip: !!tx.drip,
+        ...(tx.drip ? { note: "Dividend reinvestment" } : {}),
       });
       // Rows the provider fix reclassified: they already exist as dividend income under this exact
       // key from an earlier sync, and the upsert below ignores duplicates, so the stale row would
@@ -298,6 +303,7 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
         fees: 0, currency: held?.currency ?? meta?.currency ?? "USD",
         executed_at: earliestByInst.get(instId) ?? earliestOverall ?? today,
         dedupe_key: `ref:snaptrade-recon:${instId}`,
+        drip: false,
         note: held ? "Opening balance (reconciled to broker)" : "Adjustment (no longer held)",
       });
     }
