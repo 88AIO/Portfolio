@@ -440,6 +440,9 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
           equityFromActivities = false;
         }
       }
+      // How this broker actually shapes its DIVIDEND rows. Shown only in the owner's own sync
+      // panel, never logged — it is the evidence for telling a reinvestment from a payout.
+      if (act.divShape) debug.push(`${acctLabel}: ${act.divShape}`);
     }
 
     // Equity snapshot FALLBACK — only when the activity feed gave us no real equity history. A

@@ -75,6 +75,8 @@ export type BrokerActivitiesResult = {
   equityRows: number; // rows that were equity buys/sells/dividends
   error?: string; // set when the provider call threw / was rejected
   shape?: string; // debug: top-level response keys when the feed came back empty (to spot a mis-read)
+  /** debug: how the feed actually shapes DIVIDEND rows, so reinvestments can be told from payouts. */
+  divShape?: string;
 };
 
 // (BrokerOptionActivityResult removed — getActivities now returns options + equity together.)

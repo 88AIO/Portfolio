@@ -277,6 +277,10 @@ export const snaptradeProvider: BrokerSyncProvider = {
     let optionRows = 0;
     let equityRows = 0;
     let shape: string | undefined;
+    // How the feed shapes its DIVIDEND rows. A reinvestment is told from a payout by sign and
+    // units, and assuming E*TRADE's own negative amount survives SnapTrade's normalization was a
+    // guess — this reports what actually arrives, to the owner's own screen, so it stops being one.
+    const divShape = { rows: 0, neg: 0, withUnits: 0, withPrice: 0, samples: [] as string[] };
     try {
       // Page through the account's activities. SnapTrade paginates via offset/limit and returns
       // { data: UniversalActivity[] } per page. Each row is either an option event (option_symbol
@@ -296,13 +300,33 @@ export const snaptradeProvider: BrokerSyncProvider = {
             const leg = normalizeSnaptradeActivity(r);
             if (leg) optionLegs.push(leg);
           } else {
+            const a = (r ?? {}) as Record<string, unknown>;
+            if (String(a.type ?? "").toUpperCase().replace(/[\s_]/g, "") === "DIVIDEND") {
+              const amt = toNum(a.amount);
+              const u = toNum(a.units);
+              const px = toNum(a.price);
+              divShape.rows++;
+              if (amt != null && amt < 0) divShape.neg++;
+              if (u != null && u !== 0) divShape.withUnits++;
+              if (px != null && px !== 0) divShape.withPrice++;
+              if (divShape.samples.length < 4) {
+                divShape.samples.push(
+                  `${extractTicker(a.symbol) ?? "?"} amt=${amt ?? "-"} units=${u ?? "-"} px=${px ?? "-"} desc=${String(a.description ?? "").slice(0, 40)}`
+                );
+              }
+            }
             const tx = normalizeEquityActivity(r);
             if (tx) { equityRows++; equityTxns.push(tx); }
           }
         }
         if (rows.length < limit) break; // last page
       }
-      return { optionLegs, equityTxns, scanned, optionRows, equityRows, shape };
+      return {
+        optionLegs, equityTxns, scanned, optionRows, equityRows, shape,
+        divShape: divShape.rows
+          ? `div ${divShape.rows} rows · neg ${divShape.neg} · units ${divShape.withUnits} · px ${divShape.withPrice}${divShape.samples.length ? ` · ${divShape.samples.join(" | ")}` : ""}`
+          : undefined,
+      };
     } catch (e) {
       return { optionLegs, equityTxns, scanned, optionRows, equityRows, error: String((e as { message?: string })?.message ?? e).slice(0, 200) };
     }
