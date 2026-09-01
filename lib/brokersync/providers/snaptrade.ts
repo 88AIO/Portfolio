@@ -10,7 +10,7 @@ import { normalizeSnaptradeActivity, normalizeSnaptradeOptionPosition, isOptionP
 // the SAME ticker/exchange extractors as positions, so the resulting instrument matches the holding
 // snapshot (critical for share reconciliation). Only BUY / SELL / DIVIDEND are taken; cash movements,
 // transfers, fees and interest are left out (a transfer-in is handled later by share reconciliation).
-function normalizeEquityActivity(raw: unknown): BrokerEquityTxn | null {
+export function normalizeEquityActivity(raw: unknown): BrokerEquityTxn | null {
   if (!raw || typeof raw !== "object") return null;
   const a = raw as Record<string, unknown>;
   if (a.option_symbol) return null; // options handled elsewhere
@@ -34,10 +34,26 @@ function normalizeEquityActivity(raw: unknown): BrokerEquityTxn | null {
   const ref = String(a.id ?? a.external_reference_id ?? `${symbol}:${txnType}:${tradeDate}:${units ?? amount ?? ""}`);
 
   if (txnType === "dividend") {
-    // Store the whole cash amount as a single-"share" dividend row (quantity 1 × price = amount),
-    // so the positions view's div_paid picks it up as real dividend income.
-    const cash = Math.abs(amount ?? 0);
-    if (cash <= 0) return null;
+    const cash = amount ?? 0;
+    const units = toNum(a.units);
+    const shares = units != null ? Math.abs(units) : 0;
+
+    // A REINVESTMENT is filed under the same DIVIDEND activity type as the payment that funded it,
+    // but it is the opposite thing: the cash leaving again to buy shares. E*TRADE reports it with a
+    // negative amount and the units purchased, right beside the positive "Qualified Dividend" row.
+    //
+    // Taking Math.abs() of that amount — as this did — turned the outflow into a second helping of
+    // income, so every reinvested payment was counted twice: a $100.45 dividend became $200.83, and
+    // the shares it bought went unrecorded, absorbed later into the broker opening-balance lot.
+    // It is a purchase, and it is a DRIP purchase.
+    if (cash < 0 && shares > 0 && price != null && price > 0) {
+      return { symbol, exchange, name, txnType: "buy", quantity: shares, price, fee, currency, tradeDate, ref, drip: true };
+    }
+
+    // Otherwise it really is cash income. The sign is kept rather than absolute-valued: a negative
+    // amount with no shares is a reversal or clawback, and forcing it positive would book a
+    // correction as extra income.
+    if (cash === 0) return null;
     return { symbol, exchange, name, txnType, quantity: 1, price: cash, fee, currency, tradeDate, ref };
   }
 

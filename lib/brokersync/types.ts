@@ -63,6 +63,8 @@ export type BrokerEquityTxn = {
   currency: string;
   tradeDate: string; // YYYY-MM-DD
   ref: string; // stable broker/SnapTrade activity id, for idempotent dedupe
+  /** True when this buy was funded by a dividend the broker reinvested. */
+  drip?: boolean;
 };
 
 export type BrokerActivitiesResult = {

@@ -194,10 +194,12 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     type Row = {
       portfolio_id: string; instrument_id: string; type: string; quantity: number; price: number;
       fees: number; currency: string; executed_at: string; dedupe_key: string; note?: string;
+      drip?: boolean;
     };
     // Dedupe rows by dedupe_key: SnapTrade can emit several legs sharing one reference id, and a
     // single INSERT … ON CONFLICT cannot touch the same key twice — one dup would fail the whole batch.
     const byKey = new Map<string, Row>();
+    const reclassified: string[] = [];
     const computedByInst = new Map<string, number>();
     const earliestByInst = new Map<string, string>();
     const metaByInst = new Map<string, { firstPrice: number; currency: string }>();
@@ -239,7 +241,12 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
         portfolio_id: portfolioId, instrument_id: instId, type: tx.txnType,
         quantity: tx.quantity, price: tx.price, fees: Number.isFinite(tx.fee) ? tx.fee : 0,
         currency: tx.currency, executed_at: tx.tradeDate, dedupe_key: dk,
+        ...(tx.drip ? { drip: true, note: "Dividend reinvestment" } : {}),
       });
+      // Rows the provider fix reclassified: they already exist as dividend income under this exact
+      // key from an earlier sync, and the upsert below ignores duplicates, so the stale row would
+      // outlive the fix. Collect them to clear first.
+      if (tx.drip) reclassified.push(dk);
       if (tx.txnType === "buy") computedByInst.set(instId, (computedByInst.get(instId) ?? 0) + tx.quantity);
       else if (tx.txnType === "sell") computedByInst.set(instId, (computedByInst.get(instId) ?? 0) - tx.quantity);
       if (tx.txnType !== "dividend") {
@@ -258,6 +265,13 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     const delPos = await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-pos:%");
     if (delPos.error) return { count: 0, error: `del pos: ${delPos.error.message}` };
     await admin.from("transactions").delete().eq("portfolio_id", portfolioId).like("dedupe_key", "ref:snaptrade-recon:%");
+
+    // Clear rows whose classification changed before re-inserting them. Only these keys — the
+    // accumulated real trades are otherwise never deleted, so history persists.
+    for (let i = 0; i < reclassified.length; i += 200) {
+      await admin.from("transactions").delete()
+        .eq("portfolio_id", portfolioId).in("dedupe_key", reclassified.slice(i, i + 200));
+    }
 
     for (let i = 0; i < rows.length; i += 500) {
       const { error } = await admin.from("transactions")
