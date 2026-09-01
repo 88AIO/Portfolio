@@ -69,6 +69,7 @@ create table if not exists public.portfolios (
   created_at timestamptz not null default now()
 );
 create index if not exists portfolios_user_idx on public.portfolios(user_id);
+create index if not exists portfolios_parent_portfolio_idx on public.portfolios(parent_portfolio_id);
 
 -- 3. CATEGORIES (custom grouping, Snowball: useCategories) -----
 create table if not exists public.categories (
@@ -78,6 +79,7 @@ create table if not exists public.categories (
   target_percent numeric,
   "order" int not null default 0
 );
+create index if not exists categories_portfolio_idx on public.categories(portfolio_id);
 
 -- 4. INSTRUMENTS (shared reference + fundamentals + div info) --
 -- LIVE columns: symbol/exchange/name/currency/type (insert), sector/sector_weights/country_iso
@@ -141,6 +143,7 @@ alter table public.transactions add column if not exists drip boolean not null d
 create index if not exists tx_portfolio_idx on public.transactions(portfolio_id);
 -- The holding-detail page and delete guards filter by instrument_id (also serves the FK side).
 create index if not exists tx_instrument_idx on public.transactions(instrument_id);
+create index if not exists transactions_category_idx on public.transactions(category_id);
 -- Idempotent imports: the same transaction never inserts twice within a portfolio.
 -- (NULL keys are distinct in Postgres, so legacy rows without a key are unaffected.)
 create unique index if not exists transactions_dedupe_uidx
@@ -238,6 +241,9 @@ create table if not exists public.portfolio_splits (
 );
 create index if not exists portfolio_splits_lookup_idx
   on public.portfolio_splits(portfolio_id, instrument_id);
+-- instrument_id above is the composite index's second column, so it doesn't cover the FK on its
+-- own (cascade deletes on instruments would seq-scan this table without it).
+create index if not exists portfolio_splits_instrument_idx on public.portfolio_splits(instrument_id);
 
 -- 7b. OPTION TRANSACTIONS (options-selling layer O1) ----------
 -- Sold puts/calls, the wheel, rolls. Underlying = instrument_id.
@@ -264,6 +270,7 @@ create table if not exists public.option_transactions (
 );
 create index if not exists opt_tx_portfolio_idx on public.option_transactions(portfolio_id);
 create index if not exists opt_tx_instrument_idx on public.option_transactions(instrument_id);
+create index if not exists option_transactions_linked_txn_idx on public.option_transactions(linked_txn_id);
 create unique index if not exists option_transactions_dedupe_uidx
   on public.option_transactions(portfolio_id, dedupe_key);
 
@@ -464,38 +471,41 @@ alter table public.dividends    enable row level security;
 alter table public.instrument_splits enable row level security;
 alter table public.portfolio_splits enable row level security;
 
+-- auth.<fn>() calls below are wrapped in (select ...): otherwise Postgres re-evaluates them per
+-- row instead of once per query (the auth_rls_initplan advisor lint) — same access rules, cheaper
+-- at scale. Keep new policies wrapped the same way.
 drop policy if exists "own profile" on public.profiles;
-create policy "own profile" on public.profiles for all using (auth.uid() = id) with check (auth.uid() = id);
+create policy "own profile" on public.profiles for all using ((select auth.uid()) = id) with check ((select auth.uid()) = id);
 
 drop policy if exists "own portfolios" on public.portfolios;
-create policy "own portfolios" on public.portfolios for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own portfolios" on public.portfolios for all using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 drop policy if exists "own categories" on public.categories;
 create policy "own categories" on public.categories for all using (
-  exists (select 1 from public.portfolios p where p.id = categories.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = categories.portfolio_id and p.user_id = (select auth.uid()))
 ) with check (
-  exists (select 1 from public.portfolios p where p.id = categories.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = categories.portfolio_id and p.user_id = (select auth.uid()))
 );
 
 drop policy if exists "own transactions" on public.transactions;
 create policy "own transactions" on public.transactions for all using (
-  exists (select 1 from public.portfolios p where p.id = transactions.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = transactions.portfolio_id and p.user_id = (select auth.uid()))
 ) with check (
-  exists (select 1 from public.portfolios p where p.id = transactions.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = transactions.portfolio_id and p.user_id = (select auth.uid()))
 );
 
 drop policy if exists "own portfolio_splits" on public.portfolio_splits;
 create policy "own portfolio_splits" on public.portfolio_splits for all using (
-  exists (select 1 from public.portfolios p where p.id = portfolio_splits.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = portfolio_splits.portfolio_id and p.user_id = (select auth.uid()))
 ) with check (
-  exists (select 1 from public.portfolios p where p.id = portfolio_splits.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = portfolio_splits.portfolio_id and p.user_id = (select auth.uid()))
 );
 
 drop policy if exists "own option_transactions" on public.option_transactions;
 create policy "own option_transactions" on public.option_transactions for all using (
-  exists (select 1 from public.portfolios p where p.id = option_transactions.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = option_transactions.portfolio_id and p.user_id = (select auth.uid()))
 ) with check (
-  exists (select 1 from public.portfolios p where p.id = option_transactions.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = option_transactions.portfolio_id and p.user_id = (select auth.uid()))
 );
 
 -- Shared reference data: read-only to clients; writes via service role.
@@ -510,18 +520,18 @@ create policy "read own instruments" on public.instruments for select using (
   exists (
     select 1 from public.transactions t
     join public.portfolios p on p.id = t.portfolio_id
-    where t.instrument_id = instruments.id and p.user_id = auth.uid()
+    where t.instrument_id = instruments.id and p.user_id = (select auth.uid())
   )
   or exists (
     select 1 from public.option_transactions ot
     join public.portfolios p on p.id = ot.portfolio_id
-    where ot.instrument_id = instruments.id and p.user_id = auth.uid()
+    where ot.instrument_id = instruments.id and p.user_id = (select auth.uid())
   )
 );
 drop policy if exists "read prices" on public.price_cache;
-create policy "read prices" on public.price_cache for select using (auth.role() = 'authenticated');
+create policy "read prices" on public.price_cache for select using ((select auth.role()) = 'authenticated');
 drop policy if exists "read price_history" on public.price_history;
-create policy "read price_history" on public.price_history for select using (auth.role() = 'authenticated');
+create policy "read price_history" on public.price_history for select using ((select auth.role()) = 'authenticated');
 
 -- Cached FX (usd_rate = value of 1 unit of `quote` in USD), refreshed by the nightly sync so pages
 -- never call a live FX provider at render time. Authenticated read only; service role writes.
@@ -532,11 +542,11 @@ create table if not exists public.fx_rates (
 );
 alter table public.fx_rates enable row level security;
 drop policy if exists "read fx_rates" on public.fx_rates;
-create policy "read fx_rates" on public.fx_rates for select using (auth.role() = 'authenticated');
+create policy "read fx_rates" on public.fx_rates for select using ((select auth.role()) = 'authenticated');
 drop policy if exists "read dividends" on public.dividends;
-create policy "read dividends" on public.dividends for select using (auth.role() = 'authenticated');
+create policy "read dividends" on public.dividends for select using ((select auth.role()) = 'authenticated');
 drop policy if exists "read instrument_splits" on public.instrument_splits;
-create policy "read instrument_splits" on public.instrument_splits for select using (auth.role() = 'authenticated');
+create policy "read instrument_splits" on public.instrument_splits for select using ((select auth.role()) = 'authenticated');
 
 -- ============================================================
 -- 8. BROKER SYNC (SnapTrade) — see docs/SPEC_broker-sync.md
@@ -563,6 +573,7 @@ create table if not exists public.broker_accounts (
   created_at timestamptz not null default now(),
   unique (user_id, provider, provider_account_id)
 );
+create index if not exists broker_accounts_portfolio_idx on public.broker_accounts(portfolio_id);
 
 alter table public.broker_connections enable row level security;
 alter table public.broker_accounts    enable row level security;
@@ -570,7 +581,7 @@ alter table public.broker_accounts    enable row level security;
 -- broker_connections holds a secret: RLS on with NO policies -> only the service role can touch it.
 -- broker_accounts has no secrets: the owner may read (list) their connected accounts; writes via service role.
 drop policy if exists "own broker_accounts read" on public.broker_accounts;
-create policy "own broker_accounts read" on public.broker_accounts for select using (auth.uid() = user_id);
+create policy "own broker_accounts read" on public.broker_accounts for select using ((select auth.uid()) = user_id);
 
 -- Balance/category capture (so cash/deposit accounts like Chase route to the cash ledger).
 alter table public.broker_accounts add column if not exists account_category text;
@@ -601,9 +612,9 @@ create unique index if not exists cash_ledger_dedupe_uidx on public.cash_ledger(
 alter table public.cash_ledger enable row level security;
 drop policy if exists "own cash_ledger" on public.cash_ledger;
 create policy "own cash_ledger" on public.cash_ledger for all using (
-  exists (select 1 from public.portfolios p where p.id = cash_ledger.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = cash_ledger.portfolio_id and p.user_id = (select auth.uid()))
 ) with check (
-  exists (select 1 from public.portfolios p where p.id = cash_ledger.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = cash_ledger.portfolio_id and p.user_id = (select auth.uid()))
 );
 
 -- Immutable daily value record per account (base currency), written by the nightly sync + on manual
@@ -621,7 +632,7 @@ create table if not exists public.portfolio_value_history (
 alter table public.portfolio_value_history enable row level security;
 drop policy if exists "read own portfolio value history" on public.portfolio_value_history;
 create policy "read own portfolio value history" on public.portfolio_value_history for select using (
-  exists (select 1 from public.portfolios p where p.id = portfolio_value_history.portfolio_id and p.user_id = auth.uid())
+  exists (select 1 from public.portfolios p where p.id = portfolio_value_history.portfolio_id and p.user_id = (select auth.uid()))
 );
 
 -- ============================================================
@@ -637,7 +648,7 @@ create table if not exists public.notification_prefs (
 alter table public.notification_prefs enable row level security;
 drop policy if exists "own notification_prefs" on public.notification_prefs;
 create policy "own notification_prefs" on public.notification_prefs for all
-  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 -- Idempotency log so a daily alert cron never emails the same event twice.
 -- Service-role only (RLS on, no client policies).
@@ -667,7 +678,7 @@ create table if not exists public.iv_history (
 
 alter table public.iv_history enable row level security;
 drop policy if exists "read iv_history" on public.iv_history;
-create policy "read iv_history" on public.iv_history for select using (auth.role() = 'authenticated');
+create policy "read iv_history" on public.iv_history for select using ((select auth.role()) = 'authenticated');
 
 -- ============================================================
 -- 12. SYNC RUNS — one row per cron invocation (observability)
