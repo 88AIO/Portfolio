@@ -187,3 +187,61 @@ test("without a ref, identical trades collapse and different ones do not", () =>
     );
   }
 });
+
+// --- Reinvested dividends ------------------------------------------------------------------------
+//
+// Broker sync is owner-only, so for everyone else the CSV is the only way a reinvestment enters the
+// ledger. It has to survive the trip.
+
+test("a Dividend Reinvestment row imports as a purchase, not as income", () => {
+  // Previously rejected outright: "Dividend Reinvestment" is not in the type alias table, so the
+  // row failed as an unknown type and the shares never arrived.
+  const { rows, errors } = parseTransactionsCsv(
+    "symbol,type,quantity,price,date\nNVDA,Dividend Reinvestment,0.515,194.923,2026-06-26\n"
+  );
+  assert.equal(errors.length, 0, JSON.stringify(errors));
+  assert.equal(rows[0].type, "buy");
+  assert.equal(rows[0].drip, true);
+  assert.equal(rows[0].quantity, 0.515);
+});
+
+test("the description carries it when the type column says only 'dividend'", () => {
+  const { rows } = parseTransactionsCsv(
+    "symbol,type,quantity,price,date,description\nNVDA,dividend,0.515,194.923,2026-06-26,NVIDIA CORPORATION DIVIDEND REINVESTMENT\n"
+  );
+  assert.equal(rows[0].type, "buy", "a purchase, not a second dividend");
+  assert.equal(rows[0].drip, true);
+});
+
+test("an explicit drip column marks a plain buy", () => {
+  const { rows } = parseTransactionsCsv(
+    "symbol,type,quantity,price,date,drip\nKO,buy,1.2,60,2026-06-26,yes\n"
+  );
+  assert.equal(rows[0].type, "buy");
+  assert.equal(rows[0].drip, true);
+});
+
+test("an ordinary dividend is untouched", () => {
+  const { rows } = parseTransactionsCsv(
+    "symbol,type,quantity,price,date\nKO,dividend,100,0.485,2026-06-26\n"
+  );
+  assert.equal(rows[0].type, "dividend");
+  assert.equal(rows[0].drip, false);
+});
+
+test('"dip" in a note does not make a purchase a reinvestment', () => {
+  const { rows } = parseTransactionsCsv(
+    "symbol,type,quantity,price,date,note\nKO,buy,10,60,2026-06-26,bought the dip\n"
+  );
+  assert.equal(rows[0].drip, false);
+});
+
+test("only a purchase can carry the flag", () => {
+  // A dividend row with a stray drip column must not be tagged: the payout is not the buy it funded,
+  // and tagging both would double the reinvested share count anyone reads off the page.
+  const { rows } = parseTransactionsCsv(
+    "symbol,type,quantity,price,date,drip\nKO,dividend,100,0.485,2026-06-26,yes\n"
+  );
+  assert.equal(rows[0].type, "dividend");
+  assert.equal(rows[0].drip, false);
+});

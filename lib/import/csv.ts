@@ -31,6 +31,10 @@ const HEADER_ALIASES: Record<string, string> = {
   notes: "note",
   memo: "note",
   description: "note",
+  drip: "drip",
+  reinvest: "drip",
+  reinvested: "drip",
+  dividendreinvestment: "drip",
   ref: "ref",
   id: "ref",
   reference: "ref",
@@ -53,6 +57,26 @@ const TYPE_ALIASES: Record<string, string> = {
   withdrawal: "withdrawal",
   withdraw: "withdrawal",
 };
+
+// A dividend that was reinvested rather than paid out.
+//
+// Broker exports file it under the dividend type but describe it in words — "DIVIDEND
+// REINVESTMENT" — with the shares bought and the price paid in the quantity/price columns. Read as
+// a dividend it counts the payment twice (once as cash in, once as the reinvestment) and loses the
+// shares; read as a purchase, both come out right.
+//
+// Detection is by the row's own words, never by shape: a normal CSV dividend row legitimately
+// carries quantity and price (shares x rate), so shape alone cannot tell them apart.
+const REINVEST_TEXT = /\b(drip|re-?invest(ed|ment)?)\b/i;
+
+function looksReinvested(typeRaw: string, note: string): boolean {
+  return REINVEST_TEXT.test(typeRaw) || REINVEST_TEXT.test(note);
+}
+
+/** Truthy values people actually put in a spreadsheet column. */
+function parseBoolCell(v: string): boolean {
+  return /^(1|y|yes|true|t|x|drip)$/i.test(v.trim());
+}
 
 // Guardrails so a user-supplied ticker can't create junk instrument rows or drive unbounded
 // provider calls via the service-role client. Tickers are short and use a limited charset
@@ -176,8 +200,18 @@ export function parseTransactionsCsv(text: string): ParseResult {
     }
 
     const rawType = get("type").toLowerCase();
+    const noteCell = get("note");
     let type: string;
-    if (!rawType) {
+    let drip = false;
+
+    // A reinvested dividend is a purchase, and brokers name it in words rather than by shape —
+    // in the type column ("Dividend Reinvestment") or the description. Left alone it either failed
+    // as an unknown type or, when the type mapped to "dividend", booked the reinvestment as a
+    // second helping of income and lost the shares it bought.
+    if (looksReinvested(rawType, noteCell)) {
+      type = "buy";
+      drip = true;
+    } else if (!rawType) {
       // No type column anywhere → a plain holdings list, so "buy" is the sensible reading. But a
       // BLANK cell in a file that DOES declare the column is missing data, and defaulting it
       // invents a purchase the user never made — the kind of wrong number that only surfaces
@@ -195,6 +229,11 @@ export function parseTransactionsCsv(text: string): ParseResult {
       }
       type = mapped;
     }
+
+    // An explicit column wins for anything the wording missed.
+    if (parseBoolCell(get("drip"))) drip = true;
+    // Only a purchase can be a reinvestment; the payout row is the dividend, not the buy it funded.
+    if (type !== "buy") drip = false;
 
     const quantity = toNumber(get("quantity"));
     if (!isFinite(quantity) || quantity <= 0) {
@@ -233,8 +272,9 @@ export function parseTransactionsCsv(text: string): ParseResult {
       fees,
       currency: get("currency").toUpperCase() || null,
       executed_at,
-      note: get("note") || null,
+      note: noteCell || null,
       ref: get("ref") || null,
+      drip,
     });
   });
 

@@ -14,6 +14,7 @@ export type ParsedRow = {
   executed_at: string | null; // YYYY-MM-DD, or null = default to today
   note: string | null;
   ref: string | null; // optional broker trade id (used for dedup when present)
+  drip: boolean; // a purchase funded by a reinvested dividend
 };
 
 export type RowError = { line: number; message: string };

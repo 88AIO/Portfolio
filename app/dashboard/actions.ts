@@ -207,7 +207,7 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
   const toInsert: {
     portfolio_id: string; instrument_id: string; type: string;
     quantity: number; price: number; fees: number; currency: string;
-    executed_at: string; note: string | null; dedupe_key: string;
+    executed_at: string; note: string | null; dedupe_key: string; drip: boolean;
   }[] = [];
 
   // Two genuinely-identical fills with no broker ref (same symbol/qty/price/day/fees) share one
@@ -242,6 +242,7 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
       executed_at,
       note: r.note,
       dedupe_key,
+      drip: r.drip,
     });
   }
 
