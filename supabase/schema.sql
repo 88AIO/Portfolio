@@ -723,11 +723,10 @@ alter table public.broker_accounts add column if not exists currency text;
 alter table public.broker_accounts add column if not exists is_cash boolean not null default false;
 -- `raw` used to hold the provider's whole account object "temporarily". That object carries the
 -- FULL account number the row above deliberately truncates to four digits, and this table is
--- client-readable — so the redaction was undone one column over. Nothing ever read it. The column
--- is kept (a deployment still running the older sync would otherwise fail its account update) but
--- nothing writes it any more and any stored payload is cleared. Drop it in a later pass.
-alter table public.broker_accounts add column if not exists raw jsonb;
-update public.broker_accounts set raw = null where raw is not null;
+-- client-readable — so the redaction was undone one column over. Nothing ever read it. The sync
+-- stopped writing it and every stored payload was cleared on 2026-09-11; the column was dropped
+-- once no deployment still ran the older sync. Kept here so an older database loses it too.
+alter table public.broker_accounts drop column if exists raw;
 
 -- ============================================================
 -- 9. CASH LEDGER — manual cash movements (deposits/withdrawals/interest/fees).

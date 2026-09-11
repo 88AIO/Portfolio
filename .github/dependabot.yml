@@ -15,6 +15,21 @@ updates:
         dependency-type: "production"
         update-types: ["minor", "patch"]
 
+    ignore:
+      # Majors held back on purpose. Each entry names its blocker so the reason travels with the
+      # rule; delete the entry once the blocker is gone.
+      # TypeScript 7 fails this repo's CI build (see the closed Dependabot PR for the log).
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # ESLint 10 removed context.getFilename(); the eslint-plugin-react bundled inside
+      # eslint-config-next still calls it, so `npm run lint` crashes before checking a file.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      # Node typings track the floor in package.json `engines`, not the newest Node. Newer typings
+      # would let code compile against APIs that floor (and Vercel's runtime) does not have.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

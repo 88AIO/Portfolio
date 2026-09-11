@@ -56,8 +56,8 @@ Scores are 0–100 per area, **before → after** this pass. "After" assumes the
   HSTS, `poweredByHeader:false`.
 - Account deletion needed only a live cookie; now re-verifies the password.
 - `broker_accounts.raw` persisted the provider's whole account object (full account number) into a
-  client-readable table. Stored payloads cleared and nothing writes it; the column stays until the
-  old sync code is off every deployment.
+  client-readable table. Stored payloads cleared, nothing writes it, and the column was dropped
+  once the fixed sync was the only one deployed.
 - Provider outages looked like clean nights (every method degrades to null). `quotesWritten` is
   counted; the run alerts and `/api/health` goes 503 when it is thin or stale.
 - Snapshots read `positions` unpaginated and wrote USD for every account. Paginated; per-account
@@ -95,10 +95,12 @@ Scores are 0–100 per area, **before → after** this pass. "After" assumes the
 6. **Re-run the deep price-history backfill once** after deploying (`BackfillButton` on the
    Performance page, or `/api/backfill` with the cron secret) so rows older than the nightly window
    share the new split-adjusted, dividend-unadjusted convention.
-7. **Merge or close the 8 Dependabot PRs** — this branch already carries Next 16.3.4 and the minor
-   bumps; the `typescript@7` and `eslint@10` majors are not adopted (the former breaks the build).
-8. **Migrations folder + branch protection on `main`** before the first paying user (CI still
-   auto-deploys red builds today).
+7. ~~Merge or close the 8 Dependabot PRs~~ — done: the React patch merged, the action bumps
+   landed in `ci.yml`, and the `typescript@7` / `eslint@10` / `@types/node` majors are closed with
+   the reason recorded as an ignore rule in `.github/dependabot.yml`.
+8. **Branch protection on `main`** before the first paying user (CI still auto-deploys red builds
+   today). `supabase/migrations/` now records every change applied to production from this audit
+   on; `schema.sql` stays the full picture.
 9. `consent_log` cascades on account deletion — decide whether an anonymised tombstone should
    survive (legal-adjacent; left as is).
 10. Sentry (or similar) — error boundaries now log the digest; nothing ships it anywhere yet.
