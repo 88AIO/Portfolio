@@ -11,7 +11,7 @@ Scores are 0–100 per area, **before → after** this pass. "After" assumes the
 | Area | Before | After | What moved it |
 |---|---:|---:|---|
 | Money-math correctness | 45 | 85 | FIFO cost basis (SQL + TS twin), broker split double-count, dividend-adjusted price history, benchmark coverage guard, ex-date alerts, cushion sign, partial-assignment key, TTM/suspension dividend logic |
-| Security | 70 | 88 | Security headers + CSP, MFA enforced on API routes, timing-safe cron auth, password re-auth on delete, raw broker payload dropped, confirmed-email owner gate, backfill route secret-only, CHECK constraints, RLS tests extended |
+| Security | 70 | 88 | Security headers + CSP, MFA enforced on API routes, timing-safe cron auth, password re-auth on delete, raw broker payload no longer stored, confirmed-email owner gate, backfill route secret-only, CHECK constraints, RLS tests extended |
 | Ops / observability | 55 | 82 | `/api/health` dead-man's switch, provider-outage detection (`quotesWritten`), sync time budget + rotation, `fetchAll` surfaces errors, snapshots paginated + per-account base currency, pruning, `OPS_ALERT_EMAIL`, top-level sync failure record + email |
 | Data integrity / no lock-in | 60 | 85 | Options + cash exports, `account` and `drip` columns on the transactions export, schema CHECK constraints, unpaginated cross-user reads fixed |
 | Forms / UX honesty | 55 | 85 | Validation messages actually reach users (`ActionResult`), NaN/negative/enum validation, no false "Saved.", forms never hang, duplicate-fill message |
@@ -56,7 +56,8 @@ Scores are 0–100 per area, **before → after** this pass. "After" assumes the
   HSTS, `poweredByHeader:false`.
 - Account deletion needed only a live cookie; now re-verifies the password.
 - `broker_accounts.raw` persisted the provider's whole account object (full account number) into a
-  client-readable table. Column dropped.
+  client-readable table. Stored payloads cleared and nothing writes it; the column stays until the
+  old sync code is off every deployment.
 - Provider outages looked like clean nights (every method degrades to null). `quotesWritten` is
   counted; the run alerts and `/api/health` goes 503 when it is thin or stale.
 - Snapshots read `positions` unpaginated and wrote USD for every account. Paginated; per-account

@@ -246,7 +246,7 @@ describe("RLS cross-tenant isolation", { skip }, () => {
       assert.equal(Number(split.cost_basis), 1000);
     } finally {
       await db.from("portfolio_splits").delete().eq("instrument_id", sid);
-      await db.from("transactions").in("instrument_id", [iid, sid]).delete();
+      await db.from("transactions").delete().in("instrument_id", [iid, sid]);
       await db.from("instruments").delete().in("id", [iid, sid]);
     }
   });
