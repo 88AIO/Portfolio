@@ -5,10 +5,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncInstrumentPriceHistory } from "@/lib/marketdata/sync";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
+import { fetchAll } from "@/lib/supabase/paginate";
 
+type Inst = { symbol: string; exchange: string; type: string | null; currency: string | null };
 type Row = {
   instrument_id: string;
-  instruments: { symbol: string; exchange: string; type: string | null; currency: string | null } | null;
+  instruments: Inst | Inst[] | null;
 };
 
 // One-time deep backfill of weekly closing-price history, so the value-over-time chart reaches back
@@ -18,21 +20,32 @@ type Row = {
 export async function backfillHistory(): Promise<{ ok: boolean; message: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!isBrokerSyncOwner(user?.email)) {
+  if (!user?.email_confirmed_at || !isBrokerSyncOwner(user.email)) {
     return { ok: false, message: "Only the account owner can run the history backfill." };
   }
 
   const admin = createAdminClient();
-  const { data: txInsts, error } = await admin
-    .from("transactions")
-    .select("instrument_id, instruments(symbol, exchange, type, currency)");
-  if (error) return { ok: false, message: `Couldn't read holdings: ${error.message}` };
+  // Cross-user with the service role: page past the ~1000-row cap, or instruments beyond it are
+  // silently never backfilled.
+  let txInsts: Row[];
+  try {
+    txInsts = await fetchAll<Row>((from, to) =>
+      admin
+        .from("transactions")
+        .select("instrument_id, instruments(symbol, exchange, type, currency)")
+        .order("instrument_id", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+  } catch (e) {
+    return { ok: false, message: `Couldn't read holdings: ${e instanceof Error ? e.message : String(e)}` };
+  }
 
   // Every instrument in the ledger (held or since-exited — the historical line values positions you
   // held at each past date). Dedupe to one entry per instrument; skip crypto (no reliable weekly feed).
   const byId = new Map<string, { id: string; symbol: string; exchange: string; currency: string | null }>();
-  for (const r of (txInsts ?? []) as unknown as Row[]) {
-    const inst = r.instruments;
+  for (const r of txInsts) {
+    const inst = Array.isArray(r.instruments) ? r.instruments[0] ?? null : r.instruments;
     if (!inst || !r.instrument_id || byId.has(r.instrument_id)) continue;
     if ((inst.type ?? "") === "crypto") continue;
     byId.set(r.instrument_id, { id: r.instrument_id, symbol: inst.symbol, exchange: inst.exchange, currency: inst.currency });

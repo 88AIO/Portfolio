@@ -1,7 +1,7 @@
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncInstrumentPriceHistory } from "@/lib/marketdata/sync";
-import { isBrokerSyncOwner } from "@/lib/brokersync";
+import { fetchAll } from "@/lib/supabase/paginate";
+import { recordSyncRun, isCronAuthorized } from "@/lib/cron";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -11,22 +11,14 @@ export const maxDuration = 300;
 // closes for EVERY instrument that appears in the ledger (held or since-exited — the value-over-time
 // line values positions you held at each past date). Idempotent: re-running only fills gaps.
 //
-// Auth: the CRON_SECRET bearer (automated), OR a signed-in owner (so it can be triggered from the
-// browser without exposing the secret). Owner-gated because it fans out many provider calls.
-async function authorize(request: Request): Promise<boolean> {
-  const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.get("authorization") === `Bearer ${secret}`) return true;
-  try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    return isBrokerSyncOwner(user?.email);
-  } catch {
-    return false;
-  }
-}
-
+// Auth: the CRON_SECRET bearer only. It used to also accept a signed-in owner's cookie, which made
+// it a side-effecting GET reachable from any page the owner happened to be looking at (a hostile
+// link sends the SameSite=Lax cookie and triggers thousands of provider calls). The signed-in path
+// still exists — app/dashboard/performance/actions.ts backfillHistory is a Server Action with the
+// origin check that brings — so nothing was lost by closing this one.
 export async function GET(request: Request) {
-  if (!(await authorize(request))) return new Response("Unauthorized", { status: 401 });
+  if (!isCronAuthorized(request)) return new Response("Unauthorized", { status: 401 });
+  const startedAt = Date.now();
 
   const url = new URL(request.url);
   // ~7 years back by default (covers a 2020 inception); overridable via ?days=.
@@ -35,16 +27,22 @@ export async function GET(request: Request) {
   const admin = createAdminClient();
 
   // Every instrument that appears in the transaction ledger — including fully-exited positions, whose
-  // past value still belongs on the historical line. Join to instruments for the symbol/exchange.
-  const { data: txInsts, error } = await admin
-    .from("transactions")
-    .select("instrument_id, instruments(symbol, exchange, type, currency)");
-  if (error) return new Response(error.message, { status: 500 });
+  // past value still belongs on the historical line. Cross-user with the service role, so page past
+  // the ~1000-row cap: the previous unpaginated read silently skipped every instrument beyond it.
+  type Inst = { symbol: string; exchange: string; type: string | null; currency: string | null };
+  type Row = { instrument_id: string; instruments: Inst | Inst[] | null };
+  const txInsts = await fetchAll<Row>((from, to) =>
+    admin
+      .from("transactions")
+      .select("instrument_id, instruments(symbol, exchange, type, currency)")
+      .order("instrument_id", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 
-  type Row = { instrument_id: string; instruments: { symbol: string; exchange: string; type: string | null; currency: string | null } | null };
   const byId = new Map<string, { id: string; symbol: string; exchange: string; type: string | null; currency: string | null }>();
-  for (const r of (txInsts ?? []) as unknown as Row[]) {
-    const inst = r.instruments;
+  for (const r of txInsts) {
+    const inst = Array.isArray(r.instruments) ? r.instruments[0] ?? null : r.instruments;
     if (!inst || !r.instrument_id || byId.has(r.instrument_id)) continue;
     byId.set(r.instrument_id, { id: r.instrument_id, symbol: inst.symbol, exchange: inst.exchange, type: inst.type, currency: inst.currency });
   }
@@ -68,5 +66,7 @@ export async function GET(request: Request) {
     );
   }
 
-  return Response.json({ backfilled: ok, failed, total: instruments.length, fromDays });
+  const summary = { backfilled: ok, failed, total: instruments.length, fromDays };
+  await recordSyncRun(admin, "backfill", startedAt, summary);
+  return Response.json(summary);
 }
