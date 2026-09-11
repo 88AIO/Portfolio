@@ -1,40 +1,34 @@
-# Handoff — moving the build into Claude Code
+# Handoff — picking this build up in Claude Code
 
-Everything you need is in this folder. Here's how to pick it up in Claude Code.
+`CLAUDE.md` is the brief and the current state; `README.md` is the setup guide. This file is the
+two-minute version of how to resume work.
 
-## 1. One-time setup (~5 min)
-1. Install **Node.js 18+** if you don't have it: https://nodejs.org
-2. Install **Claude Code**:
-   ```bash
-   npm install -g @anthropic-ai/claude-code
-   ```
-   (If the command has changed, see https://docs.claude.com/en/docs/claude-code)
-3. Unzip this project somewhere permanent, then in a terminal:
-   ```bash
-   cd path/to/snowfolio
-   git init && git add -A && git commit -m "Snowfolio starting point"
-   claude
-   ```
-   That launches Claude Code inside the repo. It will automatically read `CLAUDE.md` and know the whole plan.
+## 1. Resume a session
+```bash
+cd path/to/snowfolio
+npm install
+claude
+```
+Claude Code reads `CLAUDE.md` automatically. Tell it what you want changed; it keeps the build green.
 
-## 2. First thing to tell Claude Code
-> "Read CLAUDE.md and docs/API_BLUEPRINT.md, then start Phase 1: the holdings API and full holdings screen. Keep the build green."
+## 2. Run it locally
+- `.env.local` from `.env.local.example` (the example documents every variable).
+- `npm run dev` → http://localhost:3000. Node **20.9+** (Next 16 requires it).
+- `npm test` — offline money-math suite. `npm run lint`, `npx tsc --noEmit`, `npm run build`.
+- `npm run test:rls` — cross-tenant isolation against a real database (CI boots one; locally you
+  need `supabase start` + `psql -f supabase/schema.sql`, or a scratch project).
 
-## 3. Before it can run, do the account setup (see README.md)
-- Create the Supabase project and run `supabase/schema.sql`.
-- Put your keys in `.env.local` (copy `.env.local.example`).
-- Optional: EODHD token for live prices/dividends.
-- `npm install && npm run dev` → http://localhost:3000
+## 3. Deploying a schema change
+`supabase/schema.sql` is re-runnable. After changing it: run the whole file in the Supabase SQL
+editor (or apply it as a migration), then re-run the security and performance advisors.
 
 ## 4. The Cowork ↔ Claude Code loop
-- **Claude Code** = builds the app, runs it, deploys it.
-- **Cowork** (where we've been) = logs into Snowball, captures any endpoint/screen we haven't mapped yet, does research, and drops the result into `docs/`.
-- When Claude Code needs something we don't have a spec for (e.g. the diversification or benchmark endpoint), come back to Cowork, capture it live, and add it to `docs/API_BLUEPRINT.md`.
+- **Claude Code** builds, tests, deploys.
+- **Cowork** captures anything from a logged-in Snowball session that isn't specced yet and drops
+  it into `docs/`. Several strategy docs live only in Cowork — see the list in `CLAUDE.md`.
 
-## What's already done
-- Full 1:1 data model (see `supabase/schema.sql` + `docs/API_BLUEPRINT.md`)
-- Auth, dashboard, holdings basics, dividend income + yield, multi-currency
-- Builds/TypeScript/lint all green
-
-## Still to capture in Cowork (when you build those features)
-Diversification, performance/benchmark chart, in-app dividend calendar, backtest, rebalancing, screener — see the "Still to capture" section in `docs/API_BLUEPRINT.md`.
+## 5. What's live
+Everything in `CLAUDE.md` → "What already exists": auth with optional TOTP 2FA, the full dashboard
+suite (overview, performance with benchmark, dividends, options cockpit + wheel + put finder, cash,
+owner-only broker sync, settings), three nightly/weekly crons with a `sync_runs` record and a
+`/api/health` endpoint, CSV import/export, the marketing site. Pro tier and billing are not built.

@@ -31,15 +31,19 @@ Next.js 16 (App Router) · TypeScript · Supabase (Postgres + Auth) · Tailwind 
 Behind the `lib/marketdata` provider port (**done** — `lib/marketdata/index.ts` + `providers/{yahoo,eodhd}.ts`). Default provider = `yahoo` (free, US incl. options) for personal/dev; switch to `eodhd` via env `MARKET_DATA_PROVIDER` to scale. **Coverage:** EODHD now implements every port method except option chains (quotes, FX, search, price history, dividend history + info, profile, fund breakdown) — see the capability matrix in `README.md`. Options remain Yahoo-only because EODHD sells them as a separate marketplace add-on; `capabilities.options` stays false so the port degrades honestly instead of returning empty boards. App reads cached DB tables; only the nightly sync calls a provider. (MARKET_DATA_ADAPTER / COST_MODEL docs were authored in Cowork and are not in this repo — see the docs index note below; `docs/EFFICIENCY_AUDIT.md` carries the current cost model.)
 
 ## What already exists (current state)
-- Auth (email/password + OAuth-ready), session handling in `proxy.ts`; password reset; self-serve account deletion.
-- `supabase/schema.sql` — v2, modeled on the blueprint: `profiles, portfolios (full config), categories, instruments, transactions, option_transactions, cash_ledger, price_cache, price_history, dividends, instrument_splits, portfolio_splits, fx_rates, iv_history, sync_runs, finder_scans`, plus `positions`/`portfolio_totals`/`option_positions` computed views. RLS throughout; live-vs-reserved columns annotated in the file.
+- Auth (email/password; no OAuth provider wired), optional TOTP 2FA enforced server-side in `proxy.ts` for the app AND the session-authenticated API routes; password reset; self-serve account deletion (re-authenticates with the password); signup age/Terms attestation logged to `consent_log`.
+- `supabase/schema.sql` — v2, modeled on the blueprint: `profiles, consent_log, portfolios (full config), categories, instruments, transactions, option_transactions, cash_ledger, price_cache, price_history, dividends, instrument_splits, portfolio_splits, fx_rates, iv_history, sync_runs, finder_scans, broker_connections, broker_accounts, portfolio_value_history, notification_prefs, sent_notifications`, plus `positions_all`/`positions`/`portfolio_totals`/`option_positions` computed views. RLS throughout; live-vs-reserved columns annotated in the file. CHECK constraints pin the enums and signs the views assume.
+- **Cost basis is FIFO over the lots still held** (positions view + `computeOpenPositions` in `lib/tax/realized.ts` — twins, change both). `realized_gain` on `positions_all` feeds the dashboard's "Total earned". Never reintroduce the buy_value/buy_shares lifetime average: one wheel cycle makes it wrong.
+- `price_history.close` is **split-adjusted, dividend-UNadjusted** (Yahoo `close`; EODHD raw close with `instrument_splits` applied in `syncInstrumentPriceHistory`). The benchmark is therefore price return vs price return. If you ever restore the 7-year backfill after a provider change, re-run it so old rows share the convention.
 - Full dashboard suite: overview, performance (with SPY benchmark + time-range selector), dividends (income received, by-year with projections, calendar, safety), options cockpit + wheel + put finder, cash, broker sync (owner-only), settings. Marketing site + blog/changelog + legal pages.
 - **There is deliberately no tax page.** It was removed after a walkthrough against a live broker: E*TRADE's Gains & Losses reports realized P/L on closed positions INCLUDING options and with wash-sale accounting, while `lib/tax/realized.ts` is FIFO on equities only, models no wash sales and excludes options. The page invited a comparison it could not win, under a heading that invites someone to file from it. **Do not re-add it without reframing** (an estimate, not a tax document). The engine itself stays and is tested — the wheel's per-underlying realized stock P/L and the holding detail page both compute from it.
-- Three Vercel crons (`vercel.json`): nightly market-data sync, daily alerts, weekly digest — each records its run into `sync_runs`.
-- Tests: `npm test` (offline money-math), `npm run test:rls` (cross-tenant isolation; runs in CI when secrets are set).
+- Three Vercel crons (`vercel.json`): nightly market-data sync, daily alerts, weekly digest — each records its run into `sync_runs`; the sync has a time budget with day-rotated ordering, counts `quotesWritten` so a silently-degraded provider is caught, prunes `iv_history`/`sync_runs`/`finder_scans`, and emails `OPS_ALERT_EMAIL` on problems. `/api/health` is the public dead-man's switch (503 when the last sync is stale or thin) — point an uptime monitor at it.
+- Form-facing server actions return `ActionResult` (`lib/actionResult.ts`) rather than throwing: Next redacts thrown messages in production, so a thrown validation error never reached the user.
+- Security headers + CSP in `next.config.ts`; timing-safe `isCronAuthorized` in `lib/cron.ts` guards every cron and the backfill route.
+- Tests: `npm test` (offline money-math incl. the FIFO open-lot twin), `npm run test:rls` (cross-tenant isolation + the positions view's money math, against a throwaway Postgres CI boots itself — no secrets needed).
 - Verified: `npm run build`, `tsc`, and `eslint` all pass.
 
-## Roadmap (wedge-first — see `docs/ROADMAP_v2_wedge-first.md`)
+## Roadmap (wedge-first — the full roadmap doc lives in Cowork; this is the in-repo summary)
 ```
 NOW  — calm holdings + dashboard (Option A), correctness + "prices as of", US-first coverage,
        excellent idempotent CSV/manual import, basic performance (value/total return).
@@ -73,7 +77,8 @@ LATER — advanced analytics (opt-in), rebalancing, US tax report,
 
 ## Strategy & capture docs (docs/)
 In this repo:
-- API_BLUEPRINT.md ............... reverse-engineered Snowball API/data model (the target model above)
+- QC_SCORECARD_2026-09-11.md ...... the hard-QC scorecard (what was fixed, what remains, monetization gates)
+- API_BLUEPRINT.md ............... reverse-engineered Snowball API/data model (the target model above; the only API_* capture in the repo)
 - SPEC_options-selling.md ........ the options-selling PRD (O1/O2/O3)
 - SPEC_broker-sync.md ............ broker auto-sync spec (SnapTrade, per-user flow design)
 - SPEC_broker-sync-etrade-options.md . E*Trade options-import capture notes
@@ -82,6 +87,9 @@ In this repo:
 - EFFICIENCY_AUDIT.md ............ efficiency/cost/sustainability audit (scorecard, cost model, removal candidates w/ approval gates, scale triggers)
 
 Authored in Cowork, **not in this repo** (don't search for them here — ask the owner to export if needed): MARKET_DATA_ADAPTER.md, COST_MODEL.md, ROADMAP_v2_wedge-first.md, COMPETITIVE_BRIEF.md, POSITIONING_where-we-win.md, FEATURES_borrowed-best.md, PRODUCT_NOTES_user-feedback.md, and the other per-endpoint API_*.md captures. The roadmap summary above and EFFICIENCY_AUDIT.md's cost model are the in-repo stand-ins.
+
+## Monetization (not built — gates before the first paid dollar)
+No plan column, no Stripe, no entitlement checks exist. Before charging: licensed market data (Yahoo's terms are non-commercial; EODHD covers everything except option chains), `profiles.plan` + a service-role-only billing table, a Stripe webhook route with event idempotency, hosted checkout + billing portal, a `requirePro()` gate used by the crons too, cancellation on account deletion, Supabase Pro (backups) and branch protection on `main`. The pricing page lists alerts/digest as free — they are; keep it that way or gate before anyone else opts in.
 
 ## Setup
 See `README.md` for Supabase + EODHD + Vercel setup and env vars.

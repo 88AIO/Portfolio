@@ -19,6 +19,8 @@ type TxRow = {
   currency: string | null;
   note: string | null;
   dedupe_key: string | null;
+  drip: boolean | null;
+  portfolio_id: string;
   instruments: InstrumentRef;
 };
 
@@ -44,16 +46,23 @@ export async function GET() {
   // RLS scopes transactions to the user's own portfolios automatically. Page past the ~1000-row
   // cap so a heavy multi-year account gets a COMPLETE export — a truncated file would silently
   // omit the newest trades and rebuild an incomplete portfolio on re-import (breaks "no lock-in").
-  const data = await fetchAll<TxRow>((from, to) =>
-    supabase
-      .from("transactions")
-      .select("executed_at, type, quantity, price, fees, currency, note, dedupe_key, instruments(symbol, exchange)")
-      .order("executed_at", { ascending: true })
-      .order("instrument_id", { ascending: true })
-      .range(from, to),
-  );
+  const [data, { data: pfs }] = await Promise.all([
+    fetchAll<TxRow>((from, to) =>
+      supabase
+        .from("transactions")
+        .select("executed_at, type, quantity, price, fees, currency, note, dedupe_key, drip, portfolio_id, instruments(symbol, exchange)")
+        .order("executed_at", { ascending: true })
+        .order("instrument_id", { ascending: true })
+        .range(from, to),
+    ),
+    supabase.from("portfolios").select("id, name"),
+  ]);
+  const pfName = new Map<string, string>(((pfs ?? []) as { id: string; name: string }[]).map((p) => [p.id, p.name]));
 
-  const headers = ["date", "symbol", "exchange", "type", "quantity", "price", "fees", "currency", "note", "ref"];
+  // `account` and `drip` round-trip: the importer reads `drip` (a reinvested-dividend purchase)
+  // and ignores `account`, which is there so a multi-account ledger can be told apart on the way
+  // out and re-imported by hand into the right one.
+  const headers = ["date", "symbol", "exchange", "type", "quantity", "price", "fees", "currency", "drip", "account", "note", "ref"];
   const rows: CsvValue[][] = (data as TxRow[]).map((t) => {
     const inst = instrumentOf(t.instruments);
     return [
@@ -65,6 +74,8 @@ export async function GET() {
       t.price,
       t.fees,
       t.currency,
+      t.drip ? "yes" : "",
+      pfName.get(t.portfolio_id) ?? "",
       t.note,
       refFromDedupeKey(t.dedupe_key),
     ];

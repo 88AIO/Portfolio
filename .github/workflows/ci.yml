@@ -5,6 +5,15 @@ on:
     branches: [main, "claude/**"]
   pull_request:
 
+# Least privilege: nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch supersedes the run in flight.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,6 +25,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      # `next build` type-checks too, but a bare tsc fails faster and names the file and line
+      # without the build's noise around it.
+      - run: npx tsc --noEmit
       # The offline suite: money math (FIFO tax, option premium, performance, dividends), CSV
       # import/export, provider config and broker normalization. Needs no secrets, and every case
       # in it pins behaviour a real bug once got wrong — so it has to gate the build, not sit

@@ -12,7 +12,7 @@ Strategy, specs, and audits live in `docs/` (see the index in `CLAUDE.md`).
 
 1. **Supabase** account — the database + login system → https://supabase.com
 2. **Vercel** account — hosting + the nightly cron → https://vercel.com
-3. **Node.js 18+** if you want to run it locally first.
+3. **Node.js 20.9+** if you want to run it locally first (Next 16 requires it).
 4. Optional: **Resend** (notification emails), **SnapTrade** (owner-only broker sync), **EODHD** (paid market data — the app defaults to free Yahoo and needs no key).
 
 ---
@@ -31,7 +31,9 @@ Strategy, specs, and audits live in `docs/` (see the index in `CLAUDE.md`).
   - `RESEND_API_KEY` + `EMAIL_FROM` — required for alert/digest emails to send at all.
   - `MARKET_DATA_PROVIDER` (default `yahoo`, no key needed) / `EODHD_API_TOKEN` (only for `eodhd`).
   - `SNAPTRADE_CLIENT_ID` / `SNAPTRADE_CONSUMER_KEY` / `BROKER_SYNC_OWNER_EMAILS` — owner-only broker sync; leave unset to hide the feature.
-  - `NEXT_PUBLIC_SITE_URL` — set once a custom domain is live.
+  - `NEXT_PUBLIC_SITE_URL` — set once a custom domain is live (it is also the canonical URL and the sitemap origin).
+  - `OPS_ALERT_EMAIL` — where sync failure reports go; point a free uptime monitor at `/api/health` too.
+- In **Supabase → Authentication → URL Configuration**, set the Site URL to your domain and add `https://<your-domain>/auth/callback` (plus `http://localhost:3000/auth/callback` for dev) to the redirect allow-list. Sign-up confirmation and password-reset links come back through that route; without it they land on the marketing page with no session.
 
 ### 3. Run it locally
 ```bash
@@ -41,8 +43,8 @@ npm run dev
 Open http://localhost:3000 → sign up → you're in the dashboard. Add a holding (e.g. `AAPL` / `US`), import a CSV, or connect a broker (owner only).
 
 ```bash
-npm test         # offline unit tests (money math)
-npm run test:rls # cross-tenant RLS isolation — needs a real database (see below)
+npm test         # offline unit tests (money math, incl. the FIFO cost-basis twin)
+npm run test:rls # cross-tenant RLS isolation + the positions view's math — needs a real database (see below)
 ```
 
 `test:rls` proves one signed-in user cannot read another's rows. That guarantee lives in Postgres
@@ -81,14 +83,15 @@ Supabase dashboard, only re-running the schema or a periodic audit will catch it
 | Auth session handling | `proxy.ts` (Next 16's middleware) |
 | Dashboard / performance / dividends / options / cash | `app/dashboard/**` |
 | Server actions (add, import, refresh, delete) | `app/dashboard/**/actions.ts` |
-| Scheduled jobs | `app/api/cron/{sync,alerts,digest}` + `vercel.json` |
+| Scheduled jobs | `app/api/cron/{sync,alerts,digest}` + `vercel.json`; `app/api/health` (dead-man's switch), `app/api/backfill` (secret-only deep history) |
+| Exports | `app/api/export/{transactions,options,cash,holdings}` |
 | Market data (provider port: yahoo ⇄ eodhd) | `lib/marketdata/` |
 | Broker sync (SnapTrade, owner-only) | `lib/brokersync/` |
 | Options / wheel / realized-gain / dividend / FX / email engines | `lib/` |
 | Corporate actions (splits) | `lib/corporate/` + `instrument_splits` |
 | Tests | `tests/` |
 
-**Data model:** you record **transactions** (equity, options, cash); current **positions** and option exposure are computed views over that ledger. **Stock splits** are held separately and applied when reading, so your ledger keeps saying exactly what your broker statement says while share counts and cost basis stay correct. The nightly sync fills them in from the data provider; you can add or correct one by hand on a holding's page, and your entry overrides the provider's for your portfolio only. Pages read cached tables (`price_cache`, `fx_rates`, `price_history`, `dividends`); only the nightly cron talks to the market-data vendor.
+**Data model:** you record **transactions** (equity, options, cash); current **positions** and option exposure are computed views over that ledger. Cost basis is first-in-first-out over the shares still held (the SQL view and `lib/tax/realized.ts` are twins), so realized and unrealized gains never overlap. **Stock splits** are held separately and applied when reading, so your ledger keeps saying exactly what your broker statement says while share counts and cost basis stay correct. The nightly sync fills them in from the data provider; you can add or correct one by hand on a holding's page, and your entry overrides the provider's for your portfolio only. Pages read cached tables (`price_cache`, `fx_rates`, `price_history`, `dividends`); only the nightly cron talks to the market-data vendor.
 
 ### Market-data provider coverage
 
