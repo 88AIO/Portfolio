@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
 import BrandMark from "@/components/BrandMark";
 
 // Global error boundary: a calm recovery screen instead of Next's default crash page.
@@ -10,6 +11,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
   // The digest is what matches a user's report to the server-side log line for the same error.
   useEffect(() => {
     console.error("[app] render error", error.digest ?? "", error);
+    Sentry.captureException(error);
   }, [error]);
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 text-slate-800">

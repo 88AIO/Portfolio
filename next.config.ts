@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs/config";
 
 // The Supabase project origin, so the connect-src rule names exactly one host rather than every
 // *.supabase.co project on the internet. Falls back to the wildcard when the env isn't set (e.g. a
@@ -15,19 +16,20 @@ const supabaseSources = supabaseOrigin
   ? `${supabaseOrigin} ${supabaseOrigin.replace(/^http/, "ws")}`
   : "https://*.supabase.co wss://*.supabase.co";
 
-// Content-Security-Policy. The app loads no third-party scripts, so this is nearly a self-only
-// policy. 'unsafe-inline' on script-src is the one concession: Next.js App Router streams its
+// Content-Security-Policy. The app loads no third-party scripts (the Sentry SDK is bundled, not
+// fetched from a CDN), so this is nearly a self-only policy. 'unsafe-inline' on script-src is the one concession: Next.js App Router streams its
 // hydration payload as inline <script> tags and a nonce-based policy would need the middleware to
 // run on every page — it is deliberately narrowed to the app routes (see proxy.ts). Everything
 // else is closed: no framing (clickjacking), no foreign fetch targets for data exfiltration, no
-// plugins, no base-tag hijack, forms post only to us. vercel.live is Vercel's preview toolbar.
+// plugins, no base-tag hijack, forms post only to us. vercel.live is Vercel's preview toolbar;
+// the Sentry ingest host is where error reports go (lib/observability.ts).
 const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'"} https://vercel.live`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  `connect-src 'self' ${supabaseSources} https://vercel.live`,
+  `connect-src 'self' ${supabaseSources} https://vercel.live https://*.ingest.us.sentry.io https://*.ingest.sentry.io`,
   "frame-src https://vercel.live",
   "frame-ancestors 'none'",
   "base-uri 'self'",
@@ -57,4 +59,15 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Sentry's build plugin: adds the runtime hooks and, only when SENTRY_AUTH_TOKEN is set, uploads
+// source maps so stack traces name real files. Without the token the build is unchanged apart
+// from the SDK itself — no warnings, no network calls at build time.
+export default withSentryConfig(nextConfig, {
+  org: "88aio",
+  project: "snowfolio",
+  silent: true,
+  telemetry: false,
+  sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
+  // The nightly sync carries its own cron monitor (app/api/cron/sync/route.ts); the plugin's
+  // per-vercel.json-entry auto-monitors stay off — three would exceed the free plan's quota.
+});

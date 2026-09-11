@@ -34,6 +34,7 @@ Strategy, specs, and audits live in `docs/` (see the index in `CLAUDE.md`).
   - `SNAPTRADE_CLIENT_ID` / `SNAPTRADE_CONSUMER_KEY` / `BROKER_SYNC_OWNER_EMAILS` — owner-only broker sync; leave unset to hide the feature.
   - `NEXT_PUBLIC_SITE_URL` — set once a custom domain is live (it is also the canonical URL and the sitemap origin).
   - `OPS_ALERT_EMAIL` — where sync failure reports go; point a free uptime monitor at `/api/health` too.
+  - Sentry needs nothing: the DSN is committed (`lib/observability.ts`), errors from every runtime report there, and the nightly sync checks in with a Sentry cron monitor that alerts when a night is missed. `SENTRY_DSN` / `SENTRY_AUTH_TOKEN` are optional overrides.
 - In **Supabase → Authentication → URL Configuration**, set the Site URL to your domain and add `https://<your-domain>/auth/callback` (plus `http://localhost:3000/auth/callback` for dev) to the redirect allow-list. Sign-up confirmation and password-reset links come back through that route; without it they land on the marketing page with no session.
 
 ### 3. Run it locally
@@ -86,6 +87,7 @@ Supabase dashboard, only re-running the schema or a periodic audit will catch it
 | Dashboard / performance / dividends / options / cash | `app/dashboard/**` |
 | Server actions (add, import, refresh, delete) | `app/dashboard/**/actions.ts` |
 | Scheduled jobs | `app/api/cron/{sync,alerts,digest}` + `vercel.json`; `app/api/health` (dead-man's switch), `app/api/backfill` (secret-only deep history) |
+| Error reporting | `instrumentation.ts`, `instrumentation-client.ts`, `sentry.*.config.ts`, `lib/observability.ts` (Sentry; no replay, no tracing) |
 | Exports | `app/api/export/{transactions,options,cash,holdings}` |
 | Market data (provider port: yahoo ⇄ eodhd) | `lib/marketdata/` |
 | Broker sync (SnapTrade, owner-only) | `lib/brokersync/` |

@@ -91,7 +91,9 @@ Scores are 0–100 per area, **before → after** this pass. "After" assumes the
 4. **Supabase Auth settings**: minimum password length 8+ and leaked-password check (server-side;
    the forms now say 8), CAPTCHA on sign-in/sign-up, and add `/auth/callback` to the redirect
    allow-list (README documents it).
-5. **Point an uptime monitor at `/api/health`** (free tier of any monitor).
+5. **Point an uptime monitor at `/api/health`** once the site is reachable from outside (today
+   deployment protection turns every outside caller away). Until then the nightly sync's Sentry
+   cron monitor is the outside-in signal: a missed or failed night raises a Sentry alert.
 6. **Re-run the deep price-history backfill once** after deploying (`BackfillButton` on the
    Performance page, or `/api/backfill` with the cron secret) so rows older than the nightly window
    share the new split-adjusted, dividend-unadjusted convention.
@@ -103,7 +105,9 @@ Scores are 0–100 per area, **before → after** this pass. "After" assumes the
    on; `schema.sql` stays the full picture.
 9. `consent_log` cascades on account deletion — decide whether an anonymised tombstone should
    survive (legal-adjacent; left as is).
-10. Sentry (or similar) — error boundaries now log the digest; nothing ships it anywhere yet.
+10. ~~Sentry~~ — done: server, edge, browser and both error boundaries report to the `snowfolio`
+    project (DSN committed; replay and tracing off), and the nightly sync carries a cron monitor.
+    Optional: a `SENTRY_AUTH_TOKEN` in Vercel uploads source maps for readable stack traces.
 
 ## Monetization gates (must exist before the first paid dollar)
 Nothing billing-related exists today and none of it was built here:

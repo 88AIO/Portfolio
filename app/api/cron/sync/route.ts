@@ -17,6 +17,7 @@ import { fetchAll } from "@/lib/supabase/paginate";
 import { takeProviderCallCount } from "@/lib/marketdata";
 import { recordSyncRun, listAllUserEmails, isCronAuthorized, opsAlertEmail } from "@/lib/cron";
 import { sendEmail, emailShell, emailConfig, reportEmailFailure } from "@/lib/email";
+import * as Sentry from "@sentry/nextjs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -31,6 +32,19 @@ export const maxDuration = 300;
 // the run record and the failure email always get their turn before Vercel's wall. A run killed by
 // the platform records nothing — it looks exactly like a night the cron never fired.
 const INSTRUMENT_BUDGET_MS = 230_000;
+
+// Sentry cron monitor. Each run checks in (started → ok/error); Sentry alerts when a check-in is
+// missing or errored — the outside-in "did last night happen at all" signal that /api/health can
+// only answer to a caller, and no outside caller reaches the site while Vercel's deployment
+// protection is on. Schedule and margin mirror vercel.json; Vercel crons can start minutes late.
+const SYNC_MONITOR = {
+  schedule: { type: "crontab", value: "0 6 * * *" },
+  checkinMargin: 60,   // minutes of lateness tolerated before "missed"
+  maxRuntime: 10,      // minutes before an in-progress check-in counts as failed
+  timezone: "UTC",
+  failureIssueThreshold: 1,
+  recoveryThreshold: 1,
+} as const;
 
 type Held = {
   instrument_id: string;
@@ -87,7 +101,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    return await runSync(admin, startedAt, owner);
+    return await Sentry.withMonitor("nightly-sync", () => runSync(admin, startedAt, owner), SYNC_MONITOR);
   } catch (e) {
     // A database read that fails (fetchAll throws) or any other unexpected error must leave a
     // record and a message — the whole point of sync_runs is that a bad night is visible.
