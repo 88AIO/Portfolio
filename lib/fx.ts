@@ -3,6 +3,7 @@
 // non-USD currencies. The nightly sync refreshes the table via syncFxRates().
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getFxRate } from "@/lib/marketdata";
+import { fetchAll } from "@/lib/supabase/paginate";
 
 // Approximate <currency>→USD, used only when a rate is missing from the cache (fresh currency the
 // nightly job hasn't fetched yet). Better than a silent 1.0, which would treat e.g. HKD as USD.
@@ -37,9 +38,13 @@ export async function getCachedRates(
 // Refresh the fx_rates cache from the live provider. Runs in the nightly sync only. Keeps a prior
 // cached value when a lookup fails (never overwrites a good rate with a failed 1.0).
 export async function syncFxRates(admin: SupabaseClient): Promise<number> {
-  const { data } = await admin.from("instruments").select("currency");
-  const held = (data ?? [])
-    .map((r: { currency: string | null }) => (r.currency ?? "USD").toUpperCase())
+  // Shared table, read with the service role — page it, or a currency held only by an instrument
+  // beyond the first ~1000 rows is never refreshed and silently converts at the stale fallback.
+  const data = await fetchAll<{ currency: string | null }>((from, to) =>
+    admin.from("instruments").select("currency").order("id").range(from, to),
+  );
+  const held = data
+    .map((r) => (r.currency ?? "USD").toUpperCase())
     .filter(Boolean);
   const currencies = [...new Set([...held, ...COMMON])];
 

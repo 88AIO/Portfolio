@@ -15,7 +15,7 @@ import { snapshotPortfolioValues } from "@/lib/snapshots";
 import { syncFxRates } from "@/lib/fx";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { takeProviderCallCount } from "@/lib/marketdata";
-import { recordSyncRun, listAllUserEmails } from "@/lib/cron";
+import { recordSyncRun, listAllUserEmails, isCronAuthorized, opsAlertEmail } from "@/lib/cron";
 import { sendEmail, emailShell, emailConfig, reportEmailFailure } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +26,11 @@ export const maxDuration = 300;
 // sector/name enrichment — for every instrument any user holds. This is the architecture the
 // project brief describes: the app reads cached tables; only this scheduled job fans out to the
 // provider. Per-instrument work is isolated so one failure never aborts the run.
+
+// Stop fanning out to the provider this far into the run, so the FX refresh, the value snapshots,
+// the run record and the failure email always get their turn before Vercel's wall. A run killed by
+// the platform records nothing — it looks exactly like a night the cron never fired.
+const INSTRUMENT_BUDGET_MS = 230_000;
 
 type Held = {
   instrument_id: string;
@@ -38,18 +43,17 @@ type Held = {
   type: string | null;
 };
 
-function authorized(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false; // fail closed — require a secret to be configured
-  return request.headers.get("authorization") === `Bearer ${secret}`;
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 }
 
 export async function GET(request: Request) {
-  if (!authorized(request)) return new Response("Unauthorized", { status: 401 });
+  if (!isCronAuthorized(request)) return new Response("Unauthorized", { status: 401 });
 
   const startedAt = Date.now();
   takeProviderCallCount(); // reset the counter so the summary reflects only this run
   const admin = createAdminClient();
+  const owner = opsAlertEmail();
 
   // --- Provider preflight ----------------------------------------------------------------------
   // A provider switch is two environment variables, and getting one of them wrong fails silently:
@@ -58,14 +62,13 @@ export async function GET(request: Request) {
   const configError = providerConfigError();
   if (configError) {
     console.error(`[cron:sync] provider config: ${configError.message}`);
-    const owner = (process.env.BROKER_SYNC_OWNER_EMAILS ?? "").split(",")[0]?.trim();
     if (owner) {
       const res = await sendEmail(
         owner,
         `Snowfolio sync: market-data provider ${configError.fatal ? "misconfigured" : "warning"}`,
         emailShell(
           "Provider configuration",
-          `<p style="margin:0 0 10px;font-size:14px;color:#334155">${configError.message}</p>` +
+          `<p style="margin:0 0 10px;font-size:14px;color:#334155">${escapeHtml(configError.message)}</p>` +
             `<p style="font-size:12px;color:#64748b">${configError.fatal ? "This run was aborted; no data was written or changed." : "The run continued on the fallback provider."}</p>`
         )
       );
@@ -83,34 +86,59 @@ export async function GET(request: Request) {
     }
   }
 
+  try {
+    return await runSync(admin, startedAt, owner);
+  } catch (e) {
+    // A database read that fails (fetchAll throws) or any other unexpected error must leave a
+    // record and a message — the whole point of sync_runs is that a bad night is visible.
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[cron:sync] run failed:", e);
+    await recordSyncRun(admin, "sync", startedAt, { provider: providerName(), error: message, ...emailConfig() }, []);
+    if (owner) {
+      const res = await sendEmail(
+        owner,
+        "Snowfolio sync: run failed",
+        emailShell("Sync failed", `<p style="margin:0 0 10px;font-size:14px;color:#334155">The nightly sync stopped with an error, so prices and dividends were not refreshed.</p><pre style="font-size:12px;background:#f8fafc;padding:10px;border-radius:8px">${escapeHtml(message)}</pre>`)
+      );
+      reportEmailFailure("sync", res);
+    }
+    return Response.json({ ok: false, error: message }, { status: 500 });
+  }
+}
+
+async function runSync(admin: ReturnType<typeof createAdminClient>, startedAt: number, owner: string | null) {
   // --- Brokerage auto-sync (runs first, so newly-synced holdings get priced in the same run) ---
   // Candidates are exactly the accounts on the BROKER_SYNC_OWNER_EMAILS allowlist: the SnapTrade
   // integration authenticates with a single PERSONAL key, so syncing anyone else would pull the
   // key owner's real brokerage accounts into a stranger's dashboard.
   //
-  // Resolve those emails to user ids through the paginated helper. Two wrong ways to do this, both
-  // of which this avoids: a bare auth.admin.listUsers() silently drops everyone past page 1 once
-  // the app has ~50 signups, and reading broker_connections finds nobody at all — that table backs
-  // a future per-user connect flow and nothing writes to it today, so discovering candidates from
-  // it meant the nightly broker sync quietly did nothing while the market-data sync kept working.
+  // Resolve those emails to user ids through the paginated helper (confirmed emails only). Two
+  // wrong ways to do this, both of which this avoids: a bare auth.admin.listUsers() silently drops
+  // everyone past page 1 once the app has ~50 signups, and reading broker_connections finds nobody
+  // at all — that table backs a future per-user connect flow and nothing writes to it today.
   // Failures here never abort the run.
   let brokerSynced = 0;
   let brokerOwners = 0;
+  let brokerError: string | null = null;
   try {
     const emails = await listAllUserEmails(admin);
     const owners = [...emails.entries()].filter(([, email]) => isBrokerSyncOwner(email));
     if (!owners.length) {
       // Not an error — broker sync is off unless an owner is configured — but it must be visible,
       // because "nothing synced" and "nothing to sync" look identical from the outside.
-      console.log("[cron:sync] broker sync: no account matches BROKER_SYNC_OWNER_EMAILS — skipped");
+      console.log("[cron:sync] broker sync: no confirmed account matches BROKER_SYNC_OWNER_EMAILS — skipped");
     }
     for (const [uid] of owners) {
       brokerOwners++;
       const res = await runBrokerSyncForUser(uid);
       if (res.ok) brokerSynced += res.options ?? 0;
-      else console.error(`[cron:sync] broker sync failed: ${res.message}`);
+      else {
+        brokerError ??= res.message ?? "unknown";
+        console.error(`[cron:sync] broker sync failed: ${res.message}`);
+      }
     }
   } catch (e) {
+    brokerError ??= e instanceof Error ? e.message : String(e);
     console.error("[cron:sync] broker sync threw:", e); // isolate — market-data sync still runs
   }
 
@@ -131,10 +159,16 @@ export async function GET(request: Request) {
   for (const p of data as Held[]) {
     if (!byId.has(p.instrument_id)) byId.set(p.instrument_id, p);
   }
-  const held = [...byId.values()];
+  // Rotate the starting point by day so that, if the budget ever cuts a night short, the same tail
+  // of instruments isn't the one starved every night.
+  const all = [...byId.values()];
+  const offset = all.length ? Math.floor(startedAt / 86_400_000) % all.length : 0;
+  const held = [...all.slice(offset), ...all.slice(0, offset)];
 
   let ok = 0;
   let failed = 0;
+  let quotesWritten = 0;
+  let skippedForBudget = 0;
   const failedSymbols: string[] = [];
   // Splits are counted apart from `synced`: a split that was fetched but couldn't be stored leaves
   // the instrument otherwise fine, so failing it outright would be wrong — but so is staying quiet,
@@ -143,10 +177,15 @@ export async function GET(request: Request) {
   let splitsUnstored = 0;
   const BATCH = 6;
   for (let i = 0; i < held.length; i += BATCH) {
+    if (Date.now() - startedAt > INSTRUMENT_BUDGET_MS) {
+      skippedForBudget = held.length - i;
+      console.error(`[cron:sync] time budget reached with ${skippedForBudget} instruments left; they get the next night's rotation`);
+      break;
+    }
     await Promise.all(
       held.slice(i, i + BATCH).map(async (p) => {
         try {
-          await syncInstrumentQuote(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
+          if (await syncInstrumentQuote(admin, p.instrument_id, p.symbol, p.exchange, p.currency)) quotesWritten++;
           await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
           // Splits before price history: both feed the value chart, and a chart drawn from
           // adjusted closes against unadjusted share counts has a cliff in it on the split date.
@@ -189,6 +228,7 @@ export async function GET(request: Request) {
     : [];
   let ivOk = 0;
   for (let i = 0; i < ivUniverse.length; i += BATCH) {
+    if (Date.now() - startedAt > INSTRUMENT_BUDGET_MS) break;
     await Promise.all(
       ivUniverse.slice(i, i + BATCH).map(async (sym) => {
         try { if (await syncIvSample(admin, sym, "US")) ivOk++; } catch (e) { console.error(`[cron:sync] IV sample ${sym} failed:`, e); }
@@ -207,10 +247,27 @@ export async function GET(request: Request) {
   // Record today's value for every account (after fresh prices + FX), building the permanent
   // value-over-time history. Runs regardless of trading activity; isolated so it never aborts sync.
   let valueSnapshots = 0;
+  let snapshotError: string | null = null;
   try {
     valueSnapshots = await snapshotPortfolioValues(admin);
   } catch (e) {
+    snapshotError = e instanceof Error ? e.message : String(e);
     console.error("[cron:sync] snapshot failed:", e); // isolate — must not fail the whole sync
+  }
+
+  // Housekeeping. None of these tables has a reader that looks further back than this, so the rows
+  // are pure growth: IV rank uses a 365-day window, the health check reads the latest run, and a
+  // finder scan is stale after ten minutes.
+  let pruned = 0;
+  try {
+    const dayMs = 86_400_000;
+    const cutoff = (days: number) => new Date(startedAt - days * dayMs).toISOString();
+    const r1 = await admin.from("iv_history").delete({ count: "exact" }).lt("captured_on", cutoff(400).slice(0, 10));
+    const r2 = await admin.from("sync_runs").delete({ count: "exact" }).lt("started_at", cutoff(180));
+    const r3 = await admin.from("finder_scans").delete({ count: "exact" }).lt("created_at", cutoff(1));
+    pruned = (r1.count ?? 0) + (r2.count ?? 0) + (r3.count ?? 0);
+  } catch (e) {
+    console.error("[cron:sync] prune failed:", e);
   }
 
   const summary = {
@@ -218,9 +275,14 @@ export async function GET(request: Request) {
     // read back from sync_runs after the first night on a new provider.
     provider: providerName(),
     synced: ok, failed, total: held.length, ivCaptured: ivOk,
+    // A provider outage returns null quotes and null histories — every method degrades rather than
+    // throws — so `synced` alone can read 76/76 on a night nothing was actually written. This is
+    // the count that catches it.
+    quotesWritten,
+    skippedForBudget,
     // brokerOwners answers "did it even try" — brokerOptionLegs of 0 never distinguished a
     // clean run with no new legs from a sync that never ran at all.
-    brokerOwners, brokerOptionLegs: brokerSynced, valueSnapshots, fxUpdated,
+    brokerOwners, brokerOptionLegs: brokerSynced, brokerError, valueSnapshots, snapshotError, fxUpdated, pruned,
     // splitsUnstored > 0 means the provider returned splits that did not reach the database —
     // most likely supabase/schema.sql has not been applied since the splits feature shipped.
     splitsWritten, splitsUnstored,
@@ -236,21 +298,30 @@ export async function GET(request: Request) {
   // provider name only: no user data, no secrets.
   console.log(`[cron:sync] summary ${JSON.stringify({ ...summary, durationMs: Date.now() - startedAt })}`);
 
-  // Wake the founder when a run goes wrong: any failures, or a run that synced nothing while
-  // holdings exist (a dead provider or a mid-run timeout). Best-effort — the founder emails are the
-  // BROKER_SYNC_OWNER_EMAILS list, and sendEmail no-ops without a Resend key.
-  if (failed > 0 || (ok === 0 && held.length > 0)) {
-    const owner = (process.env.BROKER_SYNC_OWNER_EMAILS ?? "").split(",")[0]?.trim();
-    if (owner) {
-      const body =
-        `<p style="margin:0 0 10px;font-size:14px;color:#334155">Nightly sync finished with problems.</p>` +
-        `<pre style="font-size:12px;background:#f8fafc;padding:10px;border-radius:8px">${JSON.stringify(summary, null, 2)}</pre>` +
-        (failedSymbols.length ? `<p style="font-size:12px;color:#64748b">Failed: ${failedSymbols.join(", ")}</p>` : "");
-      const res = await sendEmail(owner, `Snowfolio sync: ${failed} failure${failed === 1 ? "" : "s"}`, emailShell("Sync report", body));
-      // If this send fails the founder never learns the sync failed — log it loudly rather than
-      // letting a broken alert path hide a broken sync.
-      reportEmailFailure("sync", res);
-    }
+  // Wake the founder when a run goes wrong: failures, a run that synced nothing while holdings
+  // exist (a dead provider or a mid-run timeout), a night where most quotes came back empty (the
+  // provider silently degraded), a truncated run, or a broker/snapshot error. Best-effort —
+  // sendEmail no-ops without a Resend key.
+  const quotesThin = held.length > 0 && quotesWritten < held.length * 0.9;
+  const unhealthy =
+    failed > 0 || (ok === 0 && held.length > 0) || quotesThin || skippedForBudget > 0 || !!brokerError || !!snapshotError;
+  if (unhealthy && owner) {
+    const reasons = [
+      failed > 0 ? `${failed} instrument${failed === 1 ? "" : "s"} failed` : null,
+      ok === 0 && held.length > 0 ? "nothing synced" : null,
+      quotesThin ? `only ${quotesWritten} of ${held.length} received a price` : null,
+      skippedForBudget > 0 ? `${skippedForBudget} instruments skipped for time` : null,
+      brokerError ? `broker sync: ${brokerError}` : null,
+      snapshotError ? `snapshots: ${snapshotError}` : null,
+    ].filter(Boolean) as string[];
+    const body =
+      `<p style="margin:0 0 10px;font-size:14px;color:#334155">Nightly sync finished with problems: ${escapeHtml(reasons.join("; "))}.</p>` +
+      `<pre style="font-size:12px;background:#f8fafc;padding:10px;border-radius:8px">${escapeHtml(JSON.stringify(summary, null, 2))}</pre>` +
+      (failedSymbols.length ? `<p style="font-size:12px;color:#64748b">Failed: ${escapeHtml(failedSymbols.join(", "))}</p>` : "");
+    const res = await sendEmail(owner, `Snowfolio sync: ${reasons[0] ?? "problems"}`, emailShell("Sync report", body));
+    // If this send fails the founder never learns the sync failed — log it loudly rather than
+    // letting a broken alert path hide a broken sync.
+    reportEmailFailure("sync", res);
   }
 
   return Response.json(summary);
