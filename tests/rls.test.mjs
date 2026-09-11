@@ -203,23 +203,31 @@ describe("RLS cross-tenant isolation", { skip }, () => {
 
   // Not an isolation test, but the one place the SQL view's money math runs against a real
   // Postgres in CI. Its twin is tests/open-positions.test.mjs (lib/tax/realized.ts); the numbers
-  // here must match those there. The seed is buy 10 @ 100 on the shared instrument, plus a user
-  // split override of 2-for-1 on 2024-06-10 — so today's shares are 20 at a $50 basis.
+  // here must match those there.
   it("positions view: cost basis is FIFO over the lots still held, in today's shares", async () => {
-    const inst = await db
-      .from("instruments")
-      .insert({ symbol: `RLSF${suffix}`, exchange: "US", name: "FIFO Test", currency: "USD" })
-      .select("id")
-      .single();
-    assert.equal(inst.error, null, `seed fifo instrument: ${inst.error?.message}`);
-    const iid = inst.data.id;
+    const mk = async (tag) => {
+      const r = await db
+        .from("instruments")
+        .insert({ symbol: `${tag}${suffix}`, exchange: "US", name: `${tag} Test`, currency: "USD" })
+        .select("id")
+        .single();
+      assert.equal(r.error, null, `seed ${tag} instrument: ${r.error?.message}`);
+      return r.data.id;
+    };
+    const iid = await mk("RLSF");
+    const sid = await mk("RLSS");
     // Assigned 100 @ 50, called away @ 55, assigned again 100 @ 52 — the wheel seller's basic cycle.
+    // And, on a second instrument, a buy of 10 @ 100 BEFORE a 2-for-1 split the user entered
+    // themselves: only splits strictly after the trade date apply, so the date matters.
     const seed = await db.from("transactions").insert([
       { portfolio_id: A.portfolioId, instrument_id: iid, type: "buy", quantity: 100, price: 50, currency: "USD", executed_at: "2024-01-10", dedupe_key: `f1-${suffix}` },
       { portfolio_id: A.portfolioId, instrument_id: iid, type: "sell", quantity: 100, price: 55, currency: "USD", executed_at: "2024-06-10", dedupe_key: `f2-${suffix}` },
       { portfolio_id: A.portfolioId, instrument_id: iid, type: "buy", quantity: 100, price: 52, currency: "USD", executed_at: "2025-01-10", dedupe_key: `f3-${suffix}` },
+      { portfolio_id: A.portfolioId, instrument_id: sid, type: "buy", quantity: 10, price: 100, currency: "USD", executed_at: "2024-01-10", dedupe_key: `s1-${suffix}` },
     ]);
     assert.equal(seed.error, null, `seed fifo rows: ${seed.error?.message}`);
+    const ov = await db.from("portfolio_splits").insert({ portfolio_id: A.portfolioId, instrument_id: sid, ex_date: "2024-06-10", ratio: 2 });
+    assert.equal(ov.error, null, `seed split override: ${ov.error?.message}`);
     try {
       const { data, error } = await clientA
         .from("positions").select("shares, avg_cost, cost_basis, realized_gain").eq("instrument_id", iid).single();
@@ -229,16 +237,17 @@ describe("RLS cross-tenant isolation", { skip }, () => {
       assert.equal(Number(data.cost_basis), 5200);
       assert.equal(Number(data.realized_gain), 500, "the first lot's gain, once");
 
-      // The split case: buy 10 @ 100 before the user's 2-for-1 override → 20 shares at $50.
+      // 10 bought pre-split → 20 of today's shares at $50; money never scales.
       const { data: split, error: splitErr } = await clientA
-        .from("positions").select("shares, avg_cost, cost_basis").eq("instrument_id", instrumentId).single();
+        .from("positions").select("shares, avg_cost, cost_basis").eq("instrument_id", sid).single();
       assert.equal(splitErr, null, `read split position: ${splitErr?.message}`);
       assert.equal(Number(split.shares), 20);
       assert.equal(Number(split.avg_cost), 50);
       assert.equal(Number(split.cost_basis), 1000);
     } finally {
-      await db.from("transactions").delete().eq("instrument_id", iid);
-      await db.from("instruments").delete().eq("id", iid);
+      await db.from("portfolio_splits").delete().eq("instrument_id", sid);
+      await db.from("transactions").in("instrument_id", [iid, sid]).delete();
+      await db.from("instruments").delete().in("id", [iid, sid]);
     }
   });
 
