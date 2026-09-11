@@ -99,7 +99,7 @@ Scores are 0–100 per area, **before → after** this pass. "After" assumes the
    landed in `ci.yml`, and the `typescript@7` / `eslint@10` / `@types/node` majors are closed with
    the reason recorded as an ignore rule in `.github/dependabot.yml`.
 8. **Branch protection on `main`** before the first paying user (CI still auto-deploys red builds
-   today). `supabase/migrations/` now records every change applied to production from this audit
+   today). `supabase/applied/` now records every change applied to production from this audit
    on; `schema.sql` stays the full picture.
 9. `consent_log` cascades on account deletion — decide whether an anonymised tombstone should
    survive (legal-adjacent; left as is).

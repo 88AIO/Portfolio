@@ -23,7 +23,7 @@ Strategy, specs, and audits live in `docs/` (see the index in `CLAUDE.md`).
 - New project → pick a name + database password (save it).
 - When it's ready, go to **Project Settings → API** and copy: the **Project URL**, the **anon public** key, and the **service_role** key.
 - Go to **SQL Editor → New query**, paste the entire contents of `supabase/schema.sql`, and click **Run**. This creates all tables, views, and RLS policies.
-- `supabase/schema.sql` is the whole schema and is safe to re-run (every statement is idempotent). `supabase/migrations/` is the change log: one file per change applied to the live project, named with the version Supabase recorded, starting from the 2026-09-11 audit. Apply a new change to production first, then copy the exact SQL into a new file there so the repo and the live database say the same thing.
+- `supabase/schema.sql` is the whole schema and is safe to re-run (every statement is idempotent). `supabase/applied/` is the change log: one file per change applied to the live project, named with the version Supabase recorded, starting from the 2026-09-11 audit. Apply a new change to production first, then copy the exact SQL into a new file there so the repo and the live database say the same thing. (It is deliberately not `supabase/migrations/`: the CLI would replay that folder onto the empty local stack before `schema.sql` exists.)
 
 ### 2. Add your keys
 - Copy `.env.local.example` to a new file named `.env.local` and fill it in. **`.env.local.example` is the canonical list of every environment variable** — each entry documents what it does and whether it's required. The short version:
@@ -68,7 +68,7 @@ database dies with the runner. Note what this does and doesn't prove: it verifie
 `supabase/schema.sql` as written, so a bad policy is caught before it ships. It cannot tell you
 whether your *live* project still matches that file — if something was changed by hand in the
 Supabase dashboard, only re-running the schema or a periodic audit will catch it. The files in
-`supabase/migrations/` are that audit trail for changes made since 2026-09-11.
+`supabase/applied/` are that audit trail for changes made since 2026-09-11.
 
 ### 4. Deploy to Vercel
 - Push to GitHub → Vercel **New Project** → import the repo.
