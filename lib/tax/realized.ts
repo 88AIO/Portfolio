@@ -65,6 +65,95 @@ function order(a: LedgerTx, b: LedgerTx): number {
   return rank(a.type) - rank(b.type);
 }
 
+type FifoResult = { lots: RealizedLot[]; open: OpenLot[] };
+
+// Group by INSTRUMENT, not by ticker string. A dual-listed name shares its ticker across venues
+// (a London line in GBP, a US line in USD), and matching a GBP buy against a USD sell produces a
+// cost basis that is arithmetic nonsense — which the caller then converts at the sell
+// currency's FX rate, compounding it. Currency is the field that always distinguishes them;
+// exchange refines it further when the caller supplies it.
+function groupByInstrument(txs: LedgerTx[]): Map<string, { symbol: string; currency: string; txs: LedgerTx[] }> {
+  const byInstrument = new Map<string, { symbol: string; currency: string; txs: LedgerTx[] }>();
+  for (const t of txs) {
+    if (t.type !== "buy" && t.type !== "sell") continue;
+    const key = `${t.symbol}\u0000${t.exchange ?? ""}\u0000${t.currency}`;
+    const entry = byInstrument.get(key) ?? { symbol: t.symbol, currency: t.currency, txs: [] };
+    entry.txs.push(t);
+    byInstrument.set(key, entry);
+  }
+  return byInstrument;
+}
+
+// The FIFO walk itself. Shared by the realized-lot reader and the open-lot reader so the two can
+// never disagree about which shares were sold and which are still held — and it is the TypeScript
+// twin of the positions view's basis math in supabase/schema.sql. Change both together.
+function matchFifo(symbol: string, list: LedgerTx[], splitsByInstrument?: Map<string, Split[]>): FifoResult {
+  const open: OpenLot[] = [];
+  const lots: RealizedLot[] = [];
+  for (const t of [...list].sort(order)) {
+    // Restate into today's shares before matching. Buy 10 pre-split and sell 40 post-split and
+    // the raw rows cannot be matched at all — FIFO would find 10 shares to cover a 40-share sale
+    // and book the other 30 as a zero-basis windfall. Scaling both sides keeps quantity x price
+    // constant, so every money figure below is unchanged; only the share counts become
+    // comparable. Reported lot quantities are therefore in today's shares, which is what the
+    // holding page shows beside them.
+    const factor =
+      t.instrument_id && !isBrokerRestated(t.dedupe_key)
+        ? splitFactor(splitsByInstrument?.get(t.instrument_id), t.executed_at)
+        : 1;
+    const qty = Math.abs(t.quantity) * factor;
+    const price = t.price / factor;
+    if (qty <= 0) continue;
+
+    if (t.type === "buy") {
+      const costPerShare = (qty * price + (t.fees || 0)) / qty; // fees fold into basis
+      open.push({ qty, costPerShare, date: t.executed_at });
+      continue;
+    }
+
+    // sell: consume open lots FIFO. Allocate the sale's fees across the sold shares.
+    let remaining = qty;
+    const sellFeePerShare = (t.fees || 0) / qty;
+    while (remaining > 0 && open.length > 0) {
+      const lot = open[0];
+      const take = Math.min(remaining, lot.qty);
+      const proceeds = take * price - take * sellFeePerShare;
+      const costBasis = take * lot.costPerShare;
+      lots.push({
+        symbol,
+        currency: t.currency,
+        quantity: take,
+        openDate: lot.date,
+        closeDate: t.executed_at,
+        proceeds,
+        costBasis,
+        gain: proceeds - costBasis,
+        longTerm: isLongTerm(lot.date, t.executed_at),
+      });
+      lot.qty -= take;
+      remaining -= take;
+      if (lot.qty <= 1e-9) open.shift();
+    }
+    // Oversold with no matching lot (e.g. a short or a data gap): realize with zero basis so
+    // the proceeds still appear rather than silently vanishing.
+    if (remaining > 1e-9) {
+      const proceeds = remaining * price - remaining * sellFeePerShare;
+      lots.push({
+        symbol,
+        currency: t.currency,
+        quantity: remaining,
+        openDate: t.executed_at,
+        closeDate: t.executed_at,
+        proceeds,
+        costBasis: 0,
+        gain: proceeds,
+        longTerm: false,
+      });
+    }
+  }
+  return { lots, open };
+}
+
 /**
  * Match sells against prior buys FIFO and emit one realized lot per matched slice.
  * Only buy/sell transactions matter; dividends/cash movements are ignored here.
@@ -73,87 +162,43 @@ export function computeRealizedLots(
   txs: LedgerTx[],
   splitsByInstrument?: Map<string, Split[]>
 ): RealizedLot[] {
-  // Group by INSTRUMENT, not by ticker string. A dual-listed name shares its ticker across venues
-  // (a London line in GBP, a US line in USD), and matching a GBP buy against a USD sell produces a
-  // cost basis that is arithmetic nonsense — which the caller then converts at the sell
-  // currency's FX rate, compounding it. Currency is the field that always distinguishes them;
-  // exchange refines it further when the caller supplies it.
-  const byInstrument = new Map<string, { symbol: string; txs: LedgerTx[] }>();
-  for (const t of txs) {
-    if (t.type !== "buy" && t.type !== "sell") continue;
-    const key = `${t.symbol}\u0000${t.exchange ?? ""}\u0000${t.currency}`;
-    const entry = byInstrument.get(key) ?? { symbol: t.symbol, txs: [] };
-    entry.txs.push(t);
-    byInstrument.set(key, entry);
-  }
-
   const lots: RealizedLot[] = [];
-  for (const { symbol, txs: list } of byInstrument.values()) {
-    const open: OpenLot[] = [];
-    for (const t of [...list].sort(order)) {
-      // Restate into today's shares before matching. Buy 10 pre-split and sell 40 post-split and
-      // the raw rows cannot be matched at all — FIFO would find 10 shares to cover a 40-share sale
-      // and book the other 30 as a zero-basis windfall. Scaling both sides keeps quantity x price
-      // constant, so every money figure below is unchanged; only the share counts become
-      // comparable. Reported lot quantities are therefore in today's shares, which is what the
-      // holding page shows beside them.
-      const factor =
-        t.instrument_id && !isBrokerRestated(t.dedupe_key)
-          ? splitFactor(splitsByInstrument?.get(t.instrument_id), t.executed_at)
-          : 1;
-      const qty = Math.abs(t.quantity) * factor;
-      const price = t.price / factor;
-      if (qty <= 0) continue;
-
-      if (t.type === "buy") {
-        const costPerShare = (qty * price + (t.fees || 0)) / qty; // fees fold into basis
-        open.push({ qty, costPerShare, date: t.executed_at });
-        continue;
-      }
-
-      // sell: consume open lots FIFO. Allocate the sale's fees across the sold shares.
-      let remaining = qty;
-      const sellFeePerShare = (t.fees || 0) / qty;
-      while (remaining > 0 && open.length > 0) {
-        const lot = open[0];
-        const take = Math.min(remaining, lot.qty);
-        const proceeds = take * price - take * sellFeePerShare;
-        const costBasis = take * lot.costPerShare;
-        lots.push({
-          symbol,
-          currency: t.currency,
-          quantity: take,
-          openDate: lot.date,
-          closeDate: t.executed_at,
-          proceeds,
-          costBasis,
-          gain: proceeds - costBasis,
-          longTerm: isLongTerm(lot.date, t.executed_at),
-        });
-        lot.qty -= take;
-        remaining -= take;
-        if (lot.qty <= 1e-9) open.shift();
-      }
-      // Oversold with no matching lot (e.g. a short or a data gap): realize with zero basis so
-      // the proceeds still appear rather than silently vanishing.
-      if (remaining > 1e-9) {
-        const proceeds = remaining * price - remaining * sellFeePerShare;
-        lots.push({
-          symbol,
-          currency: t.currency,
-          quantity: remaining,
-          openDate: t.executed_at,
-          closeDate: t.executed_at,
-          proceeds,
-          costBasis: 0,
-          gain: proceeds,
-          longTerm: false,
-        });
-      }
-    }
+  for (const { symbol, txs: list } of groupByInstrument(txs).values()) {
+    lots.push(...matchFifo(symbol, list, splitsByInstrument).lots);
   }
-
   return lots.sort((a, b) => a.closeDate.localeCompare(b.closeDate) || a.symbol.localeCompare(b.symbol));
+}
+
+export type OpenPosition = {
+  symbol: string;
+  currency: string;
+  shares: number; // today's shares still held
+  costBasis: number; // native currency, incl. the buys' fees — what those shares cost
+};
+
+/**
+ * The shares still held after FIFO matching, and what they cost — one entry per
+ * symbol/exchange/currency group. This is what "Paid / sh" and unrealized P/L must be computed
+ * from: averaging every buy ever made keeps counting shares that were already sold, which after
+ * one full wheel cycle (assigned, called away, assigned again) prints a cost basis that overlaps
+ * the realized gain shown beside it.
+ */
+export function computeOpenPositions(
+  txs: LedgerTx[],
+  splitsByInstrument?: Map<string, Split[]>
+): OpenPosition[] {
+  const out: OpenPosition[] = [];
+  for (const { symbol, currency, txs: list } of groupByInstrument(txs).values()) {
+    const { open } = matchFifo(symbol, list, splitsByInstrument);
+    let shares = 0;
+    let costBasis = 0;
+    for (const lot of open) {
+      shares += lot.qty;
+      costBasis += lot.qty * lot.costPerShare;
+    }
+    out.push({ symbol, currency, shares, costBasis });
+  }
+  return out;
 }
 
 export type RealizedSummary = {

@@ -25,6 +25,7 @@ const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 type YahooQuoteLike = {
   regularMarketPrice?: number;
   regularMarketChangePercent?: number;
+  regularMarketTime?: Date | number | string;
   currency?: string;
   longName?: string;
   shortName?: string;
@@ -96,10 +97,22 @@ async function getQuote(symbol: string, exchange: string): Promise<Quote> {
       currency: typeof q?.currency === "string" ? currency : null,
       changePct:
         typeof q?.regularMarketChangePercent === "number" ? q.regularMarketChangePercent : null,
+      asOf: marketTime(q?.regularMarketTime),
     };
   } catch {
     return { price: null, currency: null, changePct: null };
   }
+}
+
+// Yahoo's regularMarketTime arrives as a Date from yahoo-finance2, but the raw feed carries epoch
+// seconds and a defensive cast is cheap. Anything unparseable → null, and the caller falls back to
+// the fetch time rather than inventing one.
+function marketTime(v: Date | number | string | undefined): string | null {
+  if (v == null) return null;
+  const d = v instanceof Date ? v : typeof v === "number" ? new Date(v < 1e12 ? v * 1000 : v) : new Date(v);
+  const t = d.getTime();
+  if (!Number.isFinite(t) || t <= 0) return null;
+  return d.toISOString();
 }
 
 async function getFxRate(from: string, base: string): Promise<number> {
@@ -176,10 +189,17 @@ async function getDividendInfo(symbol: string, exchange: string): Promise<Divide
         : typeof sd?.trailingAnnualDividendYield === "number"
           ? sd.trailingAnnualDividendYield
           : null;
+    // summaryDetail.exDividendDate is usually the LAST ex-date; calendarEvents.exDividendDate is
+    // the next declared one when there is one. Take the later of the two, so an upcoming ex-date
+    // wins when it exists and the most recent one is kept otherwise. The alerts only act on it
+    // when it is still ahead of today.
+    const exCandidates = [isoDate(sd?.exDividendDate), isoDate(ce?.exDividendDate)].filter(
+      (d): d is string => !!d
+    );
     return {
       annualDividendPerShare: rate,
       yieldTtm: yieldFrac != null ? yieldFrac * 100 : null,
-      exDividendDate: isoDate(sd?.exDividendDate ?? ce?.exDividendDate),
+      exDividendDate: exCandidates.length ? exCandidates.sort().at(-1)! : null,
       nextDividendDate: isoDate(ce?.dividendDate),
     };
   } catch {
@@ -267,13 +287,18 @@ async function getPriceHistory(
       interval: "1wk",
     })) as unknown as {
       meta?: { currency?: string };
-      quotes?: Array<{ date?: Date; close?: number | null; adjclose?: number | null }>;
+      quotes?: Array<{ date?: Date; close?: number | null }>;
     };
     const { divisor } = normalizeCurrency(res?.meta?.currency);
     const out: PriceHistoryPoint[] = [];
     for (const q of res?.quotes ?? []) {
       const iso = isoDate(q?.date ?? null);
-      const close = q?.adjclose ?? q?.close;
+      // `close`, not `adjclose`. Yahoo's close is already restated for splits (what the value
+      // chart needs); adjclose is ALSO adjusted for dividends, which depressed every historical
+      // price of a dividend payer by the payouts since — a phantom loss on day one that decayed to
+      // zero by today, and an SPY benchmark that quietly measured total return against a
+      // price-only portfolio line.
+      const close = q?.close;
       if (iso && typeof close === "number" && Number.isFinite(close)) out.push({ date: iso, close: close / divisor });
     }
     out.sort((a, b) => a.date.localeCompare(b.date));
@@ -410,7 +435,7 @@ async function getOptionQuote(
 
 export const yahooProvider: MarketDataProvider = {
   name: "yahoo",
-  capabilities: { options: true },
+  capabilities: { options: true, priceHistorySplitAdjusted: true },
   getQuote,
   getFxRate,
   searchInstrument,

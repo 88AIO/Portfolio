@@ -140,7 +140,8 @@ export function getFundBreakdown(symbol: string, exchange: string) {
   return provider.getFundBreakdown ? counted(provider.getFundBreakdown(symbol, exchange)) : Promise.resolve(null);
 }
 
-// Reserved for the O2 alerts/EODHD-degradation path (docs/SPEC_options-selling.md) — no callers yet.
+// The one gate for every option-chain consumer (the put finder, the nightly IV sample, the cron's
+// IV pass): a provider without chains degrades honestly instead of returning empty boards.
 export function providerSupportsOptions(): boolean {
   return getProvider().capabilities.options === true;
 }

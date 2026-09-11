@@ -1,6 +1,8 @@
 // Portfolio performance series — reconstructs value-over-time and net-invested-over-time from
-// the transaction ledger (source of truth) plus cached weekly closing prices. No stored
-// snapshots: every point is recomputed, so history stays correct after edits or back-dated trades.
+// the transaction ledger (source of truth) plus cached weekly closing prices. Every point is
+// recomputed from the ledger, so history stays correct after edits or back-dated trades; the
+// performance page then overlays the nightly portfolio_value_history snapshots for the dates they
+// cover, which are exact and immutable.
 //
 // Two honest lines:
 //   • Value    — shares held on each date × that date's close, summed in the base currency.
@@ -48,9 +50,10 @@ function buildShareTimeline(txs: PerfTransaction[], splits?: Split[]): ShareStep
   let shares = 0;
   for (const t of sorted) {
     // Every share count here is expressed in TODAY'S shares, because the closes it will be
-    // multiplied against are split-adjusted (price_history stores the provider's adjusted close —
-    // see providers/yahoo.ts). Mixing an unadjusted share count with an adjusted price is the
-    // classic way to draw a chart that falls off a cliff on the split date and never recovers.
+    // multiplied against are split-adjusted (price_history stores split-adjusted, dividend-
+    // UNadjusted closes — see PriceHistoryPoint in lib/marketdata/types.ts). Mixing an unadjusted
+    // share count with an adjusted price is the classic way to draw a chart that falls off a cliff
+    // on the split date and never recovers.
     const qty = t.quantity * (isBrokerRestated(t.dedupe_key) ? 1 : splitFactor(splits, t.executed_at));
     if (t.type === "buy") shares += qty;
     else if (t.type === "sell") shares -= qty;
@@ -128,9 +131,46 @@ export function buildHoldingsBacktest(
 }
 
 /**
+ * Net cash put into securities up to and including `date` (buys incl. fees − sell proceeds net of
+ * fees), in the base currency. Deliberately NOT clamped at zero — see buildPerformanceSeries.
+ */
+export function investedAsOf(txs: PerfTransaction[], fx: (currency: string) => number, date: string): number {
+  let invested = 0;
+  for (const t of txs) {
+    if (t.executed_at > date) continue;
+    const r = fx(t.currency);
+    if (t.type === "buy") invested += (t.quantity * t.price + t.fees) * r;
+    else if (t.type === "sell") invested -= (t.quantity * t.price - t.fees) * r;
+  }
+  return invested;
+}
+
+/**
+ * Whether the benchmark can honestly mirror every cash flow. A buy or sell dated before the first
+ * stored SPY close has no price to mirror it at, and buildBenchmarkSeries skips it — while the
+ * portfolio's own "net invested" still counts it. Comparing the two then flatters the portfolio
+ * by exactly the money the benchmark never saw: $50k invested before SPY history begins and $10k
+ * after reads as "S&P 500 −80%". The page hides the comparison when any flow is uncovered.
+ */
+export function benchmarkCoverage(
+  txs: PerfTransaction[],
+  benchCloses: PerfClose[]
+): { uncoveredFlows: number; firstClose: string | null } {
+  const firstClose = benchCloses.length ? benchCloses[0].date : null;
+  let uncoveredFlows = 0;
+  for (const t of txs) {
+    if (t.type !== "buy" && t.type !== "sell") continue;
+    if (!firstClose || t.executed_at < firstClose) uncoveredFlows++;
+  }
+  return { uncoveredFlows, firstClose };
+}
+
+/**
  * Dollar-for-dollar S&P 500 benchmark: the same cash you actually deployed (each buy minus each
  * sell, on the date it happened) invested into SPY instead. Answers "did my picks beat just buying
  * the index with the same money at the same times?" Returns date → benchmark value (base currency).
+ * Price return only (price_history is not dividend-adjusted), matched against the portfolio's own
+ * price-only appreciation; dividends on both sides are counted elsewhere.
  * @param txs         your buys/sells (the cash flows); other types ignored
  * @param benchCloses SPY weekly closes, ascending, in the base currency
  * @param fx          currency → base multiplier (applied to your cash flows)
@@ -221,18 +261,10 @@ export function buildPerformanceSeries(
       value += shares * close * fx(currencyById.get(id) ?? "USD");
     }
 
-    let invested = 0;
-    for (const t of txs) {
-      if (t.executed_at > date) continue;
-      const r = fx(t.currency);
-      if (t.type === "buy") invested += (t.quantity * t.price + t.fees) * r;
-      else if (t.type === "sell") invested -= (t.quantity * t.price - t.fees) * r;
-    }
-
     // Deliberately NOT clamped at zero. Once you have taken more cash out than you put in, net
     // invested is genuinely negative, and clamping it collapses `gain` (value - invested) to zero:
     // someone who bought for 1,000 and sold for 1,500 would be told they made nothing.
-    points.push({ date, value, invested });
+    points.push({ date, value, invested: investedAsOf(txs, fx, date) });
   }
 
   const start = points[0];

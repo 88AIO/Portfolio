@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
-import DashboardNav from "@/components/DashboardNav";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { getCachedRates } from "@/lib/fx";
 import { money, pct, num } from "@/lib/format";
@@ -26,6 +25,7 @@ import { MonthlyPremiumChart } from "@/components/charts";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
 import NotificationSettings from "@/components/NotificationSettings";
 import { getNotificationPrefs } from "./actions";
+import { upcomingExDate } from "@/lib/notifications/build";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -39,6 +39,7 @@ type PositionLite = {
   price_as_of: string | null;
   div_paid: number | null;
   option_premium: number | null;
+  ex_dividend_date: string | null;
   next_dividend_date: string | null;
   next_dividend_per_share: number | null;
   annual_div_per_share: number | null;
@@ -87,7 +88,7 @@ export default async function OptionsPage() {
   const [{ data: optRows }, { data: posRows }, { data: pfList }, ledger, optTxnRows, notifPrefs] = await Promise.all([
     supabase.from("option_positions").select("*").order("expiration"),
     supabase.from("positions").select(
-      "symbol, currency, shares, avg_cost, last_price, price_as_of, div_paid, option_premium, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
+      "symbol, currency, shares, avg_cost, last_price, price_as_of, div_paid, option_premium, ex_dividend_date, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"
     ),
     supabase.from("portfolios").select("id, name").order("created_at"),
     // Page past the ~1000-row cap so per-ticker stock gains see the full trade ledger.
@@ -191,12 +192,15 @@ export default async function OptionsPage() {
     }
   }
   for (const p of positions) {
-    if (p.shares > 0 && p.next_dividend_date && p.next_dividend_date >= today && p.next_dividend_date <= in14) {
+    // The declared EX-date, never the pay date: for a covered-call seller the ex-date is the
+    // early-assignment risk day, and the pay date is two to four weeks after the fact.
+    const exDate = upcomingExDate(p, today);
+    if (p.shares > 0 && exDate && exDate <= in14) {
       const est =
         p.next_dividend_per_share ??
         (p.annual_div_per_share && p.div_frequency ? p.annual_div_per_share / p.div_frequency : null);
       attention.push({
-        kind: "ex_dividend", symbol: p.symbol, severity: "info", date: p.next_dividend_date,
+        kind: "ex_dividend", symbol: p.symbol, severity: "info", date: exDate,
         detail: `${p.symbol} goes ex-dividend${est != null ? ` (~${money(est * p.shares, p.currency)})` : ""}`,
       });
     }
@@ -303,9 +307,7 @@ export default async function OptionsPage() {
   const tradeLog = [...optTxns].sort((a, b) => b.trade_date.localeCompare(a.trade_date));
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
-      <DashboardNav active="options" />
-
+    <main className="flex-1 bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
       <div className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-2 flex items-center justify-between gap-3">
           <Link href="/dashboard/options/finder" className="text-sm font-medium text-indigo-600 hover:underline">

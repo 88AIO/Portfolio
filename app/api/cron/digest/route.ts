@@ -1,24 +1,21 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCachedRates } from "@/lib/fx";
 import { computeOption, legPremium, type OptionPositionRow } from "@/lib/options";
-import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
+import { digestEmailHtml, upcomingExDate, type DigestData, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell, emailConfig, reportEmailFailure } from "@/lib/email";
 import { fetchAll } from "@/lib/supabase/paginate";
-import { recordSyncRun, listAllUserEmails } from "@/lib/cron";
+import { recordSyncRun, listAllUserEmails, isCronAuthorized } from "@/lib/cron";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// One DB read plus one email per opted-in user, sequentially: 60s capped this at roughly a hundred
+// users before a timeout skipped the run record.
+export const maxDuration = 300;
 
 // Weekly income digest. For each opted-in user: premium + dividends collected in the last 7 days,
 // upcoming ex-dividends, and options expiring this week — one email. CRON_SECRET-guarded.
 
 type OptTx = { portfolio_id: string; action: string; premium: number; contracts: number; fee: number; currency: string; trade_date: string };
 type DivTx = { portfolio_id: string; quantity: number; price: number; currency: string; executed_at: string };
-
-function authorized(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  return !!secret && request.headers.get("authorization") === `Bearer ${secret}`;
-}
 
 function push<T>(m: Map<string, T[]>, k: string, v: T) {
   const arr = m.get(k);
@@ -27,7 +24,7 @@ function push<T>(m: Map<string, T[]>, k: string, v: T) {
 }
 
 export async function GET(request: Request) {
-  if (!authorized(request)) return new Response("Unauthorized", { status: 401 });
+  if (!isCronAuthorized(request)) return new Response("Unauthorized", { status: 401 });
   const startedAt = Date.now();
   const admin = createAdminClient();
   const today = new Date().toISOString().slice(0, 10);
@@ -44,7 +41,7 @@ export async function GET(request: Request) {
       fetchAll<{ id: string; user_id: string; base_currency: string | null }>((f, t) =>
         admin.from("portfolios").select("id, user_id, base_currency").order("id").range(f, t)),
       fetchAll<PositionLite & { portfolio_id: string }>((f, t) =>
-        admin.from("positions").select("portfolio_id, symbol, currency, shares, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency").order("portfolio_id").order("instrument_id").range(f, t)),
+        admin.from("positions").select("portfolio_id, symbol, currency, shares, ex_dividend_date, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency").order("portfolio_id").order("instrument_id").range(f, t)),
       fetchAll<OptionPositionRow & { portfolio_id: string }>((f, t) =>
         admin.from("option_positions").select("*").order("portfolio_id").order("instrument_id").order("option_type").order("strike").order("expiration").range(f, t)),
       fetchAll<OptTx>((f, t) =>
@@ -114,10 +111,10 @@ export async function GET(request: Request) {
     const dividendsWeek = divTx.reduce((s, d) => s + d.quantity * d.price * fx(d.currency), 0);
 
     const upcomingExDiv = positions
-      .filter((p) => p.shares > 0 && p.next_dividend_date && p.next_dividend_date >= today && p.next_dividend_date <= in7)
+      .filter((p) => p.shares > 0 && (upcomingExDate(p, today) ?? "9999") <= in7)
       .map((p) => ({
         symbol: p.symbol,
-        date: p.next_dividend_date as string,
+        date: upcomingExDate(p, today) as string,
         est: p.next_dividend_per_share != null ? p.next_dividend_per_share * p.shares : (p.annual_div_per_share && p.div_frequency ? (p.annual_div_per_share / p.div_frequency) * p.shares : null),
         currency: p.currency,
       }));

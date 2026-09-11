@@ -6,6 +6,10 @@ export type Quote = {
   price: number | null;
   currency: string | null;
   changePct: number | null;
+  // When the market last set this price (ISO), if the provider reports it. "Prices as of" shows
+  // this rather than the moment we fetched it: on a Sunday the honest label is Friday's close,
+  // not "2 hours ago".
+  asOf?: string | null;
 };
 
 export type InstrumentMeta = {
@@ -33,6 +37,13 @@ export type SplitPoint = {
 };
 
 // A historical closing price used to draw portfolio value over time.
+//
+// The port's contract for `close` is SPLIT-adjusted only — restated in today's shares, but NOT
+// adjusted for dividends. The value chart multiplies it by a share count that is also in today's
+// shares, so split adjustment is required; dividend adjustment is wrong there — it depresses every
+// past price by the dividends paid since, drawing a loss on day one that never happened, and it
+// turns the SPY benchmark into a total-return line compared against a price-only one. A provider
+// whose feed is raw declares priceHistorySplitAdjusted: false and the sync applies the splits.
 export type PriceHistoryPoint = {
   date: string; // YYYY-MM-DD
   close: number; // in the instrument's currency
@@ -78,6 +89,9 @@ export type OptionChain = {
 
 export type ProviderCapabilities = {
   options: boolean;
+  // true when getPriceHistory's closes are already restated for splits (Yahoo's `close`);
+  // false when they are as-traded (EODHD's `close`) and the sync must apply instrument_splits.
+  priceHistorySplitAdjusted: boolean;
 };
 
 export interface MarketDataProvider {

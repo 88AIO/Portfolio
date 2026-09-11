@@ -2,12 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../../actions";
-import DashboardNav from "@/components/DashboardNav";
 import ActivityList, { type ActivityItem } from "@/components/ActivityList";
 import RemoveHoldingButton from "@/components/RemoveHoldingButton";
 import { money, pct, num, timeAgo } from "@/lib/format";
 import { optionActionLabel, legPremium } from "@/lib/options";
-import { computeRealizedLots, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
+import { computeRealizedLots, computeOpenPositions, summarizeRealized, type LedgerTx } from "@/lib/tax/realized";
 import { loadSplitRecords } from "@/lib/corporate/load";
 import { splitFactor } from "@/lib/corporate/splits";
 import { getCachedRates } from "@/lib/fx";
@@ -84,21 +83,34 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   const rates = await getCachedRates(supabase, txCurrencies, ccy);
   const fxTo = (c: string | null | undefined) => rates[(c || ccy).toUpperCase()] ?? 1;
 
+  // The raw ledger, one row per transaction in its OWN currency. computeRealizedLots groups by
+  // symbol/exchange/currency precisely so a GBP buy can never become the cost basis for a USD
+  // sale; forcing every row to the instrument's currency here defeated that guard on the one page
+  // that shows the lots.
+  const ledger: LedgerTx[] = txs.map((t) => ({
+    instrument_id: id, dedupe_key: t.dedupe_key, symbol: instrument.symbol, exchange: instrument.exchange,
+    currency: t.currency || ccy, type: t.type,
+    quantity: t.quantity, price: t.price, fees: t.fees, executed_at: t.executed_at,
+  }));
+
   // --- Position math from the raw ledger (works for open and fully-closed positions) ---
-  let shares = 0, buyValue = 0, buyShares = 0, divPaid = 0;
+  let shares = 0, divPaid = 0;
   for (const t of txs) {
-    const r = fxTo(t.currency);
     // Share counts scale with splits; money does not — a split changes how many pieces you hold,
     // never what you paid or were paid.
-    if (t.type === "buy") { shares += sharesOf(t); buyValue += (t.quantity * t.price + t.fees) * r; buyShares += sharesOf(t); }
+    if (t.type === "buy") shares += sharesOf(t);
     else if (t.type === "sell") shares -= sharesOf(t);
-    else if (t.type === "dividend") divPaid += t.quantity * t.price * r;
+    else if (t.type === "dividend") divPaid += t.quantity * t.price * fxTo(t.currency);
   }
-  const avgCost = buyShares > 0 ? buyValue / buyShares : 0;
+  // What the shares still held cost, FIFO — the same rule the positions view applies, so this page
+  // and the dashboard agree. Averaging every buy ever made kept counting shares already sold: one
+  // full wheel cycle (assigned, called away, assigned again) printed a "Paid / sh" that overlapped
+  // the realized gain shown beside it.
+  const costBasis = computeOpenPositions(ledger, holdingSplits).reduce((s, p) => s + p.costBasis * fxTo(p.currency), 0);
+  const avgCost = shares > 0 ? costBasis / shares : 0;
   const netPremium = opts.reduce((s, o) => s + legPremium(o) * fxTo(o.currency), 0); // signed, kept
 
   const marketValue = price != null ? price * shares : 0;
-  const costBasis = avgCost * shares;
   const unrealized = price != null ? marketValue - costBasis : 0;
 
   // Effective cost per share — the seller's real basis: what you paid, less the premium (and
@@ -109,14 +121,6 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   const effectiveCostAfterIncome = avgCost - incomePerShare;
 
   // Realized gains (FIFO) on this symbol.
-  // Each row keeps its OWN currency. computeRealizedLots groups by symbol/exchange/currency
-  // precisely so a GBP buy can never become the cost basis for a USD sale; forcing every row to the
-  // instrument's currency here defeated that guard on the one page that shows the lots.
-  const ledger: LedgerTx[] = txs.map((t) => ({
-    instrument_id: id, dedupe_key: t.dedupe_key, symbol: instrument.symbol, exchange: instrument.exchange,
-    currency: t.currency || ccy, type: t.type,
-    quantity: t.quantity, price: t.price, fees: t.fees, executed_at: t.executed_at,
-  }));
   // Without splits, a pre-split buy cannot cover a post-split sale: FIFO finds a quarter of the
   // shares it needs and books the rest as a zero-basis gain, which overstates the realized profit.
   const realized = summarizeRealized(computeRealizedLots(ledger, holdingSplits), fxTo);
@@ -195,9 +199,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
   const heldNow = shares > 0.0000001;
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-800">
-      <DashboardNav active="overview" />
-
+    <main className="flex-1 bg-slate-50 text-slate-800">
       <div className="mx-auto max-w-5xl px-6 py-8">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
@@ -221,7 +223,7 @@ export default async function HoldingDetail({ params }: { params: Promise<{ id: 
         </div>
 
         {/* Effective cost — the headline "premium lowered my share price" */}
-        {heldNow && buyShares > 0 && (
+        {heldNow && avgCost > 0 && (
           <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
             <h2 className="mb-1 font-semibold">Your effective cost per share</h2>
             <p className="mb-4 text-xs text-slate-400">

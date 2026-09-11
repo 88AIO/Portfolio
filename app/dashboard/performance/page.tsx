@@ -2,13 +2,14 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ensurePortfolio } from "../actions";
-import DashboardNav from "@/components/DashboardNav";
 import { getCachedRates } from "@/lib/fx";
 import { money, pct } from "@/lib/format";
 import {
   buildPerformanceSeries,
   buildHoldingsBacktest,
   buildBenchmarkSeries,
+  benchmarkCoverage,
+  investedAsOf,
   type PerfTransaction,
   type PerfClose,
 } from "@/lib/performance/series";
@@ -187,13 +188,15 @@ export default async function PerformancePage() {
   }
 
   // Overlay the recorded daily snapshots for the dates they cover — exact and immutable, they replace
-  // the reconstruction there. Net invested is held flat across the snapshot region (it only changes on
-  // a trade), so the "invested" line stays continuous instead of jumping to a different definition.
+  // the reconstruction there. Net invested on each snapshot date is the ledger's own figure for that
+  // date: holding it flat at today's value made a deposit inside the snapshot window look like a
+  // market gain ("+$10,000 from the market" the week $10,000 was deposited). In backtest mode there
+  // are no dated flows, so the flat cost reference is kept.
   if (firstSnapDate) {
     const snapPoints = snapDates.map((d) => ({
       date: d,
       value: Math.round(snapValueByDate.get(d) ?? 0),
-      invested: Math.round(endInvested),
+      invested: Math.round(hasRealHistory ? investedAsOf(txs as PerfTransaction[], fx, d) : endInvested),
     }));
     chartData = [...chartData.filter((p) => p.date < firstSnapDate), ...snapPoints].sort((a, b) =>
       a.date.localeCompare(b.date),
@@ -204,6 +207,7 @@ export default async function PerformancePage() {
   // --- S&P 500 benchmark: the same cash you deployed, invested in SPY instead ---
   // Only when there's real trade history (the backtest mode has no dated cash flows to mirror).
   let benchReturnPct: number | null = null;
+  let benchNote: string | null = null;
   if (hasRealHistory && hasData) {
     // SPY is public benchmark reference data every user needs — read it with the service role so it
     // works even though the tightened `instruments` RLS policy only exposes a user's OWN instruments.
@@ -221,19 +225,22 @@ export default async function PerformancePage() {
           .range(from, to),
       );
       const benchCloses: PerfClose[] = spyRows.map((r) => ({ date: r.d, close: r.close }));
-      if (benchCloses.length) {
+      const coverage = benchmarkCoverage(txs as PerfTransaction[], benchCloses);
+      if (benchCloses.length && coverage.uncoveredFlows === 0) {
         const benchByDate = buildBenchmarkSeries(txs as PerfTransaction[], benchCloses, fx, chartData.map((p) => p.date));
         chartData = chartData.map((p) => ({ ...p, benchmark: Math.round(benchByDate.get(p.date) ?? 0) }));
         const benchEnd = benchByDate.get(chartData[chartData.length - 1].date) ?? 0;
         benchReturnPct = endInvested > 0 && benchEnd > 0 ? ((benchEnd - endInvested) / endInvested) * 100 : null;
+      } else if (benchCloses.length) {
+        // A comparison that mirrors only some of the money is not a comparison. Say why it's missing
+        // rather than print a flattering number.
+        benchNote = `The S&P 500 comparison is hidden: ${coverage.uncoveredFlows} of your trades predate the S&P 500 price history we hold (from ${coverage.firstClose}), so the same-money benchmark can't mirror them honestly.`;
       }
     }
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-800">
-      <DashboardNav active="performance" email={user?.email} />
-
+    <main className="flex-1 bg-slate-50 text-slate-800">
       <div className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-2 flex items-start justify-between gap-3">
           {isOwner ? <BackfillButton /> : <span />}
@@ -263,12 +270,14 @@ export default async function PerformancePage() {
           />
         </div>
 
+        {benchNote && <p className="mt-4 text-xs text-slate-500">{benchNote}</p>}
+
         {/* Requires BOTH returns: with no positive deployed capital the user's own return is
             undefined, and "beating the market by X" against an undefined number is meaningless. */}
         {benchReturnPct != null && gainPct != null && (
           <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
             <span className="font-medium text-slate-700">
-              vs. the S&amp;P 500 <span className="text-slate-400">(same money, same timing)</span>:
+              vs. the S&amp;P 500 <span className="text-slate-400">(same money, same timing, price return)</span>:
             </span>
             <span className="tabular-nums">
               You <strong className={gainPct == null ? "text-slate-500" : gainPct >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(gainPct)}</strong>

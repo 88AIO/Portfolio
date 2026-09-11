@@ -3,22 +3,19 @@ import { computeOption, type OptionPositionRow } from "@/lib/options";
 import { buildAlerts, alertsEmailHtml, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell, emailConfig, reportEmailFailure } from "@/lib/email";
 import { fetchAll } from "@/lib/supabase/paginate";
-import { recordSyncRun, listAllUserEmails } from "@/lib/cron";
+import { recordSyncRun, listAllUserEmails, isCronAuthorized } from "@/lib/cron";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// One DB read plus one email per opted-in user, sequentially: 60s capped this at roughly a hundred
+// users before a timeout skipped the run record.
+export const maxDuration = 300;
 
 // Daily options/dividend alerts. For each user who opted in, detect assignment risk, near expiries,
 // and upcoming ex-dividends, skip anything already emailed (sent_notifications), and send one
 // summary email. CRON_SECRET-guarded; fails closed.
 
-function authorized(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  return !!secret && request.headers.get("authorization") === `Bearer ${secret}`;
-}
-
 export async function GET(request: Request) {
-  if (!authorized(request)) return new Response("Unauthorized", { status: 401 });
+  if (!isCronAuthorized(request)) return new Response("Unauthorized", { status: 401 });
   const startedAt = Date.now();
   const admin = createAdminClient();
   const today = new Date().toISOString().slice(0, 10);
@@ -31,7 +28,7 @@ export async function GET(request: Request) {
     fetchAll<{ id: string; user_id: string }>((f, t) =>
       admin.from("portfolios").select("id, user_id").order("id").range(f, t)),
     fetchAll<PositionLite & { portfolio_id: string }>((f, t) =>
-      admin.from("positions").select("portfolio_id, symbol, currency, shares, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency").order("portfolio_id").order("instrument_id").range(f, t)),
+      admin.from("positions").select("portfolio_id, symbol, currency, shares, ex_dividend_date, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency").order("portfolio_id").order("instrument_id").range(f, t)),
     fetchAll<OptionPositionRow & { portfolio_id: string }>((f, t) =>
       admin.from("option_positions").select("*").order("portfolio_id").order("instrument_id").order("option_type").order("strike").order("expiration").range(f, t)),
   ]);

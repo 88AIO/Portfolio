@@ -10,6 +10,31 @@ import { enrichInstrumentProfile } from "@/lib/enrich";
 import { snapshotPortfolioValues } from "@/lib/snapshots";
 import { assertUniformRowShape } from "@/lib/supabase/rowShape";
 import { todayIso } from "@/lib/date";
+import { mergeSplits, splitFactor, type Split, type GlobalSplitRow, type OwnSplitRow } from "@/lib/corporate/splits";
+
+// The splits that apply to this user's ledger: the shared provider rows plus the user's own
+// overrides across every one of their portfolios — the same merge the positions view performs,
+// which is the point (see the reconciliation note in importEquityHistory).
+async function loadSplitsForUser(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  instrumentIds: string[]
+): Promise<Map<string, Split[]>> {
+  const ids = [...new Set(instrumentIds)];
+  if (!ids.length) return new Map();
+  const { data: pfs } = await admin.from("portfolios").select("id").eq("user_id", userId);
+  const pfIds = ((pfs ?? []) as { id: string }[]).map((p) => p.id);
+  const [{ data: globals }, { data: own }] = await Promise.all([
+    admin.from("instrument_splits").select("instrument_id, ex_date, ratio").in("instrument_id", ids),
+    pfIds.length
+      ? admin.from("portfolio_splits").select("id, instrument_id, ex_date, ratio, note, created_at").in("instrument_id", ids).in("portfolio_id", pfIds)
+      : Promise.resolve({ data: [] as OwnSplitRow[] }),
+  ]);
+  const merged = mergeSplits((globals ?? []) as GlobalSplitRow[], (own ?? []) as OwnSplitRow[]);
+  const out = new Map<string, Split[]>();
+  for (const [id, recs] of merged) out.set(id, recs.map(({ exDate, ratio }) => ({ exDate, ratio })));
+  return out;
+}
 
 export type BrokerSyncResult = {
   ok: boolean;
@@ -208,7 +233,8 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     // Dedupe rows by dedupe_key: SnapTrade can emit several legs sharing one reference id, and a
     // single INSERT … ON CONFLICT cannot touch the same key twice — one dup would fail the whole batch.
     const byKey = new Map<string, Row>();
-    const computedByInst = new Map<string, number>();
+    // Share movements per instrument, kept as-traded here and restated for splits below.
+    const movesByInst = new Map<string, { qty: number; date: string }[]>();
     const earliestByInst = new Map<string, string>();
     const metaByInst = new Map<string, { firstPrice: number; currency: string }>();
     let earliestOverall: string | null = null;
@@ -252,8 +278,11 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
         drip: !!tx.drip,
         note: tx.drip ? "Dividend reinvestment" : null,
       });
-      if (tx.txnType === "buy") computedByInst.set(instId, (computedByInst.get(instId) ?? 0) + tx.quantity);
-      else if (tx.txnType === "sell") computedByInst.set(instId, (computedByInst.get(instId) ?? 0) - tx.quantity);
+      if (tx.txnType === "buy" || tx.txnType === "sell") {
+        const moves = movesByInst.get(instId) ?? [];
+        moves.push({ qty: tx.txnType === "buy" ? tx.quantity : -tx.quantity, date: tx.tradeDate });
+        movesByInst.set(instId, moves);
+      }
       if (tx.txnType !== "dividend") {
         if (!earliestByInst.has(instId) || tx.tradeDate < earliestByInst.get(instId)!) {
           earliestByInst.set(instId, tx.tradeDate);
@@ -264,6 +293,22 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     }
     const rows = [...byKey.values()];
     if (!rows.length) return { count: 0 };
+
+    // The shares the activity feed accounts for, in TODAY'S shares. The broker reports its current
+    // position post-split, and the positions view restates every activity row post-split too (a
+    // buy of 10 before a 4-for-1 counts as 40). Summing the as-traded quantities here sized the
+    // opening-balance lot against pre-split numbers, and the view then scaled the activity rows on
+    // top of it: 0.13 CRWD bought before its 4-for-1 plus a 0.40 reconciling lot displayed as 0.93
+    // shares against a real holding of 0.53. The lot must fill the gap in the same units the view
+    // measures it in.
+    const splitsByInst = await loadSplitsForUser(admin, userId, [...movesByInst.keys()]);
+    const computedByInst = new Map<string, number>();
+    for (const [instId, moves] of movesByInst) {
+      const splits = splitsByInst.get(instId);
+      let total = 0;
+      for (const m of moves) total += m.qty * splitFactor(splits, m.date);
+      computedByInst.set(instId, total);
+    }
 
     // Write the real transactions FIRST, before touching anything already in the database. A batch
     // failure here — a bad row, a transient network error, a future NOT-NULL column added the same
@@ -358,7 +403,6 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
         account_type: account.accountType || null,
         currency: account.currency || null,
         is_cash: account.isCash,
-        raw: account.raw ?? null,
       })
       .eq("user_id", userId).eq("provider", "snaptrade").eq("provider_account_id", account.id);
 

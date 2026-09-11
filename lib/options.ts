@@ -86,8 +86,14 @@ export function computeOption(row: OptionPositionRow): ComputedOption {
         ? px < row.strike
         : px > row.strike;
 
+  // Cushion: how far the price would have to move to reach the strike, positive while the option
+  // is out of the money for EITHER type. A put is OTM below its strike (price above), a call is OTM
+  // above its strike (price below) — measuring both as (price − strike) flipped the sign for every
+  // call, printing a comfortable 11%-OTM covered call as "−11% cushion".
   const distanceToStrikePct =
-    px && px > 0 ? ((px - row.strike) / px) * 100 : null;
+    px && px > 0
+      ? (row.option_type === "put" ? (px - row.strike) / px : (row.strike - px) / px) * 100
+      : null;
 
   const annualizedRoC =
     // Only annualize a position that still has time left. A stale ledger leg past its expiration

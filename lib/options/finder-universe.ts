@@ -2,9 +2,11 @@
 // liquid, optionable set kept bounded to stay inside free-tier data limits (cost model:
 // docs/EFFICIENCY_AUDIT.md).
 // Shared so the nightly cron captures IV samples for exactly these names too.
+// Exactly FINDER_MAX_UNIVERSE names: with one more, a user holding no US names was told the scan
+// was "capped" on every run, when nothing of theirs had been cut.
 export const FINDER_UNIVERSE = [
   "AAPL", "MSFT", "NVDA", "AMD", "KO", "PEP", "JPM", "XOM",
-  "O", "SCHD", "QQQ", "SPY", "T", "VZ", "PFE",
+  "O", "SCHD", "QQQ", "SPY", "T", "PFE",
 ];
 
 // Cap on the combined (held + seed) scan universe per request.

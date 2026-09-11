@@ -3,7 +3,6 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/user";
 import { ensurePortfolio, refreshPrices } from "./actions";
-import DashboardNav from "@/components/DashboardNav";
 import { getCachedRates } from "@/lib/fx";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { money, pct, num, timeAgo } from "@/lib/format";
@@ -15,7 +14,7 @@ import FirstRun from "@/components/FirstRun";
 import { CHART_CATEGORICAL } from "@/lib/chartColors";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // "Refresh prices" enriches many holdings; give it room.
+export const maxDuration = 60; // "Refresh prices" quotes every holding in batches; give it room.
 
 type Position = {
   portfolio_id: string;
@@ -52,7 +51,7 @@ export default async function Dashboard({
 
   // The four reads below are independent — fetch them together instead of serially (this is the
   // most-visited page; each awaited round trip adds latency). RLS scopes every one to the user.
-  const [{ data: positions }, { data: optRows }, { data: pfList }, { data: brokerAccts }] =
+  const [{ data: positions }, { data: optRows }, { data: pfList }, { data: brokerAccts }, { data: allRows }] =
     await Promise.all([
       // Consolidate across ALL of the user's portfolios (default + broker-synced).
       supabase.from("positions").select("*").order("symbol"),
@@ -64,6 +63,10 @@ export default async function Dashboard({
       supabase.from("portfolios").select("id, name"),
       // Uninvested cash sitting in each connected brokerage account (from the broker sync).
       supabase.from("broker_accounts").select("portfolio_id, cash_balance, currency"),
+      // Every holding INCLUDING fully-closed ones: what a finished wheel cycle earned (its realized
+      // stock gain and the dividends it paid along the way) belongs in "Total earned" even though
+      // the shares are gone. Reading only live positions dropped both the day a position closed.
+      supabase.from("positions_all").select("currency, realized_gain, div_paid"),
     ]);
   const rows = (positions ?? []) as Position[];
   const pfName = new Map<string, string>(
@@ -76,14 +79,18 @@ export default async function Dashboard({
   const rates = await getCachedRates(supabase, [...rows.map((p) => p.currency), ...optionCurrencies], base);
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
-  let marketValue = 0, costBasis = 0, dayPL = 0, annualDivs = 0, dividendsReceived = 0;
+  let marketValue = 0, costBasis = 0, dayPL = 0, annualDivs = 0, dividendsReceived = 0, realizedGain = 0;
   let unpricedCount = 0; // holdings with no quote yet — excluded from value/cost so P/L isn't distorted
   const mvByPortfolio = new Map<string, number>(); // holdings market value per account, in base currency
+  for (const a of (allRows ?? []) as { currency: string; realized_gain: number | null; div_paid: number | null }[]) {
+    const r = fx(a.currency);
+    // Dividends are real regardless of whether we have a live price, so they always count.
+    dividendsReceived += (a.div_paid ?? 0) * r;
+    realizedGain += (a.realized_gain ?? 0) * r;
+  }
   for (const p of rows) {
     const r = fx(p.currency);
-    // Dividends are real regardless of whether we have a live price, so they always count.
     annualDivs += (p.year_total_divs ?? 0) * r;
-    dividendsReceived += (p.div_paid ?? 0) * r;
     // No quote yet (obscure/intl ticker, or a fetch that hasn't landed): counting its full cost
     // basis against a $0 market value would show the holding as a fabricated ~100% loss. Exclude it
     // from BOTH sides of the capital P/L until a price arrives; the row itself still shows "—".
@@ -118,10 +125,12 @@ export default async function Dashboard({
   }
   const totalValue = marketValue + totalCash; // holdings + free cash = the broker's own account total
   const yieldOnValue = marketValue > 0 ? (annualDivs / marketValue) * 100 : 0;
-  const totalPL = marketValue - costBasis; // pure share appreciation (premium NOT baked in)
+  const totalPL = marketValue - costBasis; // unrealized share appreciation (premium NOT baked in)
   const totalPLpct = costBasis > 0 ? (totalPL / costBasis) * 100 : 0;
-  // Total return = capital gains + dividends received + option premium — each counted once.
-  const totalReturn = totalPL + dividendsReceived + optionPremium;
+  // Total return = unrealized gains + realized gains on shares sold + dividends received + option
+  // premium — each counted once. With FIFO cost basis the realized and unrealized parts never
+  // overlap: a lot is either still held (unrealized) or sold (realized), never both.
+  const totalReturn = totalPL + realizedGain + dividendsReceived + optionPremium;
   const totalReturnPct = costBasis > 0 ? (totalReturn / costBasis) * 100 : 0;
 
   // Group holdings by portfolio (account), with per-account subtotals.
@@ -227,9 +236,7 @@ export default async function Dashboard({
   const pricesAsOf = asOfTimes.length ? new Date(Math.min(...asOfTimes)).toISOString() : null;
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
-      <DashboardNav active="overview" email={user?.email} />
-
+    <main className="flex-1 bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
       <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Page intro */}
         <div className="mb-5">
@@ -253,16 +260,16 @@ export default async function Dashboard({
           />
           <Tile
             label="Total earned"
-            hint="Everything you've made: price gains, dividends, and option premium, counted once each."
+            hint="Everything you've made: gains on shares you still hold, gains on shares you've sold, dividends, and option premium — counted once each."
             value={money(totalReturn, base)}
-            sub={optionPremium !== 0 ? "gains + dividends + premium" : `${pct(totalReturnPct)} incl. dividends`}
+            sub={optionPremium !== 0 || realizedGain !== 0 ? "gains + sold + dividends + premium" : `${pct(totalReturnPct)} incl. dividends`}
             positive={totalReturn >= 0}
           />
           <Tile
             label="Gain / loss"
-            hint="How much your shares are up or down versus what you paid — price only, before dividends."
+            hint="How much the shares you still hold are up or down versus what those shares cost (first-in, first-out) — price only, before dividends."
             value={money(totalPL, base)}
-            sub={`${pct(totalPLpct)} on shares`}
+            sub={`${pct(totalPLpct)} on shares held`}
             positive={totalPL >= 0}
           />
           <Tile label="Today" hint="How much your holdings moved so far today." value={money(dayPL, base)} positive={dayPL >= 0} />
@@ -273,7 +280,7 @@ export default async function Dashboard({
             sub={`${pct(yieldOnValue)} yield`}
             neutral
           />
-          <Tile label="Invested" hint="What you paid for everything you currently hold." value={money(costBasis, base)} muted />
+          <Tile label="Invested" hint="What the shares you currently hold cost you (first-in, first-out)." value={money(costBasis, base)} muted />
         </div>
 
         {unpricedCount > 0 && (
@@ -482,6 +489,13 @@ export default async function Dashboard({
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
                   ↓ Transactions (.csv)
+                </a>
+                <a
+                  href="/api/export/options"
+                  download
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  ↓ Options (.csv)
                 </a>
                 <a
                   href="/api/export/holdings"

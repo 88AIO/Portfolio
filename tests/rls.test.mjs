@@ -198,6 +198,50 @@ describe("RLS cross-tenant isolation", { skip }, () => {
   it("portfolio_totals view: does not leak another tenant's totals", () =>
     assertScoped(clientA, "portfolio_totals", A.portfolioId, B.portfolioId));
 
+  it("positions_all view: does not leak another tenant's closed holdings either", () =>
+    assertScoped(clientA, "positions_all", A.portfolioId, B.portfolioId));
+
+  // Not an isolation test, but the one place the SQL view's money math runs against a real
+  // Postgres in CI. Its twin is tests/open-positions.test.mjs (lib/tax/realized.ts); the numbers
+  // here must match those there. The seed is buy 10 @ 100 on the shared instrument, plus a user
+  // split override of 2-for-1 on 2024-06-10 — so today's shares are 20 at a $50 basis.
+  it("positions view: cost basis is FIFO over the lots still held, in today's shares", async () => {
+    const inst = await db
+      .from("instruments")
+      .insert({ symbol: `RLSF${suffix}`, exchange: "US", name: "FIFO Test", currency: "USD" })
+      .select("id")
+      .single();
+    assert.equal(inst.error, null, `seed fifo instrument: ${inst.error?.message}`);
+    const iid = inst.data.id;
+    // Assigned 100 @ 50, called away @ 55, assigned again 100 @ 52 — the wheel seller's basic cycle.
+    const seed = await db.from("transactions").insert([
+      { portfolio_id: A.portfolioId, instrument_id: iid, type: "buy", quantity: 100, price: 50, currency: "USD", executed_at: "2024-01-10", dedupe_key: `f1-${suffix}` },
+      { portfolio_id: A.portfolioId, instrument_id: iid, type: "sell", quantity: 100, price: 55, currency: "USD", executed_at: "2024-06-10", dedupe_key: `f2-${suffix}` },
+      { portfolio_id: A.portfolioId, instrument_id: iid, type: "buy", quantity: 100, price: 52, currency: "USD", executed_at: "2025-01-10", dedupe_key: `f3-${suffix}` },
+    ]);
+    assert.equal(seed.error, null, `seed fifo rows: ${seed.error?.message}`);
+    try {
+      const { data, error } = await clientA
+        .from("positions").select("shares, avg_cost, cost_basis, realized_gain").eq("instrument_id", iid).single();
+      assert.equal(error, null, `read positions: ${error?.message}`);
+      assert.equal(Number(data.shares), 100);
+      assert.equal(Number(data.avg_cost), 52, "only the second lot is still held");
+      assert.equal(Number(data.cost_basis), 5200);
+      assert.equal(Number(data.realized_gain), 500, "the first lot's gain, once");
+
+      // The split case: buy 10 @ 100 before the user's 2-for-1 override → 20 shares at $50.
+      const { data: split, error: splitErr } = await clientA
+        .from("positions").select("shares, avg_cost, cost_basis").eq("instrument_id", instrumentId).single();
+      assert.equal(splitErr, null, `read split position: ${splitErr?.message}`);
+      assert.equal(Number(split.shares), 20);
+      assert.equal(Number(split.avg_cost), 50);
+      assert.equal(Number(split.cost_basis), 1000);
+    } finally {
+      await db.from("transactions").delete().eq("instrument_id", iid);
+      await db.from("instruments").delete().eq("id", iid);
+    }
+  });
+
   it("isolation is symmetric (B cannot see A either)", () =>
     assertScoped(clientB, "positions", B.portfolioId, A.portfolioId));
 
@@ -233,5 +277,40 @@ describe("RLS cross-tenant isolation", { skip }, () => {
       .from("portfolios")
       .insert({ user_id: B.id, name: "spoofed" });
     assert.notEqual(error, null, "RLS with-check must reject inserting a portfolio owned by another user");
+  });
+
+  it("write guard: a user cannot update or delete another tenant's row by id", async () => {
+    const { data: bRow } = await db
+      .from("transactions").select("id, quantity").eq("portfolio_id", B.portfolioId).limit(1).single();
+    // UPDATE by a guessed id: RLS makes the row invisible, so zero rows change and no error leaks
+    // whether the id exists.
+    const upd = await clientA.from("transactions").update({ quantity: 999 }).eq("id", bRow.id).select("id");
+    assert.equal(upd.error, null);
+    assert.equal((upd.data ?? []).length, 0, "A updated a row it cannot see");
+    const del = await clientA.from("transactions").delete().eq("id", bRow.id).select("id");
+    assert.equal(del.error, null);
+    assert.equal((del.data ?? []).length, 0, "A deleted a row it cannot see");
+    const { data: still } = await db.from("transactions").select("quantity").eq("id", bRow.id).single();
+    assert.equal(Number(still.quantity), Number(bRow.quantity), "B's row must be untouched");
+  });
+
+  it("shared reference tables are read-only for signed-in users", async () => {
+    // price_cache, dividends and instrument_splits are written by the service role only. A client
+    // that could write them would restate every other user's prices or cost basis.
+    const price = await clientA.from("price_cache").upsert({ instrument_id: instrumentId, price: 1, currency: "USD" });
+    assert.notEqual(price.error, null, "authenticated write to price_cache must be rejected");
+    const split = await clientA.from("instrument_splits").insert({ instrument_id: instrumentId, ex_date: "2020-01-01", ratio: 10 });
+    assert.notEqual(split.error, null, "authenticated write to instrument_splits must be rejected");
+    const div = await clientA.from("dividends").insert({ instrument_id: instrumentId, ex_date: "2020-01-01", amount: 1 });
+    assert.notEqual(div.error, null, "authenticated write to dividends must be rejected");
+  });
+
+  it("signed-out (anon) reads return nothing from every user table and view", async () => {
+    const anon = createClient(URL, ANON, { auth: { persistSession: false } });
+    for (const table of ["portfolios", "transactions", "option_transactions", "positions", "positions_all", "option_positions", "portfolio_value_history", "notification_prefs", "broker_accounts", "consent_log", "instruments"]) {
+      const { data, error } = await anon.from(table).select("*").limit(5);
+      assert.equal(error, null, `${table}: anon read errored: ${error?.message}`);
+      assert.equal((data ?? []).length, 0, `${table}: anon read returned rows`);
+    }
   });
 });

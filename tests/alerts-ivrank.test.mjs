@@ -28,7 +28,7 @@ const pos = (o = {}) => ({
   symbol: "SCHD",
   currency: "USD",
   shares: 100,
-  next_dividend_date: null,
+  ex_dividend_date: null,
   next_dividend_per_share: 0.25,
   annual_div_per_share: 1,
   div_frequency: 4,
@@ -70,36 +70,36 @@ test("an already-expired option (negative dte) does not alert", () => {
 });
 
 test("an ex-dividend inside three days alerts, with an estimated amount", () => {
-  const items = buildAlerts([], [pos({ next_dividend_date: "2026-09-01" })], TODAY);
+  const items = buildAlerts([], [pos({ ex_dividend_date: "2026-09-01" })], TODAY);
   assert.equal(items.length, 1);
   assert.match(items[0].text, /ex-dividend/);
   assert.match(items[0].text, /25/, "0.25 x 100 shares");
 });
 
 test("ex-dividends outside the window, in the past, or on shares you do not hold are skipped", () => {
-  assert.deepEqual(buildAlerts([], [pos({ next_dividend_date: "2026-09-10" })], TODAY), [], "too far out");
-  assert.deepEqual(buildAlerts([], [pos({ next_dividend_date: "2026-08-29" })], TODAY), [], "already passed");
-  assert.deepEqual(buildAlerts([], [pos({ next_dividend_date: "2026-09-01", shares: 0 })], TODAY), [], "not held");
+  assert.deepEqual(buildAlerts([], [pos({ ex_dividend_date: "2026-09-10" })], TODAY), [], "too far out");
+  assert.deepEqual(buildAlerts([], [pos({ ex_dividend_date: "2026-08-29" })], TODAY), [], "already passed");
+  assert.deepEqual(buildAlerts([], [pos({ ex_dividend_date: "2026-09-01", shares: 0 })], TODAY), [], "not held");
 });
 
 test("the ex-dividend window includes both boundary days", () => {
-  assert.equal(buildAlerts([], [pos({ next_dividend_date: TODAY })], TODAY).length, 1, "today counts");
-  assert.equal(buildAlerts([], [pos({ next_dividend_date: "2026-09-02" })], TODAY).length, 1, "day three counts");
+  assert.equal(buildAlerts([], [pos({ ex_dividend_date: TODAY })], TODAY).length, 1, "today counts");
+  assert.equal(buildAlerts([], [pos({ ex_dividend_date: "2026-09-02" })], TODAY).length, 1, "day three counts");
 });
 
 test("a missing per-share estimate falls back to annual/frequency, and omits the figure if neither", () => {
-  const derived = buildAlerts([], [pos({ next_dividend_date: "2026-09-01", next_dividend_per_share: null })], TODAY);
+  const derived = buildAlerts([], [pos({ ex_dividend_date: "2026-09-01", next_dividend_per_share: null })], TODAY);
   assert.match(derived[0].text, /25/, "1.00/yr over 4 payments x 100 shares");
 
   const none = buildAlerts([], [pos({
-    next_dividend_date: "2026-09-01", next_dividend_per_share: null, annual_div_per_share: null,
+    ex_dividend_date: "2026-09-01", next_dividend_per_share: null, annual_div_per_share: null,
   })], TODAY);
   assert.doesNotMatch(none[0].text, /~/, "no invented number when nothing is known");
 });
 
 test("dedupe keys are stable per event so a daily cron never re-sends the same alert", () => {
-  const a = buildAlerts([opt({ status: "may_be_assigned", dte: 5 })], [pos({ next_dividend_date: "2026-09-01" })], TODAY);
-  const b = buildAlerts([opt({ status: "may_be_assigned", dte: 4 })], [pos({ next_dividend_date: "2026-09-01" })], "2026-08-31");
+  const a = buildAlerts([opt({ status: "may_be_assigned", dte: 5 })], [pos({ ex_dividend_date: "2026-09-01" })], TODAY);
+  const b = buildAlerts([opt({ status: "may_be_assigned", dte: 4 })], [pos({ ex_dividend_date: "2026-09-01" })], "2026-08-31");
   assert.deepEqual(a.map((i) => i.dedupeKey), b.map((i) => i.dedupeKey), "keys must not move with the calendar");
   assert.equal(new Set(a.map((i) => i.dedupeKey)).size, a.length, "no collisions");
 });
@@ -107,7 +107,7 @@ test("dedupe keys are stable per event so a daily cron never re-sends the same a
 test("alerts come back in date order", () => {
   const items = buildAlerts(
     [opt({ dte: 2, expiration: "2026-09-01", strike: 1 }), opt({ dte: 0, expiration: "2026-08-30", strike: 2 })],
-    [pos({ next_dividend_date: "2026-08-31" })],
+    [pos({ ex_dividend_date: "2026-08-31" })],
     TODAY
   );
   assert.deepEqual(items.map((i) => i.date), ["2026-08-30", "2026-08-31", "2026-09-01"]);

@@ -7,6 +7,9 @@ export type PositionLite = {
   symbol: string;
   currency: string;
   shares: number;
+  // The declared ex-dividend date. This — not next_dividend_date, which is the PAY date — is the
+  // day a covered-call seller can be assigned early and the day you must already hold the shares.
+  ex_dividend_date: string | null;
   next_dividend_date: string | null;
   next_dividend_per_share: number | null;
   annual_div_per_share: number | null;
@@ -49,17 +52,25 @@ export function buildAlerts(options: ComputedOption[], positions: PositionLite[]
   }
   const in3 = addDaysIso(today, 3);
   for (const p of positions) {
-    if (p.shares > 0 && p.next_dividend_date && p.next_dividend_date >= today && p.next_dividend_date <= in3) {
+    const exDate = upcomingExDate(p, today);
+    if (p.shares > 0 && exDate && exDate <= in3) {
       const est = p.next_dividend_per_share ?? (p.annual_div_per_share && p.div_frequency ? p.annual_div_per_share / p.div_frequency : null);
       items.push({
-        dedupeKey: `exdiv:${p.symbol}:${p.next_dividend_date}`,
+        dedupeKey: `exdiv:${p.symbol}:${exDate}`,
         severity: "info",
-        date: p.next_dividend_date,
-        text: `${p.symbol} goes ex-dividend on ${p.next_dividend_date}${est != null ? ` (~${money(est * p.shares, p.currency)})` : ""}.`,
+        date: exDate,
+        text: `${p.symbol} goes ex-dividend on ${exDate}${est != null ? ` (~${money(est * p.shares, p.currency)})` : ""}.`,
       });
     }
   }
   return items.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// The next ex-dividend date for a holding, or null when none is declared ahead of today. Reads
+// only the ex-date column: the alerts used to fire off next_dividend_date, which the provider
+// fills with the PAY date — two to four weeks after the day that actually matters to a seller.
+export function upcomingExDate(p: Pick<PositionLite, "ex_dividend_date">, today: string): string | null {
+  return p.ex_dividend_date && p.ex_dividend_date >= today ? p.ex_dividend_date : null;
 }
 
 export function alertsEmailHtml(items: AlertItem[]): string {

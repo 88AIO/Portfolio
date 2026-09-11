@@ -134,19 +134,22 @@ async function getQuote(
   knownCurrency?: string | null
 ): Promise<Quote> {
   const empty: Quote = { price: null, currency: null, changePct: null };
-  const d = await get<{ close?: unknown; change_p?: unknown }>(
+  const d = await get<{ close?: unknown; change_p?: unknown; timestamp?: unknown }>(
     `/real-time/${encodeURIComponent(ticker(symbol, exchange))}`,
     60
   );
   if (!d) return empty;
   const price = num(d.close);
   const divisor = minorUnitDivisor(exchange, knownCurrency);
+  // `timestamp` is epoch seconds of the last trade — the honest "prices as of".
+  const ts = num(d.timestamp);
   return {
     price: price != null ? price / divisor : null,
     // The real-time endpoint doesn't return a currency; the instrument row carries it (set from
     // searchInstrument at add time), so leaving it null means "unchanged" rather than "USD".
     currency: null,
     changePct: num(d.change_p),
+    asOf: ts != null && ts > 0 ? new Date(ts * 1000).toISOString() : null,
   };
 }
 
@@ -267,8 +270,10 @@ async function getPriceHistory(
   knownCurrency?: string | null
 ): Promise<PriceHistoryPoint[]> {
   // Weekly bars (period=w) to match the Yahoo provider: ~52 points/year per instrument, light to
-  // store and to draw. adjusted_close so splits don't put a false cliff in the value chart.
-  const rows = await get<Array<{ date?: string; close?: unknown; adjusted_close?: unknown }>>(
+  // store and to draw. The raw `close`, deliberately: adjusted_close is adjusted for dividends as
+  // well as splits, which is the wrong series for a value chart (see PriceHistoryPoint). Splits
+  // are applied by the sync from instrument_splits — capabilities.priceHistorySplitAdjusted: false.
+  const rows = await get<Array<{ date?: string; close?: unknown }>>(
     `/eod/${encodeURIComponent(ticker(symbol, exchange))}?period=w&from=${daysAgo(fromDays)}`,
     86_400
   );
@@ -277,7 +282,7 @@ async function getPriceHistory(
   const out: PriceHistoryPoint[] = [];
   for (const r of rows) {
     const date = ymd(r.date);
-    const close = num(r.adjusted_close) ?? num(r.close);
+    const close = num(r.close);
     if (!date || close == null) continue;
     out.push({ date, close: close / divisor });
   }
@@ -323,7 +328,7 @@ async function getFundBreakdown(symbol: string, exchange: string): Promise<FundB
 
 export const eodhdProvider: MarketDataProvider = {
   name: "eodhd",
-  capabilities: { options: false },
+  capabilities: { options: false, priceHistorySplitAdjusted: false },
   getQuote,
   getFxRate,
   searchInstrument,

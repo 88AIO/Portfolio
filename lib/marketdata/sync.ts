@@ -10,9 +10,11 @@ import {
   getSplitHistory,
   getQuote,
   getOptionChain,
+  getProvider,
   providerSupportsOptions,
 } from "@/lib/marketdata";
 import { inferDivFrequency } from "@/lib/dividends/cadence";
+import { splitFactor, type Split } from "@/lib/corporate/splits";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -74,9 +76,22 @@ export async function syncInstrumentPriceHistory(
 ) {
   const history = await getPriceHistory(symbol, exchange, fromDays, currency);
   if (!history.length) return;
+  // price_history stores split-adjusted (today's-shares) closes. A provider whose feed is as-traded
+  // gets the shared provider splits applied here — the sync writes instrument_splits just before
+  // this runs — so a pre-split $1,200 close lands as the $120 it is in today's shares.
+  let adjust: (close: number, date: string) => number = (close) => close;
+  if (!getProvider().capabilities.priceHistorySplitAdjusted) {
+    const { data } = await admin
+      .from("instrument_splits").select("ex_date, ratio").eq("instrument_id", instrumentId);
+    const splits: Split[] = (data ?? [])
+      .filter((r: { ex_date: string | null; ratio: number | null }) => r.ex_date && r.ratio != null)
+      .map((r: { ex_date: string | null; ratio: number | null }) => ({ exDate: r.ex_date as string, ratio: Number(r.ratio) }))
+      .sort((a: Split, b: Split) => a.exDate.localeCompare(b.exDate));
+    if (splits.length) adjust = (close, date) => close / splitFactor(splits, date);
+  }
   for (let i = 0; i < history.length; i += 500) {
     await admin.from("price_history").upsert(
-      history.slice(i, i + 500).map((h) => ({ instrument_id: instrumentId, d: h.date, close: h.close })),
+      history.slice(i, i + 500).map((h) => ({ instrument_id: instrumentId, d: h.date, close: adjust(h.close, h.date) })),
       { onConflict: "instrument_id,d" }
     );
   }
@@ -142,11 +157,17 @@ export async function syncInstrumentDividends(
       history.map((h) => ({ instrument_id: instrumentId, ex_date: h.exDate, amount: h.amount, currency })),
       { onConflict: "instrument_id,ex_date" }
     );
-    const now = Date.now();
-    const last12 = history.filter((h) => now - new Date(h.exDate).getTime() < 366 * 24 * 60 * 60 * 1000);
-    ttmSum = last12.reduce((s, h) => s + (h.amount || 0), 0);
     patch.div_frequency = inferDivFrequency(history);
     patch.next_dividend_per_share = history[history.length - 1].amount;
+    // Trailing twelve months of payouts. When the cadence is known, that is the last `freq`
+    // payments, not "everything inside a 366-day window": a quarterly payer whose ex-dates fall
+    // just inside both ends of the window returns FIVE payments, overstating the annual figure by
+    // 25% for the distribution ETFs that rely on it (no forward rate from the provider).
+    const freqKnown = patch.div_frequency as number | null;
+    const now = Date.now();
+    const withinYear = history.filter((h) => now - new Date(h.exDate).getTime() < 366 * 24 * 60 * 60 * 1000);
+    const last12 = freqKnown && freqKnown > 0 && withinYear.length > freqKnown ? withinYear.slice(-freqKnown) : withinYear;
+    ttmSum = last12.reduce((s, h) => s + (h.amount || 0), 0);
   }
 
   // Annual dividend per share — honest, forward-looking, and never inflated across a cut:
@@ -164,6 +185,11 @@ export async function syncInstrumentDividends(
     annual = forward;
   } else if (ttmSum > 0) {
     annual = recentRunRate > 0 && recentRunRate < ttmSum * 0.8 ? recentRunRate : ttmSum;
+  } else if (history.length) {
+    // A name that used to pay and has paid nothing for a year, with no forward rate, has
+    // suspended its dividend. Leaving the column untouched kept projecting the old payout into
+    // "Dividends / yr" and the calendar forever; zero is the honest figure.
+    annual = 0;
   } else {
     annual = forward;
   }
@@ -174,22 +200,36 @@ export async function syncInstrumentDividends(
   }
 }
 
-// Refresh a single instrument's cached quote (price + day change).
+// Refresh a single instrument's cached quote (price + day change). Returns whether a price was
+// actually written: the nightly sync counts these, because a provider outage that returns nothing
+// looks identical to a clean night otherwise (every method degrades to null rather than throwing).
 export async function syncInstrumentQuote(
   admin: Admin,
   instrumentId: string,
   symbol: string,
   exchange: string,
   currency?: string
-) {
+): Promise<boolean> {
   const q = await getQuote(symbol, exchange, currency);
-  if (q.price != null) {
-    await admin.from("price_cache").upsert({
-      instrument_id: instrumentId,
-      price: q.price,
-      change_pct: q.changePct,
-      currency: q.currency ?? currency ?? null,
-      as_of: new Date().toISOString(),
-    });
+  if (q.price == null) return false;
+  const { error } = await admin.from("price_cache").upsert({
+    instrument_id: instrumentId,
+    price: q.price,
+    change_pct: q.changePct,
+    currency: q.currency ?? currency ?? null,
+    as_of: quoteAsOf(q.asOf),
+  });
+  return !error;
+}
+
+// "Prices as of" is the market's timestamp when the provider gives one, never later than now, and
+// the fetch time only as a fallback. A price fetched on Sunday is Friday's close, and the label
+// should say so instead of "2 hours ago".
+export function quoteAsOf(asOf: string | null | undefined): string {
+  const now = Date.now();
+  if (asOf) {
+    const t = Date.parse(asOf);
+    if (Number.isFinite(t) && t > 0 && t <= now) return new Date(t).toISOString();
   }
+  return new Date(now).toISOString();
 }
