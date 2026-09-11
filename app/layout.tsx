@@ -21,6 +21,9 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title,
   description,
+  // Resolved against metadataBase per page, so the vercel.app alias and the custom domain never
+  // compete as duplicates once NEXT_PUBLIC_SITE_URL names the real one.
+  alternates: { canonical: "./" },
   manifest: "/manifest.webmanifest",
   applicationName: "Snowfolio",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "Snowfolio" },
@@ -47,10 +50,9 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f7f4ec" },
-    { media: "(prefers-color-scheme: dark)", color: "#1b1914" },
-  ],
+  // The app deliberately keeps its ivory paper in dark-OS contexts too (see globals.css), so the
+  // browser chrome must match it — a near-black address bar over an ivory page looked broken.
+  themeColor: "#f7f4ec",
 };
 
 export default function RootLayout({

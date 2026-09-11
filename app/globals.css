@@ -20,14 +20,19 @@
 
   --font-sans: var(--font-manrope), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   --font-display: var(--font-fraunces), Georgia, "Times New Roman", serif;
-  --font-mono: var(--font-manrope), ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* A real monospace: the MFA setup key and CSV column names are styled font-mono precisely so
+     their characters line up and read unambiguously. Mapping it to Manrope defeated that. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
   /* Neutral ramp — warm stone / ink (replaces cold slate everywhere) */
   --color-slate-50: #f6f3ea;
   --color-slate-100: #eee9dc;
   --color-slate-200: #e2ddce;
   --color-slate-300: #cec7b4;
-  --color-slate-400: #9c968a;
+  /* 400 is the app's "quiet text" tone — table headers, hints, "prices as of". It was #9c968a,
+     2.9:1 on white, which fails WCAG AA for text (4.5:1) and is genuinely hard to read on a
+     phone in daylight. This shade keeps the warm, receding feel at ~4.9:1 on white and ~4.5:1 on the paper. */
+  --color-slate-400: #736e62;
   --color-slate-500: #6f6a5d;
   --color-slate-600: #565144;
   --color-slate-700: #3f3b31;
@@ -106,4 +111,33 @@ h2 {
 /* Tabular figures wherever numbers line up in columns. */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+/* Respect the OS "reduce motion" setting: no shimmer, no spinners, no smooth scrolling, no
+   transitions. The content is identical; only the movement goes. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Statements are printed. Drop the dark app header and the paper tint; let the tables run. */
+@media print {
+  body {
+    background: #fff;
+  }
+  header,
+  footer,
+  nav,
+  form,
+  button {
+    display: none !important;
+  }
 }

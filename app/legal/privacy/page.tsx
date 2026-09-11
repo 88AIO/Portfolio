@@ -59,8 +59,8 @@ export default function PrivacyPage() {
       <P>
         We keep your data while your account is active and as needed to provide the Service. Your daily
         value history is retained so your long-term performance record persists. You can delete your
-        account and associated personal data by contacting us; some records may be retained where
-        required by law.
+        account and everything in it yourself at any time from Settings, or by contacting us; some
+        records may be retained where required by law.
       </P>
 
       <H2>Security</H2>
@@ -80,7 +80,7 @@ export default function PrivacyPage() {
       </P>
       <UL>
         <li>Most of your data is viewable and editable directly in the app.</li>
-        <li>Turn off emails anytime via notification settings.</li>
+        <li>Turn off emails anytime from the notification toggles on the Options page. They are off by default.</li>
         <li>To request access, correction, deletion, or a copy of your data, email{" "}
           <a href={`mailto:${CONTACT_EMAIL}`} className="text-indigo-600 underline">{CONTACT_EMAIL}</a>.
           We will respond within the time required by applicable law.</li>

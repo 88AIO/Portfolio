@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
-import DashboardNav from "@/components/DashboardNav";
 import { getCachedRates } from "@/lib/fx";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { money, pct } from "@/lib/format";
@@ -260,9 +259,7 @@ export default async function DividendsPage() {
   );
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-800">
-      <DashboardNav active="dividends" />
-
+    <main className="flex-1 bg-slate-50 text-slate-800">
       <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Forecast summary */}
         <div className="mb-2 flex justify-end">

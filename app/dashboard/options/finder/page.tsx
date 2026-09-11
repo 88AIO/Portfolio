@@ -1,5 +1,4 @@
 import Link from "next/link";
-import DashboardNav from "@/components/DashboardNav";
 import PutFinder from "@/components/PutFinder";
 
 export const dynamic = "force-dynamic";
@@ -7,9 +6,7 @@ export const maxDuration = 60; // the scan pulls option chains for a bounded uni
 
 export default function PutFinderPage() {
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
-      <DashboardNav active="options" />
-
+    <main className="flex-1 bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
       <div className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-5">
           <Link href="/dashboard/options" className="text-sm text-indigo-600 hover:underline">← Back to Options</Link>
@@ -22,8 +19,9 @@ export default function PutFinderPage() {
             colored low → high to keep risk visible.
           </p>
           <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            Informational only — this is not a recommendation to sell any option. IV shown is current implied
-            volatility (a 52-week <em>IV-rank</em> and a dividend-safety score are on the roadmap).
+            Informational only — this is not a recommendation to sell any option. IV is the current implied
+            volatility; IV rank places it against the past year&apos;s readings and stays blank until enough
+            history exists to rank honestly.
           </div>
           <div className="mt-5">
             <PutFinder />

@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
-import DashboardNav from "@/components/DashboardNav";
 import { isBrokerSyncConfigured, isBrokerSyncOwner } from "@/lib/brokersync";
 import { timeAgo } from "@/lib/format";
 import BrokerConnect from "@/components/BrokerConnect";
@@ -56,9 +55,7 @@ export default async function BrokerPage() {
   }, null);
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-800">
-      <DashboardNav active="broker" email={user?.email} />
-
+    <main className="flex-1 bg-slate-50 text-slate-800">
       <div className="mx-auto max-w-3xl px-6 py-8 space-y-6">
         {/* Intro / what this does */}
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-soft">
@@ -120,9 +117,13 @@ export default async function BrokerPage() {
             </div>
           ) : (
             <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
-              Broker sync isn&apos;t set up yet. Add your SnapTrade API keys
-              (<span className="font-mono">SNAPTRADE_CLIENT_ID</span> /{" "}
-              <span className="font-mono">SNAPTRADE_CONSUMER_KEY</span>) to enable it.
+              {isOwner ? (
+                <>Broker sync isn&apos;t set up yet. Add your SnapTrade API keys
+                (<span className="font-mono">SNAPTRADE_CLIENT_ID</span> /{" "}
+                <span className="font-mono">SNAPTRADE_CONSUMER_KEY</span>) to enable it.</>
+              ) : (
+                <>Brokerage auto-sync is on the roadmap. Until then, add holdings by hand or import a CSV from the dashboard.</>
+              )}
             </p>
           )}
         </section>

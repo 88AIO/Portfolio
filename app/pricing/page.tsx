@@ -9,14 +9,19 @@ export const metadata: Metadata = {
     "Start free with no holding cap. A generous free tier for your whole portfolio, dividends, and option income, with a Pro tier for deeper analytics coming later. No ads, no upsell.",
 };
 
+// Everything listed under Free is live today. Alerts and the weekly digest were once pencilled in
+// as Pro, but they shipped free — and the FAQ below promises that what is free stays free, so the
+// list has to say what the app actually does.
 const freeIncludes = [
   "Your whole portfolio, no holding cap",
   "Dividends + option premium in one income view",
   "Dividend calendar & 0–100 safety score",
-  "Options-seller cockpit (the wheel, premium over time)",
+  "Options-seller cockpit (the wheel, premium over time, put finder)",
+  "Email alerts: assignment, expiry, ex-dividend",
+  "Weekly income digest",
   "Performance with S&P 500 benchmark",
-  "US & international, multi-account rollup",
-  "Realized gains (FIFO), short vs. long term",
+  "US & international, in your base currency",
+  "Realized gains (FIFO), short- and long-term",
   "CSV import/export, no lock-in",
   "Nightly price & dividend refresh",
 ];
@@ -24,8 +29,7 @@ const freeIncludes = [
 const proIncludes = [
   "Everything in Free",
   "Advanced analytics & backtesting",
-  "Email alerts: assignment, expiry, ex-dividend",
-  "Weekly income digest",
+  "Brokerage auto-sync",
   "Rebalancing tools",
   "Priority support",
 ];
@@ -35,6 +39,7 @@ export default function PricingPage() {
     <div className="bg-[#f7f4ec] text-slate-800">
       <MarketingNav />
 
+      <main>
       <section className="relative overflow-hidden">
         <div
           aria-hidden
@@ -66,7 +71,7 @@ export default function PricingPage() {
             </div>
             <p className="mt-2 text-sm text-slate-500">Everything you need to see your real income.</p>
             <Link
-              href="/login"
+              href="/login?mode=signup"
               className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-slate-900 py-3 text-sm font-medium text-[#f7f4ec] shadow-sm transition hover:bg-slate-800"
             >
               Get started free
@@ -132,7 +137,7 @@ export default function PricingPage() {
           <h2 className="font-display text-3xl font-medium tracking-tight text-[#f7f4ec] sm:text-4xl">Start free today.</h2>
           <p className="mx-auto mt-4 max-w-lg text-lg leading-relaxed text-[#c7ddd3]">No card, no catch. See your income picture in minutes.</p>
           <Link
-            href="/login"
+            href="/login?mode=signup"
             className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#f7f4ec] px-6 py-3 font-medium text-[#173f33] shadow-sm transition hover:bg-white"
           >
             Get started free
@@ -140,6 +145,7 @@ export default function PricingPage() {
           </Link>
         </div>
       </section>
+      </main>
 
       <MarketingFooter />
     </div>

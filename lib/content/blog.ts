@@ -50,7 +50,7 @@ export const posts: Post[] = [
       { type: "h2", text: "Delayed is fine. Pretending isn't." },
       { type: "p", text: "Free and low-cost market data is often delayed, and that's usually fine for tracking a long-term portfolio. What isn't fine is presenting a delayed number as if it were live. So everywhere a price appears in Snowfolio, you can see when it was last updated. “Prices as of two hours ago” is more useful than a confident wrong number." },
       { type: "h2", text: "Honest about the hard cases" },
-      { type: "p", text: "Some holdings need extra honesty. High-yield ETFs can pay out capital as well as income; we show that plainly rather than flattering the yield. Holdings with too little dividend history stay unrated on our safety score instead of getting a made-up grade. When we don't know something, we say so." },
+      { type: "p", text: "Some holdings need extra honesty. A yield that looks too good to be true gets marked down by the safety score rather than flattered. Holdings with too little dividend history stay unrated instead of getting a made-up grade. When we don't know something, we say so." },
       { type: "quote", text: "We would rather show a number we can stand behind than a confident wrong one." },
       { type: "p", text: "It's a small principle with a big effect: you can act on what you see, because you know exactly how fresh it is." },
     ],
@@ -66,7 +66,7 @@ export const posts: Post[] = [
     body: [
       { type: "p", text: "Portfolio tools tend to land at one of two extremes. The powerful ones bury you in tabs, metrics, and settings until checking your holdings feels like a job. The simple ones are pleasant but thin, and often dishonest about their data. Neither serves someone who just wants a clear, trustworthy read on what they own and what it earns." },
       { type: "h2", text: "Simple by default, depth on demand" },
-      { type: "p", text: "The home screen should answer three questions: what do I own, what's it worth, and what income is coming. That's it. Backtests, x-rays, and deep metrics are one tap away, off by default, for the moments you actually want them." },
+      { type: "p", text: "The home screen should answer three questions: what do I own, what's it worth, and what income is coming. That's it. The per-holding detail, the options cockpit and the performance chart are one tap away, off by default, for the moments you actually want them." },
       { type: "h2", text: "No ads, no upsell, no lock-in" },
       { type: "ul", items: [
         "No ads, ever, and we don't sell your data.",

@@ -16,7 +16,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   return {
     title: `${post.title} — Snowfolio`,
     description: post.excerpt,
-    openGraph: { title: post.title, description: post.excerpt, type: "article" },
+    openGraph: { title: post.title, description: post.excerpt, type: "article", publishedTime: post.date },
     twitter: { card: "summary_large_image", title: post.title, description: post.excerpt },
   };
 }
@@ -54,7 +54,7 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
         <div className="mt-12 rounded-2xl border border-[#205d4a]/20 bg-gradient-to-br from-[#edf3ee] to-white p-6 text-center shadow-soft">
           <p className="font-display text-lg font-medium text-slate-900">See what your portfolio really pays you.</p>
           <Link
-            href="/login"
+            href="/login?mode=signup"
             className="mt-4 inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-medium text-[#f7f4ec] hover:bg-slate-800"
           >
             Get started free

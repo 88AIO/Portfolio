@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { ensurePortfolio } from "../actions";
-import DashboardNav from "@/components/DashboardNav";
 import { getCachedRates } from "@/lib/fx";
+import { fetchAll } from "@/lib/supabase/paginate";
+import { getCurrentUser } from "@/lib/supabase/user";
+import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { money, timeAgo } from "@/lib/format";
 import AddCashEntryForm from "@/components/AddCashEntryForm";
 import { deleteCashEntry } from "./actions";
@@ -33,13 +35,20 @@ export default async function CashPage() {
   const supabase = await createClient();
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
+  const user = await getCurrentUser();
+  const canBrokerSync = isBrokerSyncOwner(user?.email);
 
-  const [{ data: accts }, { data: pfList }, { data: ledger }] = await Promise.all([
+  const [{ data: accts }, { data: pfList }, { data: ledger }, allAmounts] = await Promise.all([
     supabase
       .from("broker_accounts")
       .select("portfolio_id, brokerage_name, account_number, cash_balance, currency, is_cash, account_category, last_synced_at"),
     supabase.from("portfolios").select("id, name").order("created_at"),
     supabase.from("cash_ledger").select("*").order("entry_date", { ascending: false }).limit(100),
+    // The list shows the latest 100 entries; the net must cover every entry, or a ledger with a
+    // long history quietly drops its oldest deposits from the headline.
+    fetchAll<{ amount: number; currency: string }>((from, to) =>
+      supabase.from("cash_ledger").select("amount, currency").order("entry_date").order("id").range(from, to),
+    ),
   ]);
 
   const accounts = (accts ?? []) as BrokerAcct[];
@@ -57,13 +66,13 @@ export default async function CashPage() {
 
   const currencies = [
     ...cashAccounts.map((a) => a.currency ?? "USD"),
-    ...entries.map((e) => e.currency),
+    ...allAmounts.map((e) => e.currency),
   ];
   const rates = await getCachedRates(supabase, currencies, base);
   const fx = (ccy: string) => rates[ccy] ?? 1;
 
   const syncedCash = cashAccounts.reduce((s, a) => s + (a.cash_balance ?? 0) * fx(a.currency ?? "USD"), 0);
-  const manualNet = entries.reduce((s, e) => s + e.amount * fx(e.currency), 0);
+  const manualNet = allAmounts.reduce((s, e) => s + e.amount * fx(e.currency), 0);
 
   // Prefer cash-account portfolios in the ledger's account picker.
   const cashPfIds = new Set(cashAccounts.map((a) => a.portfolio_id).filter(Boolean) as string[]);
@@ -73,9 +82,7 @@ export default async function CashPage() {
   ];
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
-      <DashboardNav active="cash" />
-
+    <main className="flex-1 bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800">
       <div className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-5">
           <h1 className="font-display text-3xl font-medium tracking-tight text-slate-900">Cash &amp; ledger</h1>
@@ -94,8 +101,10 @@ export default async function CashPage() {
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="mb-4 text-base font-semibold">Cash accounts</h2>
               {cashAccounts.length === 0 ? (
-                <p className="py-8 text-center text-sm text-slate-400">
-                  No cash or bank accounts synced yet. Connect one in the SnapTrade dashboard, then hit Sync.
+                <p className="py-8 text-center text-sm text-slate-500">
+                  {canBrokerSync
+                    ? "No cash or bank accounts synced yet. Connect one in the SnapTrade dashboard, then hit Sync."
+                    : "Synced cash accounts arrive with brokerage auto-sync, which is on the roadmap. Record deposits, withdrawals and interest in the ledger on the right."}
                 </p>
               ) : (
                 <ul className="divide-y divide-slate-100 text-sm">
@@ -167,7 +176,7 @@ export default async function CashPage() {
           <section className="space-y-6">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="mb-3 text-base font-semibold">Add ledger entry</h2>
-              <AddCashEntryForm portfolios={ledgerPortfolios} />
+              <AddCashEntryForm portfolios={ledgerPortfolios} base={base} />
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-5 text-xs text-slate-500 shadow-soft">
               Bank &amp; deposit accounts (like Chase) are tracked here as cash, kept out of your stock holdings

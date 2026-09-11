@@ -77,14 +77,26 @@ function FragmentRow({
         onClick={canExpand ? onToggle : undefined}
       >
         <td className="py-2.5 pr-2">
-          <div className="flex items-center gap-1.5">
-            {canExpand && (
+          {/* A real button, so the row opens from the keyboard and screen readers hear its state;
+              the row-level onClick is a convenience for mouse users only. */}
+          {canExpand ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onToggle(); }}
+              aria-expanded={isOpen}
+              aria-label={`${isOpen ? "Hide" : "Show"} ${w.symbol} history`}
+              className="flex items-center gap-1.5 rounded focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            >
               <span className={`text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`} aria-hidden>
                 ▸
               </span>
-            )}
-            <span className="font-medium text-slate-900">{w.symbol}</span>
-          </div>
+              <span className="font-medium text-slate-900">{w.symbol}</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-slate-900">{w.symbol}</span>
+            </div>
+          )}
           <div className="mt-0.5 pl-[18px] text-[11px] text-slate-400">
             {w.shares > 0 ? `${num(w.shares, 0)} sh` : "no shares"}
             {w.openPuts > 0 ? ` · ${w.openPuts}P` : ""}

@@ -27,7 +27,7 @@ export default function ResetPasswordPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (password.length < 6) return setMsg("Use at least 6 characters.");
+    if (password.length < 8) return setMsg("Use at least 8 characters.");
     if (password !== confirm) return setMsg("Those passwords don't match.");
     setLoading(true);
     setMsg(null);
@@ -70,10 +70,12 @@ export default function ResetPasswordPage() {
             <p className="mb-6 text-sm text-slate-500">Choose a new password for your account.</p>
             <form onSubmit={submit} className="space-y-3">
               <div className="relative">
+                <label htmlFor="new-password" className="sr-only">New password</label>
                 <input
+                  id="new-password"
                   type={show ? "text" : "password"}
                   required
-                  minLength={6}
+                  minLength={8}
                   placeholder="New password"
                   value={password}
                   autoComplete="new-password"
@@ -89,10 +91,12 @@ export default function ResetPasswordPage() {
                   {show ? "Hide" : "Show"}
                 </button>
               </div>
+              <label htmlFor="confirm-password" className="sr-only">Confirm new password</label>
               <input
+                id="confirm-password"
                 type={show ? "text" : "password"}
                 required
-                minLength={6}
+                minLength={8}
                 placeholder="Confirm new password"
                 value={confirm}
                 autoComplete="new-password"
@@ -110,7 +114,7 @@ export default function ResetPasswordPage() {
           </>
         )}
 
-        {msg && <p className="mt-4 text-sm text-rose-600">{msg}</p>}
+        {msg && <p role="alert" className="mt-4 text-sm text-rose-600">{msg}</p>}
       </div>
     </main>
   );

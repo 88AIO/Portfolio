@@ -3,21 +3,44 @@
 import { useEffect, useState } from "react";
 import BrandMark from "@/components/BrandMark";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { MIN_AGE } from "@/lib/legal";
 
+// Only ever send someone to a path on this site after sign-in. `next` comes from the URL, so a
+// value like "//evil.example" or "https://…" must never be followed.
+function safeNext(raw: string | null): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/dashboard";
+  return raw;
+}
+
+type Msg = { text: string; tone: "error" | "info" | "success" };
+
+// Three things arrive on the URL: ?mode=signup (every "Get started" button on the marketing site —
+// landing on "Welcome back" was the first thing a new visitor saw), ?next= (the page the middleware
+// bounced them from, so an alert email's deep link still lands where it pointed), and ?error= from
+// the auth callback (an expired or already-used link used to bounce here silently). The layout
+// wraps this page in Suspense, which useSearchParams needs on a prerendered route.
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<"signin" | "signup" | "mfa">("signin");
+  const params = useSearchParams();
+  const next = safeNext(params.get("next"));
+  const [mode, setMode] = useState<"signin" | "signup" | "mfa">(() =>
+    params.get("mode") === "signup" ? "signup" : "signin"
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
-  const [msg, setMsg] = useState<{ text: string; tone: "error" | "info" } | null>(null);
+  const [msg, setMsg] = useState<Msg | null>(() => {
+    const err = params.get("error");
+    if (err === "link_expired") return { text: "That link has expired or was already used. Sign in, or request a fresh one below.", tone: "error" };
+    if (err === "callback") return { text: "We couldn't complete that sign-in link. Please try again.", tone: "error" };
+    return null;
+  });
   const [loading, setLoading] = useState(false);
-  const note = (text: string, tone: "error" | "info" = "info") => setMsg({ text, tone });
+  const note = (text: string, tone: Msg["tone"] = "info") => setMsg({ text, tone });
 
   // Lands here two ways: fresh from the password form below, or bounced back by proxy.ts because
   // an already-signed-in session hasn't cleared its second factor yet (e.g. a bookmark straight to
@@ -53,7 +76,7 @@ export default function LoginPage() {
       note("That code didn't match — check the time on your phone and try again.", "error");
       return;
     }
-    router.push("/dashboard");
+    router.push(next);
   }
 
   async function sendReset() {
@@ -69,7 +92,7 @@ export default function LoginPage() {
     });
     setLoading(false);
     if (error) note(error.message, "error");
-    else note("Check your email for a link to reset your password.", "info");
+    else note("Check your email for a link to reset your password.", "success");
   }
 
   async function submit(e: React.FormEvent) {
@@ -88,7 +111,13 @@ export default function LoginPage() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { min_age_confirmed: true, agreed_terms_and_privacy: true } },
+        options: {
+          data: { min_age_confirmed: true, agreed_terms_and_privacy: true },
+          // The confirmation link must come back through /auth/callback, which exchanges the code
+          // for a session. Without this it lands wherever the Supabase project's Site URL points —
+          // on the marketing page with a dangling ?code= and no session, if that was never set.
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        },
       });
       if (error) {
         // Don't leak whether an email is already registered (account enumeration). Surface a
@@ -102,11 +131,9 @@ export default function LoginPage() {
       } else if (data.session) {
         // Confirmation is off: they're signed in already, so glide straight into the app.
         // push() alone: /dashboard is force-dynamic, so it always renders fresh on arrival.
-        // Following it with refresh() rendered the whole dashboard a second time — every query
-        // twice — which is most of what made signing in feel slow.
-        router.push("/dashboard");
+        router.push(next);
       } else {
-        note("Almost there. We sent a confirmation link to your email. Open it and you're in.", "info");
+        note("Almost there. We sent a confirmation link to your email. Open it and you're in.", "success");
       }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -121,12 +148,15 @@ export default function LoginPage() {
           // push() alone: /dashboard is force-dynamic, so it always renders fresh on arrival.
           // Following it with refresh() rendered the whole dashboard a second time — every query
           // twice — which is most of what made signing in feel slow.
-          router.push("/dashboard");
+          router.push(next);
         }
       }
     }
     setLoading(false);
   }
+
+  const input =
+    "w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200";
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f7f4ec] px-4">
@@ -135,10 +165,10 @@ export default function LoginPage() {
         className="pointer-events-none absolute inset-x-0 top-[-16rem] h-[34rem] bg-[radial-gradient(52rem_32rem_at_50%_0%,rgba(32,93,74,0.10),transparent_70%)]"
       />
       <div className="relative w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-8 shadow-[0_1px_0_rgba(0,0,0,0.02),0_24px_48px_-28px_rgba(23,63,51,0.30)]">
-        <div className="mb-7 flex items-center gap-2.5">
+        <Link href="/" className="mb-7 flex items-center gap-2.5" aria-label="Snowfolio home">
           <BrandMark className="h-8 w-8" />
           <span className="text-lg font-semibold tracking-tight text-slate-900">Snowfolio</span>
-        </div>
+        </Link>
         <h1 className="font-display mb-1.5 text-2xl font-medium tracking-tight text-slate-900">
           {mode === "signin" ? "Welcome back" : mode === "signup" ? "Create your account" : "Enter your code"}
         </h1>
@@ -150,7 +180,9 @@ export default function LoginPage() {
 
         {mode === "mfa" ? (
           <form onSubmit={submitMfa} className="space-y-3">
+            <label htmlFor="mfa-code" className="sr-only">6-digit code</label>
             <input
+              id="mfa-code"
               type="text"
               inputMode="numeric"
               autoComplete="one-time-code"
@@ -164,26 +196,31 @@ export default function LoginPage() {
             />
             <button
               type="submit" disabled={loading || mfaCode.trim().length !== 6}
+              aria-busy={loading}
               className="w-full rounded-xl bg-slate-900 py-2.5 text-sm font-medium text-[#f7f4ec] shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
             >
-              {loading ? "…" : "Verify"}
+              {loading ? "Verifying…" : "Verify"}
             </button>
           </form>
         ) : (
           <form onSubmit={submit} className="space-y-3">
+            <label htmlFor="login-email" className="sr-only">Email</label>
             <input
+              id="login-email"
               type="email" required placeholder="you@email.com" value={email}
               autoComplete="email"
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+              className={input}
             />
             <div className="relative">
+              <label htmlFor="login-password" className="sr-only">Password</label>
               <input
+                id="login-password"
                 type={showPassword ? "text" : "password"}
-                required placeholder="Password" value={password} minLength={6}
+                required placeholder="Password" value={password} minLength={8}
                 autoComplete={mode === "signin" ? "current-password" : "new-password"}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 pr-16 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+                className={`${input} pr-16`}
               />
               <button
                 type="button"
@@ -195,26 +232,30 @@ export default function LoginPage() {
               </button>
             </div>
             {mode === "signup" && (
-              <label className="flex items-start gap-2 pt-1 text-xs text-slate-500">
-                <input
-                  type="checkbox"
-                  checked={agreed}
-                  onChange={(e) => setAgreed(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"
-                />
-                <span>
-                  I&rsquo;m {MIN_AGE} or older and agree to the{" "}
-                  <Link href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Terms</Link>{" "}
-                  and{" "}
-                  <Link href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Privacy Policy</Link>.
-                </span>
-              </label>
+              <>
+                <p className="text-xs text-slate-500">Use at least 8 characters.</p>
+                <label className="flex items-start gap-2 pt-1 text-xs text-slate-500">
+                  <input
+                    type="checkbox"
+                    checked={agreed}
+                    onChange={(e) => setAgreed(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"
+                  />
+                  <span>
+                    I&rsquo;m {MIN_AGE} or older and agree to the{" "}
+                    <Link href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Terms</Link>{" "}
+                    and{" "}
+                    <Link href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Privacy Policy</Link>.
+                  </span>
+                </label>
+              </>
             )}
             <button
               type="submit" disabled={loading}
+              aria-busy={loading}
               className="w-full rounded-xl bg-slate-900 py-2.5 text-sm font-medium text-[#f7f4ec] shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
             >
-              {loading ? "…" : mode === "signin" ? "Sign in" : "Sign up"}
+              {loading ? (mode === "signin" ? "Signing in…" : "Creating account…") : mode === "signin" ? "Sign in" : "Sign up"}
             </button>
             {mode === "signin" && (
               <button
@@ -229,7 +270,14 @@ export default function LoginPage() {
           </form>
         )}
 
-        {msg && <p className={`mt-4 text-sm ${msg.tone === "error" ? "text-rose-600" : "text-amber-600"}`}>{msg.text}</p>}
+        {msg && (
+          <p
+            role={msg.tone === "error" ? "alert" : "status"}
+            className={`mt-4 text-sm ${msg.tone === "error" ? "text-rose-600" : msg.tone === "success" ? "text-emerald-700" : "text-slate-600"}`}
+          >
+            {msg.text}
+          </p>
+        )}
 
         {mode !== "mfa" && (
           <button
@@ -240,7 +288,7 @@ export default function LoginPage() {
           </button>
         )}
 
-        <div className="mt-6 flex justify-center gap-4 border-t border-slate-100 pt-4 text-xs text-slate-400">
+        <div className="mt-6 flex justify-center gap-4 border-t border-slate-100 pt-4 text-xs text-slate-500">
           <Link href="/legal/disclaimer" className="hover:text-indigo-600">Disclaimer</Link>
           <Link href="/legal/terms" className="hover:text-indigo-600">Terms</Link>
           <Link href="/legal/privacy" className="hover:text-indigo-600">Privacy</Link>

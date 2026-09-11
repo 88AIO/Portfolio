@@ -1,8 +1,9 @@
 // Shown instantly on any dashboard navigation while the server renders — so moving between pages
-// feels immediate instead of freezing on the old screen. A calm shimmer, not a spinner.
+// feels immediate instead of freezing on the old screen. A calm shimmer, not a spinner. The real
+// header is rendered by the layout above this, so it stays put; this only stands in for the page.
 export default function DashboardLoading() {
   return (
-    <div className="min-h-screen animate-pulse bg-slate-50 px-6 py-8">
+    <div className="flex-1 animate-pulse bg-slate-50 px-6 py-8" aria-busy="true" aria-label="Loading">
       <div className="mx-auto max-w-6xl">
         <div className="h-7 w-40 rounded bg-slate-200" />
         <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">

@@ -7,7 +7,7 @@ import { posts, formatDate } from "@/lib/content/blog";
 export const metadata: Metadata = {
   title: "Blog — Snowfolio",
   description:
-    "Notes on income investing, honest data, and building a calm portfolio tracker. From the team behind Snowfolio.",
+    "Notes on income investing, honest data, and building a calm portfolio tracker, from the maker of Snowfolio.",
 };
 
 export default function BlogIndex() {

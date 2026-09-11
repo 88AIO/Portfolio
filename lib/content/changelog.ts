@@ -9,6 +9,50 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    date: "2026-09-11",
+    title: "Cost basis you can check against your statement",
+    tag: "Fixed",
+    points: [
+      "Cost basis and gain/loss now use first-in-first-out over the shares you still hold. After a full wheel cycle (assigned, called away, assigned again) the old average-of-every-buy printed a cost that overlapped the realized gain beside it.",
+      "Total earned now includes what shares you've already sold made, and the dividends from holdings you've since closed.",
+      "Broker-synced holdings that split after a visible purchase were double-counted; they now match the broker's share count.",
+      "The value chart and the S&P 500 benchmark use split-adjusted, dividend-unadjusted prices — no more phantom day-one loss on dividend payers, and price return is compared with price return. The benchmark hides itself when your trades predate the S&P 500 history we hold rather than flatter you.",
+      "Ex-dividend heads-ups fire on the ex-date, not the pay date. Covered-call cushion reads positive when the call is out of the money.",
+      "“Prices as of” shows when the market last set the price, not when we fetched it.",
+    ],
+  },
+  {
+    date: "2026-09-11",
+    title: "Clearer forms, a safer account",
+    tag: "Improved",
+    points: [
+      "Add-holding, option and cash forms now say exactly what was wrong instead of a generic error, and never report success for a row that wasn't saved.",
+      "Deleting your account asks for your password. Session-authenticated downloads respect two-factor authentication.",
+      "Options and cash-ledger exports, and an account column on the transactions export, so a multi-account ledger round-trips.",
+      "“Get started” lands on the sign-up form; after signing in you return to the page you asked for.",
+      "Quieter text is darker for readability, tables open from the keyboard, and the app respects reduced-motion settings.",
+    ],
+  },
+  {
+    date: "2026-09-01",
+    title: "Two-factor authentication",
+    tag: "New",
+    points: [
+      "Optional authenticator-app (TOTP) two-factor sign-in, enrolled from Settings and enforced server-side on every dashboard request.",
+      "The signup age and Terms attestation is now recorded with a timestamp.",
+    ],
+  },
+  {
+    date: "2026-08-31",
+    title: "Stock splits, reinvested dividends, and the wheel",
+    tag: "New",
+    points: [
+      "Stock splits are applied when reading, never by rewriting your ledger — and you can record one by hand when the data provider misses it.",
+      "Mark a purchase as a reinvested dividend so it counts as shares, not as income twice.",
+      "The options cockpit, the wheel view with per-stock history, IV rank, and the cash-secured put finder.",
+    ],
+  },
+  {
     date: "2026-08-24",
     title: "A calmer, more premium look",
     tag: "Improved",

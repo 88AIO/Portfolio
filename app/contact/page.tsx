@@ -86,7 +86,7 @@ export default function ContactPage() {
           <h2 className="font-display text-3xl font-medium tracking-tight text-[#f7f4ec] sm:text-4xl">Ready when you are.</h2>
           <p className="mx-auto mt-4 max-w-lg text-lg leading-relaxed text-[#c7ddd3]">Start free, and reach out any time.</p>
           <Link
-            href="/login"
+            href="/login?mode=signup"
             className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#f7f4ec] px-6 py-3 font-medium text-[#173f33] shadow-sm transition hover:bg-white"
           >
             Get started free

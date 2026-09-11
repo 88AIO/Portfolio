@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import BrandMark from "@/components/BrandMark";
 import { signOut } from "@/app/dashboard/actions";
 
@@ -17,11 +18,27 @@ const NAV: [NavKey, string, string][] = [
   ["settings", "Settings", "/dashboard/settings"],
 ];
 
-// Shared dashboard header. The full link set shows on large screens; below that it collapses
-// behind a menu button so the dark nav never overflows on a phone.
-export default function DashboardNav({ active, email }: { active: NavKey; email?: string | null }) {
+// Which tab a path belongs to. A holding's detail page is part of the overview; the put finder is
+// part of options.
+function activeFor(path: string): NavKey {
+  if (path.startsWith("/dashboard/performance")) return "performance";
+  if (path.startsWith("/dashboard/dividends")) return "dividends";
+  if (path.startsWith("/dashboard/options")) return "options";
+  if (path.startsWith("/dashboard/cash")) return "cash";
+  if (path.startsWith("/dashboard/broker")) return "broker";
+  if (path.startsWith("/dashboard/settings")) return "settings";
+  return "overview";
+}
+
+// Shared dashboard header, rendered ONCE by app/dashboard/layout.tsx rather than by every page:
+// rendering it per page meant it vanished during every navigation (the loading skeleton had no
+// header) and the email chip came and went depending on which page remembered to pass it. The
+// full link set shows on large screens; below that it collapses behind a menu button so the dark
+// nav never overflows on a phone.
+export default function DashboardNav({ email }: { email?: string | null }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
+  const active = activeFor(usePathname() ?? "/dashboard");
 
   return (
     <header className="border-b border-slate-800 bg-slate-900 text-white">
@@ -32,10 +49,10 @@ export default function DashboardNav({ active, email }: { active: NavKey; email?
         </Link>
 
         {/* Desktop nav */}
-        <nav className="hidden items-center gap-1 text-sm lg:flex">
+        <nav aria-label="Dashboard" className="hidden items-center gap-1 text-sm lg:flex">
           {NAV.map(([key, label, href]) =>
             key === active ? (
-              <span key={key} className="rounded-lg bg-white/10 px-3 py-1.5 font-medium">{label}</span>
+              <span key={key} aria-current="page" className="rounded-lg bg-white/10 px-3 py-1.5 font-medium">{label}</span>
             ) : (
               <Link key={key} href={href} className="rounded-lg px-3 py-1.5 text-slate-300 transition hover:bg-white/10">
                 {label}
@@ -74,10 +91,10 @@ export default function DashboardNav({ active, email }: { active: NavKey; email?
       {/* Mobile menu panel */}
       {open && (
         <div id="dashboard-menu" className="border-t border-slate-800 lg:hidden">
-          <nav className="mx-auto flex max-w-6xl flex-col px-6 py-2 text-sm">
+          <nav aria-label="Dashboard" className="mx-auto flex max-w-6xl flex-col px-6 py-2 text-sm">
             {NAV.map(([key, label, href]) =>
               key === active ? (
-                <span key={key} className="rounded-lg bg-white/10 px-2 py-2.5 font-medium">{label}</span>
+                <span key={key} aria-current="page" className="rounded-lg bg-white/10 px-2 py-2.5 font-medium">{label}</span>
               ) : (
                 <Link key={key} href={href} onClick={close} className="rounded-lg px-2 py-2.5 text-slate-300 transition hover:bg-white/10">
                   {label}

@@ -1,10 +1,16 @@
 "use client";
 
+import { useEffect } from "react";
 import BrandMark from "@/components/BrandMark";
 
 // Global error boundary: a calm recovery screen instead of Next's default crash page.
 // Covers render/data failures across the app (e.g. a transient Supabase outage).
-export default function Error({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  // The boundary swallowed the error entirely — a production render failure left no trace anywhere.
+  // The digest is what matches a user's report to the server-side log line for the same error.
+  useEffect(() => {
+    console.error("[app] render error", error.digest ?? "", error);
+  }, [error]);
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 text-slate-800">
       <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-[0_1px_0_rgba(0,0,0,0.02),0_24px_48px_-28px_rgba(23,63,51,0.30)]">

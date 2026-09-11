@@ -10,8 +10,8 @@ export const metadata: Metadata = {
 };
 
 const principles: [string, string][] = [
-  ["Simple by default, depth on demand", "The home screen answers what you own, what it's worth, and what income is coming. Backtests, X-ray, and deep metrics are one tap away, off by default."],
-  ["Honest about its data", "Prices are timestamped. Yield ETFs show return-of-capital plainly. We'd rather show a number we can stand behind than a confident wrong one."],
+  ["Simple by default, depth on demand", "The home screen answers what you own, what it's worth, and what income is coming. Per-holding detail, the options cockpit and the performance chart are one tap away, off by default."],
+  ["Honest about its data", "Prices carry the time the market last set them. Thin dividend history stays unrated instead of guessed. We'd rather show a number we can stand behind than a confident wrong one."],
   ["No duplicates", "The same holding across accounts rolls up to one line. Imports are de-duplicated, so bringing in the same file twice is always safe."],
   ["Track & inform, never advise", "We show you what's happening with your income and your options. We never tell you what to trade, and there's no trading terminal."],
   ["No ads, no upsell, no lock-in", "We don't run ads, don't sell your data, and don't cold-call. Export everything any time, or delete it all in a click."],
@@ -23,6 +23,7 @@ export default function AboutPage() {
     <div className="bg-[#f7f4ec] text-slate-800">
       <MarketingNav />
 
+      <main>
       {/* Hero */}
       <section className="relative overflow-hidden">
         <div
@@ -94,9 +95,9 @@ export default function AboutPage() {
           <h2 className="font-display mt-3 text-3xl font-medium tracking-tight text-slate-900 sm:text-4xl">Built in the open, one honest step at a time.</h2>
         </div>
         <div className="mt-12 space-y-4">
-          <Phase tag="Now" title="Calm holdings & income" body="A correct, honest dashboard: holdings, dividends, and option premium together, with timestamped prices and idempotent import." />
-          <Phase tag="Next" title="Deeper income tools" body="A richer dividend engine and safety scoring, income alerts, and a weekly digest, packaged in a generous free tier." />
-          <Phase tag="Later" title="The options-selling layer" body="A full seller's cockpit: the wheel, alerts, and an opportunity finder. Track & inform, never advise." />
+          <Phase tag="Live" title="Calm holdings & income" body="An honest dashboard: holdings, dividends, and option premium together, with timestamped prices, idempotent import, a dividend calendar and safety score, email alerts and a weekly digest." />
+          <Phase tag="Live" title="The options-selling layer" body="A full seller's cockpit: the wheel, FIFO realized gains, IV rank, and a cash-secured put finder. Track & inform, never advise." />
+          <Phase tag="Next" title="Depth on demand" body="Brokerage auto-sync for everyone, deeper analytics and backtesting, rebalancing tools — the Pro tier, once it's earned its price." />
         </div>
       </section>
 
@@ -106,7 +107,7 @@ export default function AboutPage() {
           <h2 className="font-display text-3xl font-medium tracking-tight text-[#f7f4ec] sm:text-4xl">Come see your income clearly.</h2>
           <p className="mx-auto mt-4 max-w-lg text-lg leading-relaxed text-[#c7ddd3]">Free to start, calm by design.</p>
           <Link
-            href="/login"
+            href="/login?mode=signup"
             className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#f7f4ec] px-6 py-3 font-medium text-[#173f33] shadow-sm transition hover:bg-white"
           >
             Get started free
@@ -114,6 +115,7 @@ export default function AboutPage() {
           </Link>
         </div>
       </section>
+      </main>
 
       <MarketingFooter />
     </div>
