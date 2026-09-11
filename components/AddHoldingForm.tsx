@@ -15,10 +15,11 @@ export default function AddHoldingForm() {
         setPending(true);
         setError(null);
         try {
-          await addTransaction(fd);
-          ref.current?.reset();
+          const r = await addTransaction(fd);
+          if (r.ok) ref.current?.reset();
+          else setError(r.error);
         } catch {
-          setError("Couldn't add that. Check the symbol and try again.");
+          setError("Something went wrong on our side. Nothing was added — please try again.");
         } finally {
           setPending(false);
         }
@@ -46,7 +47,7 @@ export default function AddHoldingForm() {
       <button disabled={pending} className="w-full rounded-lg bg-indigo-600 py-2 font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
         {pending ? "Adding…" : "Add transaction"}
       </button>
-      {error && <p className="text-xs text-rose-600">{error}</p>}
+      {error && <p role="alert" className="text-xs text-rose-600">{error}</p>}
     </form>
   );
 }

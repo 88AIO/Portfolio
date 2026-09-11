@@ -13,6 +13,7 @@ export default function NotificationSettings({
   const [alerts, setAlerts] = useState(initial.email_alerts);
   const [digest, setDigest] = useState(initial.email_digest);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [testing, startTest] = useTransition();
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -21,9 +22,23 @@ export default function NotificationSettings({
     if (next.alerts) fd.set("email_alerts", "on");
     if (next.digest) fd.set("email_digest", "on");
     setSaved(false);
-    await updateNotificationPrefs(fd);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setSaveError(null);
+    try {
+      const r = await updateNotificationPrefs(fd);
+      if (!r.ok) {
+        // Roll the toggles back: a privacy control must show what is actually stored.
+        setAlerts(initial.email_alerts);
+        setDigest(initial.email_digest);
+        setSaveError(r.error);
+        return;
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      setAlerts(initial.email_alerts);
+      setDigest(initial.email_digest);
+      setSaveError("We couldn't save that just now. Please try again.");
+    }
   }
 
   return (
@@ -40,9 +55,10 @@ export default function NotificationSettings({
         checked={digest}
         onChange={(v) => { setDigest(v); save({ alerts, digest: v }); }}
       />
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-slate-500" role="status">
         Emails go to your account address. {saved ? <span className="text-emerald-600">Saved.</span> : "Off by default."}
       </p>
+      {saveError && <p role="alert" className="text-xs text-rose-600">{saveError}</p>}
 
       <div className="border-t border-slate-100 pt-3">
         <button

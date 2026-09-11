@@ -3,12 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote } from "@/lib/marketdata";
+import { getQuote, searchInstrument } from "@/lib/marketdata";
+import { quoteAsOf } from "@/lib/marketdata/sync";
+import { ok, fail, type ActionResult } from "@/lib/actionResult";
 import { getCachedRates } from "@/lib/fx";
 import { ensurePortfolio } from "../actions";
 import { isValidYmd, todayIso } from "@/lib/date";
 import { computeOption, legPremium, type OptionPositionRow } from "@/lib/options";
-import { digestEmailHtml, type DigestData, type PositionLite } from "@/lib/notifications/build";
+import { digestEmailHtml, upcomingExDate, type DigestData, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell } from "@/lib/email";
 import { isValidSymbol, isValidExchange } from "@/lib/import/csv";
 
@@ -37,7 +39,7 @@ export async function sendTestEmail(): Promise<{ ok: boolean; message: string }>
   const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
 
   const [{ data: posData }, { data: optPos }, { data: optTx }, { data: divTx }] = await Promise.all([
-    supabase.from("positions").select("symbol, currency, shares, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"),
+    supabase.from("positions").select("symbol, currency, shares, ex_dividend_date, next_dividend_date, next_dividend_per_share, annual_div_per_share, div_frequency"),
     supabase.from("option_positions").select("*"),
     supabase.from("option_transactions").select("action, premium, contracts, fee, currency, trade_date").gte("trade_date", weekAgo),
     supabase.from("transactions").select("quantity, price, currency, executed_at").eq("type", "dividend").gte("executed_at", weekAgo),
@@ -54,10 +56,10 @@ export async function sendTestEmail(): Promise<{ ok: boolean; message: string }>
   const premiumWeek = oTx.reduce((s, o) => s + legPremium(o) * fx(o.currency), 0);
   const dividendsWeek = dTx.reduce((s, d) => s + d.quantity * d.price * fx(d.currency), 0);
   const upcomingExDiv = positions
-    .filter((p) => p.shares > 0 && p.next_dividend_date && p.next_dividend_date >= today && p.next_dividend_date <= in7)
+    .filter((p) => p.shares > 0 && (upcomingExDate(p, today) ?? "9999") <= in7)
     .map((p) => ({
       symbol: p.symbol,
-      date: p.next_dividend_date as string,
+      date: upcomingExDate(p, today) as string,
       est: p.next_dividend_per_share != null
         ? p.next_dividend_per_share * p.shares
         : (p.annual_div_per_share && p.div_frequency ? (p.annual_div_per_share / p.div_frequency) * p.shares : null),
@@ -76,53 +78,64 @@ export async function sendTestEmail(): Promise<{ ok: boolean; message: string }>
   return { ok: false, message: `Couldn't send: ${res.error ?? "unknown error"}.` };
 }
 
-export async function updateNotificationPrefs(formData: FormData) {
+export async function updateNotificationPrefs(formData: FormData): Promise<ActionResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  if (!user) return fail("You're signed out. Sign in and try again.");
   const email_alerts = formData.get("email_alerts") === "on";
   const email_digest = formData.get("email_digest") === "on";
-  await supabase.from("notification_prefs").upsert(
+  const { error } = await supabase.from("notification_prefs").upsert(
     { user_id: user.id, email_alerts, email_digest, updated_at: new Date().toISOString() },
     { onConflict: "user_id" }
   );
+  // A privacy control must never report "Saved." on a failed write.
+  if (error) return fail("We couldn't save that setting just now. Please try again.");
   revalidatePath("/dashboard/options");
+  return ok;
 }
 
 // Record a sold/closed/expired/assigned option leg. Premium is entered PER SHARE
 // (how sellers think); the DB stores it per share and multiplies by 100×contracts in the views.
 // An "assigned" action also writes the linked equity leg (put → buy shares at strike,
 // call → sell shares at strike) so cost basis and holdings stay correct automatically.
-export async function addOptionTransaction(formData: FormData) {
+export async function addOptionTransaction(formData: FormData): Promise<ActionResult> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return fail("You're signed out. Sign in and try again.");
   const admin = createAdminClient();
 
   const symbol = String(formData.get("symbol") || "").trim().toUpperCase();
   const exchange = String(formData.get("exchange") || "US").trim().toUpperCase();
   const action = String(formData.get("action") || "sell_to_open");
   const option_type = String(formData.get("option_type") || "put") === "call" ? "call" : "put";
-  const strike = Number(formData.get("strike") || 0);
+  const strike = Number(formData.get("strike"));
   const expiration = String(formData.get("expiration") || "");
-  const contracts = Math.max(1, Math.round(Number(formData.get("contracts") || 1)));
+  const contractsRaw = Number(formData.get("contracts") || 1);
   const premium = Number(formData.get("premium") || 0);
   const fee = Number(formData.get("fee") || 0);
   const trade_date = String(formData.get("trade_date") || "") || todayIso();
-  const note = String(formData.get("note") || "").trim() || null;
+  const note = String(formData.get("note") || "").trim().slice(0, 200) || null;
   const portfolioIdRaw = String(formData.get("portfolio_id") || "").trim();
 
   const validActions = ["sell_to_open", "buy_to_close", "expired", "assigned", "rolled"];
-  // Throw (don't silently return) on bad input so AddOptionForm's catch shows an error instead of
-  // resetting to a false success — a mistyped leg must never look saved (same contract as
-  // addTransaction). The income totals would otherwise silently understate.
-  if (!symbol || !strike || !expiration || !validActions.includes(action))
-    throw new Error("Enter a symbol, a strike, and an expiration.");
+  // Every rejection is returned as a message the form can show. A mistyped leg must never look
+  // saved (the income totals would silently understate), and it must never fail with a message
+  // the user can't read either. Number.isFinite, not a truthiness check: NaN is falsy in JS but
+  // "abc" typed into a numeric field must be told apart from an honest zero.
+  if (!symbol || !expiration || !validActions.includes(action))
+    return fail("Enter a symbol, a strike, and an expiration.");
+  if (!Number.isFinite(strike) || strike <= 0) return fail("The strike must be a price above zero.");
+  if (!Number.isFinite(contractsRaw) || contractsRaw < 1) return fail("Contracts must be a whole number, 1 or more.");
+  const contracts = Math.round(contractsRaw);
+  if (!Number.isFinite(premium) || premium < 0 || !Number.isFinite(fee) || fee < 0)
+    return fail("Premium and fee are entered as positive per-share amounts (the action sets the direction).");
   // Dates hit NOT NULL columns — reject a malformed expiration/trade_date cleanly instead of 500ing.
   if (!isValidYmd(expiration) || !isValidYmd(trade_date))
-    throw new Error("That expiration or trade date isn't a valid date.");
+    return fail("That expiration or trade date isn't a valid date.");
   // Validate the ticker/exchange before any service-role write into the shared `instruments` table,
   // so a malformed underlying can't create junk reference rows (matches addTransaction / CSV import).
   if (!isValidSymbol(symbol) || !isValidExchange(exchange))
-    throw new Error("That symbol or exchange doesn't look right.");
+    return fail("That symbol or exchange doesn't look right.");
 
   // Resolve the target portfolio (must belong to the signed-in user); default to the primary one.
   let portfolioId = "";
@@ -133,23 +146,31 @@ export async function addOptionTransaction(formData: FormData) {
   }
   if (!portfolioId) portfolioId = (await ensurePortfolio()).id;
 
-  // Resolve/create the UNDERLYING instrument (shared reference table, service role).
+  // Resolve/create the UNDERLYING instrument (shared reference table, service role). Look the
+  // name, currency and type up exactly as addTransaction does: a row created here as a bare
+  // "USD stock" is SHARED, so an HK or LSE underlying first logged from this form would have been
+  // mis-currencied for every user who later held it.
   let { data: inst } = await admin
     .from("instruments").select("id, currency").eq("symbol", symbol).eq("exchange", exchange).maybeSingle();
   if (!inst) {
+    const meta = await searchInstrument(symbol, exchange);
     const { data: created } = await admin.from("instruments").insert({
-      symbol, exchange, name: symbol, currency: "USD", type: "stock",
+      symbol, exchange, name: meta?.name ?? symbol,
+      currency: meta?.currency ?? "USD", type: meta?.type ?? "stock",
     }).select("id, currency").single();
     inst = created;
   }
-  if (!inst) throw new Error("Couldn't look up that symbol. Check it and try again.");
+  if (!inst) return fail("Couldn't look up that symbol. Check it and try again.");
   const currency = inst.currency || "USD";
 
-  // Assignment writes the equity leg it creates (idempotent via a stable dedupe_key).
+  // Assignment writes the equity leg it creates (idempotent via a stable dedupe_key). The key
+  // carries the trade date and contract count: two contracts on one series can be assigned on
+  // different days, and a key without those merged the second share leg over the first — 100
+  // shares recorded for 200 delivered, with the cost basis short by a whole assignment.
   let linkedTxnId: string | null = null;
   if (action === "assigned") {
     const isPut = option_type === "put";
-    const { data: tx } = await supabase.from("transactions").upsert(
+    const { data: tx, error: txError } = await supabase.from("transactions").upsert(
       {
         portfolio_id: portfolioId,
         instrument_id: inst.id,
@@ -160,10 +181,11 @@ export async function addOptionTransaction(formData: FormData) {
         currency,
         executed_at: trade_date,
         note: `Assigned ${option_type} $${strike} exp ${expiration}`,
-        dedupe_key: `opt-assign:${portfolioId}:${symbol}:${option_type}:${strike}:${expiration}`,
+        dedupe_key: `opt-assign:${portfolioId}:${symbol}:${option_type}:${strike}:${expiration}:${trade_date}:${contracts}`,
       },
       { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: false }
     ).select("id").single();
+    if (txError) return fail("Couldn't record the assigned shares. Please try again.");
     linkedTxnId = (tx as { id: string } | null)?.id ?? null;
   }
 
@@ -186,16 +208,17 @@ export async function addOptionTransaction(formData: FormData) {
     },
     { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true }
   );
-  if (upsertError) throw new Error("Couldn't save that option leg. Please try again.");
+  if (upsertError) return fail("Couldn't save that option leg. Please try again.");
 
   // Pull a fresh underlying price so collateral / RoC / moneyness compute immediately.
   const q = await getQuote(symbol, exchange, currency);
   if (q.price != null) {
     await admin.from("price_cache").upsert({
-      instrument_id: inst.id, price: q.price, change_pct: q.changePct, currency, as_of: new Date().toISOString(),
+      instrument_id: inst.id, price: q.price, change_pct: q.changePct, currency, as_of: quoteAsOf(q.asOf),
     });
   }
 
   revalidatePath("/dashboard/options");
   revalidatePath("/dashboard");
+  return ok;
 }

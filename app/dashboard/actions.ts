@@ -19,6 +19,10 @@ import {
 import type { ImportResult } from "@/lib/import/types";
 import { isValidYmd, todayIso } from "@/lib/date";
 import { assertUniformRowShape } from "@/lib/supabase/rowShape";
+import { quoteAsOf } from "@/lib/marketdata/sync";
+import { ok, fail, type ActionResult } from "@/lib/actionResult";
+
+const TRANSACTION_TYPES = new Set(["buy", "sell", "dividend"]);
 
 // Get the user's default portfolio, creating one on first use.
 export async function ensurePortfolio() {
@@ -40,25 +44,31 @@ export async function ensurePortfolio() {
 }
 
 // Add a buy/sell/dividend transaction. Creates the instrument row if new.
-export async function addTransaction(formData: FormData) {
+export async function addTransaction(formData: FormData): Promise<ActionResult> {
   const supabase = await createClient();
+  const user = await getCurrentUser();
+  if (!user) return fail("You're signed out. Sign in and try again.");
   const admin = createAdminClient();
 
   const symbol = String(formData.get("symbol") || "").trim().toUpperCase();
   const exchange = String(formData.get("exchange") || "US").trim().toUpperCase();
   const type = String(formData.get("type") || "buy");
-  const quantity = Number(formData.get("quantity") || 0);
+  const quantity = Number(formData.get("quantity"));
   const price = Number(formData.get("price") || 0);
   const executed_at = String(formData.get("executed_at") || "") || undefined;
   // Only meaningful on a buy: the dividend row is the payout, not the purchase it funded.
   const drip = type === "buy" && formData.get("drip") != null;
-  // Throw (don't silently return) on bad input so the form's catch shows an error instead of
-  // resetting to a false "success" — the user must know nothing was added.
-  if (!symbol || quantity <= 0) throw new Error("Enter a symbol and a quantity greater than zero.");
+  // Every rejection is returned as a message the form can show — a bad row must never look added,
+  // and the reason must reach the person who typed it. Number.isFinite rather than a comparison:
+  // NaN fails `<= 0` and would have sailed through to a NOT NULL violation the old code ignored.
+  if (!TRANSACTION_TYPES.has(type)) return fail("Choose Buy, Sell or Dividend.");
+  if (!symbol) return fail("Enter a symbol.");
+  if (!Number.isFinite(quantity) || quantity <= 0) return fail("Enter a quantity greater than zero.");
+  if (!Number.isFinite(price) || price < 0) return fail("The price must be zero or more.");
   // Reject malformed tickers before they create junk reference rows / provider calls.
-  if (!isValidSymbol(symbol) || !isValidExchange(exchange)) throw new Error("That symbol or exchange doesn't look right.");
+  if (!isValidSymbol(symbol) || !isValidExchange(exchange)) return fail("That symbol or exchange doesn't look right.");
   // A supplied date must be a real calendar date (empty is fine — we default to today).
-  if (executed_at && !isValidYmd(executed_at)) throw new Error("That trade date isn't a valid date.");
+  if (executed_at && !isValidYmd(executed_at)) return fail("That trade date isn't a valid date.");
 
   const portfolio = await ensurePortfolio();
 
@@ -73,26 +83,32 @@ export async function addTransaction(formData: FormData) {
     }).select().single();
     inst = newInst;
   }
-  if (!inst) throw new Error("Couldn't look up that symbol. Check it and try again.");
+  if (!inst) return fail("Couldn't look up that symbol. Check it and try again.");
 
   const date = executed_at || todayIso();
   const dedupe_key = transactionDedupeKey({
     ref: null, type, instrument_id: inst.id, executed_at: date, quantity, price, fees: 0,
   });
-  await supabase.from("transactions").upsert(
+  const { data: inserted, error } = await supabase.from("transactions").upsert(
     {
       portfolio_id: portfolio.id, instrument_id: inst.id, type,
       quantity, price, fees: 0, currency: inst.currency, executed_at: date, dedupe_key, drip,
     },
     { onConflict: "portfolio_id,dedupe_key", ignoreDuplicates: true }
-  );
+  ).select("id");
+  if (error) return fail("Couldn't save that transaction. Please try again.");
+  // The natural key collapses a genuine second identical fill (same symbol, shares, price, day)
+  // into the first. Say so instead of reporting success for a row that was never added.
+  if (!inserted?.length) {
+    return fail("An identical transaction is already recorded for that day. If this really is a second fill, change the price by a cent or add it with a note via CSV import.");
+  }
 
   // Fetch a fresh price + full dividend sync for this instrument right away.
   const q = await getQuote(symbol, exchange, inst.currency);
   if (q.price != null) {
     await admin.from("price_cache").upsert({
       instrument_id: inst.id, price: q.price, currency: inst.currency,
-      change_pct: q.changePct, as_of: new Date().toISOString(),
+      change_pct: q.changePct, as_of: quoteAsOf(q.asOf),
     });
   }
   await syncInstrumentDividends(admin, inst.id, symbol, exchange, inst.currency);
@@ -100,6 +116,7 @@ export async function addTransaction(formData: FormData) {
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/performance");
+  return ok;
 }
 
 // Refresh live prices for every instrument the user holds.
@@ -137,7 +154,7 @@ export async function refreshPrices() {
           await admin.from("price_cache").upsert({
             instrument_id: p.instrument_id, price: q.price,
             change_pct: q.changePct, currency: q.currency ?? p.currency ?? null,
-            as_of: new Date().toISOString(),
+            as_of: quoteAsOf(q.asOf),
           });
         }
       })
@@ -287,7 +304,7 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
         if (q.price != null) {
           await admin.from("price_cache").upsert({
             instrument_id: inst.id, price: q.price, currency: inst.currency,
-            change_pct: q.changePct, as_of: new Date().toISOString(),
+            change_pct: q.changePct, as_of: quoteAsOf(q.asOf),
           });
         }
       })

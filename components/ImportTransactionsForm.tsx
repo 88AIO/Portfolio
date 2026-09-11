@@ -15,10 +15,16 @@ export default function ImportTransactionsForm() {
       action={async (fd) => {
         setPending(true);
         setResult(null);
-        const r = await importTransactions(fd);
-        setResult(r);
-        setPending(false);
-        ref.current?.reset();
+        try {
+          const r = await importTransactions(fd);
+          setResult(r);
+        } catch {
+          // Without this, a failed request left the button on "Importing…" forever with no message.
+          setResult({ imported: 0, duplicates: 0, failed: 1, total: 0, errors: [{ line: 0, message: "The import couldn't run just now. Nothing was changed — please try again." }] });
+        } finally {
+          setPending(false);
+          ref.current?.reset();
+        }
       }}
       className="space-y-2 text-sm"
     >
@@ -37,7 +43,7 @@ export default function ImportTransactionsForm() {
       </button>
 
       {result && (
-        <div className="rounded-lg bg-slate-50 p-2 text-xs">
+        <div role="status" className="rounded-lg bg-slate-50 p-2 text-xs">
           <p className="text-slate-600">
             Imported <b className="text-emerald-600">{result.imported}</b>
             {result.duplicates > 0 && (
