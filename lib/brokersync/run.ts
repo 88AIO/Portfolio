@@ -36,6 +36,15 @@ async function loadSplitsForUser(
   return out;
 }
 
+// Coins that changed their exchange ticker after we first synced them. A broker feed may still
+// report the old ticker indefinitely (Coinbase et al don't retroactively relabel past activity),
+// so this maps it forward before every lookup/upsert — otherwise the old ticker resolves to a NEW
+// instrument row (the existing one was renamed to the new ticker) and the holding silently forks
+// into two: the renamed original plus a fresh phantom re-created under the old symbol.
+const CRYPTO_TICKER_ALIAS: Record<string, string> = {
+  RNDR: "RENDER", // Render Network migrated its ticker from RNDR to RENDER in 2025
+};
+
 export type BrokerSyncResult = {
   ok: boolean;
   message?: string;
@@ -251,6 +260,7 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
       let instType = "stock";
       if (brokerIsCrypto) {
         sym = (sym.replace(/[-/]?(USD|USDC|USDT)$/i, "") || sym).toUpperCase();
+        sym = CRYPTO_TICKER_ALIAS[sym] ?? sym;
         ex = "CRYPTO";
         instType = "crypto";
       }
@@ -460,6 +470,7 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
       let instType = "stock";
       if (isCrypto) {
         symbol = symbol.replace(/[-/]?(USD|USDC|USDT)$/i, "") || symbol; // BTC-USD -> BTC
+        symbol = CRYPTO_TICKER_ALIAS[symbol] ?? symbol;
         exchange = "CRYPTO";
         instType = "crypto";
       }
