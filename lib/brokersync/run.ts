@@ -150,7 +150,7 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
     console.error("[brokersync] listAccounts threw:", String((e as { message?: string })?.message ?? e));
     return { ok: false, message: "Couldn't list brokerage accounts — try again." };
   }
-  console.error(`[brokersync] START v4 · accounts=${accounts.length}`);
+  console.log(`[brokersync] START v4 · accounts=${accounts.length}`);
   const today = todayIso();
   const now = new Date().toISOString();
   const instBySymbol = new Map<string, { id: string; currency: string }>();
@@ -575,7 +575,7 @@ export async function runBrokerSyncForUser(userId: string): Promise<BrokerSyncRe
       optionDebug.push(...r.debug);
     }
   }
-  console.error(`[brokersync] DONE · holdings=${holdings} options=${optionLegs}`);
+  console.log(`[brokersync] DONE · holdings=${holdings} options=${optionLegs}`);
 
   // Enrich sector/country for the synced instruments (only those still missing it), in a small
   // dedicated batched pass so the calls aren't rate-limited like they are inside the price refresh.
