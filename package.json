@@ -18,12 +18,12 @@
     "@sentry/nextjs": "^10.74.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.116.0",
-    "next": "^16.3.4",
+    "next": "^16.3.5",
     "papaparse": "^5.7.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "recharts": "^3.10.1",
-    "snaptrade-typescript-sdk": "^12.2.6",
+    "snaptrade-typescript-sdk": "^12.2.7",
     "yahoo-finance2": "^4.0.2"
   },
   "devDependencies": {
