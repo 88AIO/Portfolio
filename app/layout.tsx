@@ -5,10 +5,13 @@ import "./globals.css";
 
 // Geometric sans for the interface; a warm optical serif for headline moments.
 const sans = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
+// "optional", not "swap": on a slow first visit the page now paints before this font arrives, and
+// swapping it into the headline reflowed the hero (a 0.07 layout shift on mobile). Optional keeps
+// the fallback serif for that one view — the font is cached for the next — so nothing moves.
 const display = Fraunces({
   subsets: ["latin"],
   variable: "--font-fraunces",
-  display: "swap",
+  display: "optional",
   weight: ["400", "500", "600"],
   style: ["normal", "italic"],
 });

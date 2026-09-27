@@ -59,6 +59,19 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["yahoo-finance2", "snaptrade-typescript-sdk"],
   // No reason to advertise the framework on every response.
   poweredByHeader: false,
+  // Sentry's tree-shaking flags. Tracing and session replay are off by design (lib/observability.ts),
+  // so their code was dead weight in every page's JavaScript. Set here rather than through the
+  // Sentry plugin's bundleSizeOptimizations, which only reaches webpack builds; Next 16 builds with
+  // Turbopack. The nightly sync's cron monitor is a check-in, not tracing, and keeps working.
+  compiler: {
+    define: {
+      __SENTRY_DEBUG__: "false",
+      __SENTRY_TRACING__: "false",
+      __RRWEB_EXCLUDE_IFRAME__: "true",
+      __RRWEB_EXCLUDE_SHADOW_DOM__: "true",
+      __SENTRY_EXCLUDE_REPLAY_WORKER__: "true",
+    },
+  },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

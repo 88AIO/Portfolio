@@ -32,6 +32,9 @@ reaches once the owner steps at the bottom are done.
 | Domain & public access | 15 | 20 | 100 | buy the domain (owner) — snowfolio.app is available, $9.99 then $15/yr |
 | Legal & compliance | 35 | 35 | 100 | entity, attorney review, support inbox (owner + professionals) |
 | Monetization | 15 | 15 | — | not needed for a free launch |
+| Data accuracy (prices, sync) | — | **100** | 100 | 2 price-history bugs found and fixed (see QC pass 3) |
+| Benchmark & return math | — | **100** | 100 | TWR + XIRR + S&P total return; opening-lot inflation removed |
+| Page speed (Core Web Vitals) | — | **95** | 100 | all "good"; lab blocking time 238–353 ms vs 200 ms target |
 | **Engineering core** | **89** | **98** | 100 | |
 | **Public-launch readiness** | **59** | **67** | 100 | the owner steps below |
 
@@ -69,6 +72,61 @@ Everything below is either live in the database now or on the branch, green in C
 - Next 16.3.6, React 19.3.0, Sentry 10.75, supabase-js 2.117, SnapTrade 12.2.12 (supersedes
   Dependabot #14 and #16); 0 vulnerabilities.
 - Nightly sync prunes old rate-limit rows.
+
+## QC pass 3 — accuracy, benchmark, speed (same day)
+
+**Endpoints.** Every route re-probed on the branch build: 16 private API routes refuse without a
+session or cron secret (401), 9 dashboard pages redirect to sign-in, public pages 200, unknown
+paths 404. Live cron record, 30 days: sync 30/30 nights, alerts 29, digest 4 Mondays, 0 problem
+runs; slowest sync 138 s of its 300 s budget.
+
+**Sync accuracy — two bugs found and fixed.**
+1. *Look-ahead in price history.* The provider's weekly bars are stamped Monday but carry the
+   week's Friday close, so any date inside a week was priced up to four trading days in the
+   future; the S&P 500 benchmark bought SPY at Friday's price for a Monday trade.
+2. *Intraday prices stored as closes.* The 06:00 UTC sync saved "today" rows for Asian exchanges
+   (mid-session) and crypto (six hours in): 1.7–2% off on average, up to 27%.
+Fix: daily bars reduced to each week's last *completed* close on its real date; the nightly sync
+replaces anything else in its window; existing rows repaired in production (23,785 → 22,312, one
+true close per week, recorded in `supabase/applied/`). Check: portfolio value rebuilt from stored
+closes matches the independent nightly snapshot to **0.03%** ($356,033 vs $356,137). Sweep: no
+price moves >25% vs history, no unpriced holding, no ×100 currency-unit errors, FX fresh and in
+range, no bad or duplicate dividends.
+
+**Benchmark — brought to industry standard.**
+| | Before | Now |
+|---|---|---|
+| Headline return | simple return on net invested | time-weighted (weekly Modified Dietz, chain-linked), annualized ≥ 1 yr |
+| Your-money return | — | XIRR (money-weighted) |
+| Dividends | excluded both sides | included: yours received, SPY reinvested on ex-date |
+| S&P 500 series | price only, Monday-stamped weekly bars | total-return index on real week-end closes |
+| Opening-balance lots | at old cost on the window's start date | at market value that day |
+| Late-priced holdings (crypto) | n/a | join TWR at first close, no fake jump |
+| Range picker | value change only | + time-weighted you vs S&P 500 for any window |
+| SPY data | refreshed only because the owner holds SPY | maintained nightly, 10 years of dividends |
+
+Live effect (owner portfolio, today): money-weighted **26.9%/yr** with dividends (23.8% price
+only) vs **18.0%/yr** for the same money in SPY (price only; ~+1.3 pts once SPY's older dividends
+load tonight). The old method would have shown +70% and "beating the market by 42%", because the
+opening-balance lots carried years of earlier gains at cost. Tested against Excel's documented XIRR
+example and the textbook TWR deposit case (`tests/returns.test.mjs`).
+
+**Speed vs industry targets** (production build; mobile = 4× CPU slowdown + slow 4G, as Lighthouse):
+| Metric | Target ("good") | Before | Now |
+|---|---|---|---|
+| Largest Contentful Paint, mobile | ≤ 2.5 s | 0.9–1.0 s; **/login 3.2 s** | **0.78–0.92 s** all pages |
+| Cumulative Layout Shift | ≤ 0.1 | 0 | **0** |
+| Interaction → next paint | ≤ 200 ms | 4–7 ms | **5 ms** |
+| JS before a page is usable | ~170 KB budget | 298 KB | **~150 KB** (Sentry deferred) |
+| Total blocking time, lab | < 200 ms | 356–453 ms | 238–353 ms (React hydration) |
+| Database: holdings / options / history | < 100 ms | — | **53 / 52 / 78 ms** on ~2,000 trades |
+| DB cache hit rate | > 99% | — | **99.66%** |
+Fixes: `/login` server-rendered (it waited for all JavaScript); public pages stopped prefetching
+the login page's 67 KB auth bundle; browser Sentry loads when idle, through a narrow import (the
+namespace import had produced a 192 KB chunk; now 62 KB, errors during load still reported); the
+headline font no longer reflows the hero on slow first visits. Vercel's observability data isn't
+enabled on this project, so production latency percentiles weren't available; the region move
+to sfo1 removes a cross-country round trip from every database call once merged.
 
 ## Current configuration (verified live)
 
