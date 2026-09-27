@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import * as Sentry from "@sentry/nextjs";
+import { reportError } from "@/lib/sentryClient";
 
 // Root-level error boundary. Unlike app/error.tsx (which catches errors within the page tree),
 // this catches errors thrown by the ROOT layout itself, so it must render its own <html>/<body>.
@@ -9,7 +9,7 @@ import * as Sentry from "@sentry/nextjs";
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     console.error("[app] root error", error.digest ?? "", error);
-    Sentry.captureException(error);
+    reportError(error);
   }, [error]);
   return (
     <html lang="en">

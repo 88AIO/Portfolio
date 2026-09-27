@@ -13,6 +13,18 @@ import {
   type PerfTransaction,
   type PerfClose,
 } from "@/lib/performance/series";
+import {
+  annualize,
+  dividendsCover,
+  investorFlows,
+  seriesReturn,
+  timeWeightedReturn,
+  totalReturnIndex,
+  xirr,
+  openingLotValuer,
+  type Dividend,
+} from "@/lib/performance/returns";
+import { closeAsOf } from "@/lib/performance/series";
 import { loadSplitsByInstrument } from "@/lib/corporate/load";
 import PerformanceRange from "@/components/PerformanceRange";
 import PricesAsOf, { oldestPriceAsOf } from "@/components/PricesAsOf";
@@ -32,6 +44,9 @@ type Tx = {
   fees: number;
   currency: string;
   executed_at: string;
+  // Marks a broker's opening-balance lot: already in today's shares (never split-adjusted again)
+  // and counted at market value, not old cost, when measuring returns.
+  dedupe_key: string | null;
 };
 
 type Pos = {
@@ -61,7 +76,7 @@ export default async function PerformancePage() {
     fetchAll<Tx>((from, to) =>
       supabase
         .from("transactions")
-        .select("instrument_id, type, quantity, price, fees, currency, executed_at")
+        .select("instrument_id, type, quantity, price, fees, currency, executed_at, dedupe_key")
         .order("executed_at", { ascending: true })
         .order("instrument_id", { ascending: true })
         .range(from, to),
@@ -165,7 +180,7 @@ export default async function PerformancePage() {
 
   const hasRealHistory = txs.some((t) => (t.type === "buy" || t.type === "sell") && t.executed_at < today);
 
-  let chartData: { date: string; value: number; invested: number; benchmark?: number }[];
+  let chartData: { date: string; value: number; invested: number; benchmark?: number; twr?: number; spy?: number }[];
   let endValue: number, endInvested: number, gain: number, gainPct: number | null, hasData: boolean;
 
   if (hasRealHistory) {
@@ -204,33 +219,92 @@ export default async function PerformancePage() {
     hasData = chartData.length >= 2 && chartData[chartData.length - 1].value > 0;
   }
 
-  // --- S&P 500 benchmark: the same cash you deployed, invested in SPY instead ---
-  // Only when there's real trade history (the backtest mode has no dated cash flows to mirror).
-  let benchReturnPct: number | null = null;
+  // --- Returns the way brokers and index providers quote them (lib/performance/returns.ts) ---
+  // Dividends received count as return; money added or taken out doesn't.
+  const dividendsReceived = hasRealHistory
+    ? txs.reduce((sum, t) => (t.type === "dividend" ? sum + t.quantity * t.price * fx(t.currency) : sum), 0)
+    : 0;
+  const twrOpts = { txs: txs as PerfTransaction[], historyById, currencyById, fx, today, currentValueById, splitsById };
+  const openingLot = openingLotValuer(historyById, fx);
+  const twr = hasRealHistory && hasData ? timeWeightedReturn({ ...twrOpts, includeDividends: true }) : null;
+  const spanDays = twr?.start && twr.end ? (Date.parse(twr.end) - Date.parse(twr.start)) / 86_400_000 : 0;
+  const twrAnnual = annualize(twr?.total ?? null, spanDays);
+  const mwr = twr && spanDays >= 365 ? xirr(investorFlows(txs as PerfTransaction[], fx, today, endValue, true, openingLot)) : null;
+
+  // --- S&P 500 benchmark: SPY with dividends reinvested, compared two ways ---
+  //   • time-weighted: how your investments did vs the index, whatever you added when;
+  //   • same money: the cash you actually deployed, on the dates you deployed it, put in SPY.
+  // Only with real trade history (the backtest mode has no dated cash flows to mirror).
+  type Bench = {
+    totalReturn: boolean;
+    you: number | null;
+    spy: number | null;
+    annual: boolean;
+    youMwr: number | null;
+    spyMwr: number | null;
+  };
+  let bench: Bench | null = null;
   let benchNote: string | null = null;
-  if (hasRealHistory && hasData) {
+  if (twr?.start && twr.end) {
     // SPY is public benchmark reference data every user needs — read it with the service role so it
     // works even though the tightened `instruments` RLS policy only exposes a user's OWN instruments.
-    // (price_history below stays on the RLS client; its authenticated-read policy is unchanged.)
+    // (price_history and dividends below stay on the RLS client; their authenticated-read policies
+    // are unchanged.)
     const { data: spyInst } = await createAdminClient()
       .from("instruments").select("id").eq("symbol", "SPY").eq("exchange", "US").maybeSingle();
     const spyId = (spyInst as { id: string } | null)?.id;
     if (spyId) {
-      const spyRows = await fetchAll<{ d: string; close: number }>((from, to) =>
-        supabase
-          .from("price_history")
-          .select("d, close")
-          .eq("instrument_id", spyId)
-          .order("d", { ascending: true })
-          .range(from, to),
-      );
-      const benchCloses: PerfClose[] = spyRows.map((r) => ({ date: r.d, close: r.close }));
+      const [spyRows, { data: spyDivRows }] = await Promise.all([
+        fetchAll<{ d: string; close: number }>((from, to) =>
+          supabase
+            .from("price_history")
+            .select("d, close")
+            .eq("instrument_id", spyId)
+            .order("d", { ascending: true })
+            .range(from, to),
+        ),
+        supabase.from("dividends").select("ex_date, amount").eq("instrument_id", spyId).order("ex_date", { ascending: true }),
+      ]);
+      const benchCloses: PerfClose[] = spyRows.map((r) => ({ date: r.d, close: Number(r.close) }));
+      const spyDivs: Dividend[] = ((spyDivRows ?? []) as { ex_date: string; amount: number }[]).map((d) => ({
+        exDate: d.ex_date,
+        amount: Number(d.amount),
+      }));
       const coverage = benchmarkCoverage(txs as PerfTransaction[], benchCloses);
       if (benchCloses.length && coverage.uncoveredFlows === 0) {
-        const benchByDate = buildBenchmarkSeries(txs as PerfTransaction[], benchCloses, fx, chartData.map((p) => p.date));
-        chartData = chartData.map((p) => ({ ...p, benchmark: Math.round(benchByDate.get(p.date) ?? 0) }));
+        // Total return needs SPY's payouts back to your first trade. Until the nightly sync has
+        // fetched them, both sides are compared on price alone rather than income against none.
+        const totalReturn = dividendsCover(spyDivs, firstTradeDate);
+        const yours = totalReturn ? twr : timeWeightedReturn({ ...twrOpts, includeDividends: false });
+        const index = totalReturn ? totalReturnIndex(benchCloses, spyDivs) : benchCloses;
+        const spyTotal = seriesReturn(index, twr.start, twr.end);
+        const annual = spanDays >= 365;
+
+        const benchByDate = buildBenchmarkSeries(
+          txs as PerfTransaction[], benchCloses, fx, chartData.map((p) => p.date), totalReturn ? spyDivs : [], openingLot,
+        );
         const benchEnd = benchByDate.get(chartData[chartData.length - 1].date) ?? 0;
-        benchReturnPct = endInvested > 0 && benchEnd > 0 ? ((benchEnd - endInvested) / endInvested) * 100 : null;
+        const spyMwr = annual && benchEnd > 0
+          ? xirr(investorFlows(txs.filter((t) => t.type === "buy" || t.type === "sell") as PerfTransaction[], fx, today, benchEnd, false, openingLot))
+          : null;
+        const youMwr = annual ? xirr(investorFlows(txs as PerfTransaction[], fx, today, endValue, totalReturn, openingLot)) : null;
+
+        // Per-point growth-of-1 for both, so the chart's range picker can show the time-weighted
+        // comparison for whatever window is selected.
+        chartData = chartData.map((p) => ({
+          ...p,
+          benchmark: Math.round(benchByDate.get(p.date) ?? 0),
+          twr: p.date >= twr.start! ? closeAsOf(yours.points, p.date) ?? undefined : undefined,
+          spy: p.date >= twr.start! ? closeAsOf(index, p.date) ?? undefined : undefined,
+        }));
+        bench = {
+          totalReturn,
+          you: annual ? annualize(yours.total, spanDays) : yours.total,
+          spy: annual ? annualize(spyTotal, spanDays) : spyTotal,
+          annual,
+          youMwr,
+          spyMwr,
+        };
       } else if (benchCloses.length) {
         // A comparison that mirrors only some of the money is not a comparison. Say why it's missing
         // rather than print a flattering number.
@@ -238,6 +312,9 @@ export default async function PerformancePage() {
       }
     }
   }
+  // The gap between two returns, in percentage points (a difference of percentages is not a percent).
+  const pts = (x: number) => `${Math.abs(x * 100).toFixed(1)} pts`;
+  const pctOf = (x: number | null) => (x == null ? "—" : pct(x * 100));
 
   return (
     <main className="flex-1 bg-slate-50 text-slate-800">
@@ -259,40 +336,66 @@ export default async function PerformancePage() {
           <Card label="Worth now" value={money(endValue, base)} />
           <Card label={hasRealHistory ? "Net invested" : "What you paid"} value={money(endInvested, base)} />
           <Card
-            label={hasRealHistory ? "Appreciation" : "Unrealized gain"}
-            value={money(gain, base)}
-            tone={gain >= 0 ? "up" : "down"}
+            label={hasRealHistory ? "Total gain" : "Unrealized gain"}
+            value={money(gain + dividendsReceived, base)}
+            tone={gain + dividendsReceived >= 0 ? "up" : "down"}
+            sub={hasRealHistory && dividendsReceived > 0 ? `${money(gain, base)} price + ${money(dividendsReceived, base)} dividends` : undefined}
           />
-          <Card
-            label="Return"
-            value={pct(gainPct)}
-            tone={gainPct == null ? undefined : gainPct >= 0 ? "up" : "down"}
-          />
+          {twr?.total != null ? (
+            <Card
+              label={twrAnnual != null ? "Return per year" : "Return"}
+              value={pctOf(twrAnnual ?? twr.total)}
+              tone={(twrAnnual ?? twr.total) >= 0 ? "up" : "down"}
+              sub={`time-weighted${mwr != null ? ` · your money ${pctOf(mwr)}/yr` : ""}`}
+            />
+          ) : (
+            <Card
+              label="Return"
+              value={pct(gainPct)}
+              tone={gainPct == null ? undefined : gainPct >= 0 ? "up" : "down"}
+            />
+          )}
         </div>
 
         {benchNote && <p className="mt-4 text-xs text-slate-500">{benchNote}</p>}
 
-        {/* Requires BOTH returns: with no positive deployed capital the user's own return is
-            undefined, and "beating the market by X" against an undefined number is meaningless. */}
-        {benchReturnPct != null && gainPct != null && (
-          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
-            <span className="font-medium text-slate-700">
-              vs. the S&amp;P 500 <span className="text-slate-400">(same money, same timing, price return)</span>:
-            </span>
-            <span className="tabular-nums">
-              You <strong className={gainPct == null ? "text-slate-500" : gainPct >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(gainPct)}</strong>
-            </span>
-            <span className="text-slate-300">·</span>
-            <span className="tabular-nums">
-              S&amp;P 500 <strong className={benchReturnPct >= 0 ? "text-emerald-600" : "text-rose-600"}>{pct(benchReturnPct)}</strong>
-            </span>
-            <span
-              className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                gainPct - benchReturnPct >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
-              }`}
-            >
-              {gainPct - benchReturnPct >= 0 ? "Beating" : "Trailing"} the market by {pct(Math.abs(gainPct - benchReturnPct))}
-            </span>
+        {bench && bench.you != null && bench.spy != null && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="font-medium text-slate-700">
+                vs. the S&amp;P 500{" "}
+                <span className="text-slate-400">
+                  ({bench.totalReturn ? "total return, dividends reinvested" : "price return"}, time-weighted{bench.annual ? ", per year" : ""})
+                </span>
+                :
+              </span>
+              <span className="tabular-nums">
+                You <strong className={bench.you >= 0 ? "text-emerald-600" : "text-rose-600"}>{pctOf(bench.you)}</strong>
+              </span>
+              <span className="text-slate-300">·</span>
+              <span className="tabular-nums">
+                S&amp;P 500 <strong className={bench.spy >= 0 ? "text-emerald-600" : "text-rose-600"}>{pctOf(bench.spy)}</strong>
+              </span>
+              <span
+                className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                  bench.you - bench.spy >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+                }`}
+              >
+                {bench.you - bench.spy >= 0 ? "Beating" : "Trailing"} the market by {pts(bench.you - bench.spy)}
+                {bench.annual ? " a year" : ""}
+              </span>
+            </div>
+            {bench.youMwr != null && bench.spyMwr != null && (
+              <p className="mt-1.5 text-xs text-slate-500">
+                Same money, same dates: your cash earned <strong className="tabular-nums">{pctOf(bench.youMwr)}</strong> a
+                year; in the S&amp;P 500 it would have earned <strong className="tabular-nums">{pctOf(bench.spyMwr)}</strong>.
+              </p>
+            )}
+            {!bench.totalReturn && (
+              <p className="mt-1.5 text-xs text-slate-400">
+                Dividends are left out on both sides until the S&amp;P 500&apos;s payout history reaches back to your first trade (it fills in overnight).
+              </p>
+            )}
           </div>
         )}
 
@@ -306,7 +409,7 @@ export default async function PerformancePage() {
               <span className="flex items-center gap-1.5">
                 <span className="h-0.5 w-4 border-t border-dashed border-slate-400" /> {hasRealHistory ? "Net invested" : "What you paid"}
               </span>
-              {benchReturnPct != null && (
+              {bench && (
                 <span className="flex items-center gap-1.5">
                   <span className="h-0.5 w-4 border-t-2 border-[#b98a34]" /> S&amp;P 500
                 </span>
@@ -315,8 +418,9 @@ export default async function PerformancePage() {
           </div>
           <p className="mb-4 max-w-2xl text-xs text-slate-400">
             {hasRealHistory ? (
-              <>Reconstructed from your transactions and weekly closing prices. The gap between the two
-              lines is your gain; dividends are counted separately on the Dividends page.</>
+              <>Reconstructed from your transactions and weekly closing prices. The gap between value and
+              net invested is your price gain; dividends received are on top of it.
+              {bench ? <> The S&amp;P 500 line is the same money, on the same dates, put into SPY{bench.totalReturn ? " with its dividends reinvested" : ""}; holdings your broker reported as an opening balance count at their market value that day.</> : null}</>
             ) : (
               <>Your broker sends your <em>current</em> holdings, not the date of each purchase, so this
               shows the stocks you hold <strong>today</strong>, valued back through the past year. It&apos;s a
@@ -337,10 +441,22 @@ export default async function PerformancePage() {
           )}
         </section>
 
-        <p className="mt-4 text-center text-xs text-slate-400">
-          A simple return on the money you put in, not a time-weighted or money-weighted (XIRR) figure.
-          We&apos;d rather show a number we can stand behind than a confident wrong one.
-        </p>
+        {hasRealHistory && twr?.total != null ? (
+          <p className="mx-auto mt-4 max-w-3xl text-center text-xs text-slate-400">
+            Return is time-weighted: each week between closing prices is measured on its own (Modified
+            Dietz) and the weeks are chain-linked, so money you add or withdraw doesn&apos;t count as
+            performance. &ldquo;Your money&rdquo; is money-weighted (XIRR). Both include dividends
+            received; the S&amp;P 500 is SPY with dividends reinvested on the ex-date. Holdings your broker
+            reported as an opening balance enter at their market value that day, so gains made before
+            it don&apos;t count as recent performance. Past trades in other currencies are converted at
+            today&apos;s rates.
+            {twr.unpricedValue > 0 && <> {money(twr.unpricedValue, base)} of holdings with no price history is left out of the time-weighted figure.</>}
+          </p>
+        ) : (
+          <p className="mt-4 text-center text-xs text-slate-400">
+            A simple return on what you paid for the holdings you have today.
+          </p>
+        )}
       </div>
     </main>
   );
@@ -350,16 +466,19 @@ function Card({
   label,
   value,
   tone,
+  sub,
 }: {
   label: string;
   value: string;
   tone?: "up" | "down";
+  sub?: string;
 }) {
   const toneClass = tone === "up" ? "text-emerald-600" : tone === "down" ? "text-rose-600" : "text-slate-900";
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
       <div className="text-xs uppercase tracking-wide text-slate-400">{label}</div>
       <div className={`mt-1 text-xl font-semibold ${toneClass}`}>{value}</div>
+      {sub && <div className="mt-0.5 text-xs text-slate-400">{sub}</div>}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncInstrumentPriceHistory } from "@/lib/marketdata/sync";
+import { syncBenchmark } from "@/lib/marketdata/benchmark";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { fetchAll } from "@/lib/supabase/paginate";
 
@@ -42,12 +43,13 @@ export async function backfillHistory(): Promise<{ ok: boolean; message: string 
   }
 
   // Every instrument in the ledger (held or since-exited — the historical line values positions you
-  // held at each past date). Dedupe to one entry per instrument; skip crypto (no reliable weekly feed).
+  // held at each past date). Dedupe to one entry per instrument. Crypto is included: the nightly sync
+  // already prices it from the same feed, and leaving it out gave coins held since 2020 no history
+  // before the nightly window, which the performance page can only treat as unpriced.
   const byId = new Map<string, { id: string; symbol: string; exchange: string; currency: string | null }>();
   for (const r of txInsts) {
     const inst = Array.isArray(r.instruments) ? r.instruments[0] ?? null : r.instruments;
     if (!inst || !r.instrument_id || byId.has(r.instrument_id)) continue;
-    if ((inst.type ?? "") === "crypto") continue;
     byId.set(r.instrument_id, { id: r.instrument_id, symbol: inst.symbol, exchange: inst.exchange, currency: inst.currency });
   }
   const instruments = [...byId.values()];
@@ -67,6 +69,9 @@ export async function backfillHistory(): Promise<{ ok: boolean; message: string 
       })
     );
   }
+
+  // The S&P 500 benchmark too: deep history and ten years of dividends, whoever holds it.
+  await syncBenchmark(admin);
 
   revalidatePath("/dashboard/performance");
   const failNote = failed ? ` (${failed} not covered by the price feed — usually a delisted ticker)` : "";

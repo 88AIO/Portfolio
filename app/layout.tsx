@@ -4,11 +4,17 @@ import { SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 // Geometric sans for the interface; a warm optical serif for headline moments.
-const sans = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
+//
+// Both "optional", not "swap": on a slow first visit the page paints before the fonts arrive, and
+// swapping them in reflowed text that was already on screen (0.07 on the hero from the serif, 0.06
+// on the pricing cards from the sans, mobile). Optional keeps the fallback for that one view — the
+// fonts are preloaded and cached for the next — so nothing moves. On a normal connection they
+// arrive inside the first paint and are used straight away.
+const sans = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "optional" });
 const display = Fraunces({
   subsets: ["latin"],
   variable: "--font-fraunces",
-  display: "swap",
+  display: "optional",
   weight: ["400", "500", "600"],
   style: ["normal", "italic"],
 });

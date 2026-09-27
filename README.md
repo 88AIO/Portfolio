@@ -34,6 +34,7 @@ Strategy, specs, and audits live in `docs/` (see the index in `CLAUDE.md`).
   - `SNAPTRADE_CLIENT_ID` / `SNAPTRADE_CONSUMER_KEY` / `BROKER_SYNC_OWNER_EMAILS` — owner-only broker sync; leave unset to hide the feature.
   - `NEXT_PUBLIC_SITE_URL` — set once a custom domain is live (it is also the canonical URL and the sitemap origin).
   - `OPS_ALERT_EMAIL` — where sync failure reports go; point a free uptime monitor at `/api/health` too.
+  - `NEXT_PUBLIC_TURNSTILE_SITE_KEY` — optional CAPTCHA on sign-up, sign-in and password reset. Set it and redeploy **before** enabling Turnstile in Supabase → Authentication → Bot and Abuse Protection (see `.env.local.example`).
   - Sentry needs nothing: the DSN is committed (`lib/observability.ts`), errors from every runtime report there, and the nightly sync checks in with a Sentry cron monitor that alerts when a night is missed. `SENTRY_DSN` / `SENTRY_AUTH_TOKEN` are optional overrides.
 - In **Supabase → Authentication → URL Configuration**, set the Site URL to your domain and add `https://<your-domain>/auth/callback` (plus `http://localhost:3000/auth/callback` for dev) to the redirect allow-list. Sign-up confirmation and password-reset links come back through that route; without it they land on the marketing page with no session.
 

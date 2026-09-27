@@ -16,6 +16,11 @@ const supabaseSources = supabaseOrigin
   ? `${supabaseOrigin} ${supabaseOrigin.replace(/^http/, "ws")}`
   : "https://*.supabase.co wss://*.supabase.co";
 
+// Cloudflare Turnstile (the sign-up/sign-in CAPTCHA, components/Turnstile.tsx) runs a script and an
+// iframe from its own origin. Allowed only when a site key is configured, so the policy stays
+// self-only for a deployment that doesn't use it.
+const turnstile = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() ? " https://challenges.cloudflare.com" : "";
+
 // Content-Security-Policy. The app loads no third-party scripts (the Sentry SDK is bundled, not
 // fetched from a CDN), so this is nearly a self-only policy. 'unsafe-inline' on script-src is the one concession: Next.js App Router streams its
 // hydration payload as inline <script> tags and a nonce-based policy would need the middleware to
@@ -25,12 +30,12 @@ const supabaseSources = supabaseOrigin
 // the Sentry ingest host is where error reports go (lib/observability.ts).
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'"} https://vercel.live`,
+  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'"} https://vercel.live${turnstile}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   `connect-src 'self' ${supabaseSources} https://vercel.live https://*.ingest.us.sentry.io https://*.ingest.sentry.io`,
-  "frame-src https://vercel.live",
+  `frame-src https://vercel.live${turnstile}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -54,6 +59,19 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["yahoo-finance2", "snaptrade-typescript-sdk"],
   // No reason to advertise the framework on every response.
   poweredByHeader: false,
+  // Sentry's tree-shaking flags. Tracing and session replay are off by design (lib/observability.ts),
+  // so their code was dead weight in every page's JavaScript. Set here rather than through the
+  // Sentry plugin's bundleSizeOptimizations, which only reaches webpack builds; Next 16 builds with
+  // Turbopack. The nightly sync's cron monitor is a check-in, not tracing, and keeps working.
+  compiler: {
+    define: {
+      __SENTRY_DEBUG__: "false",
+      __SENTRY_TRACING__: "false",
+      __RRWEB_EXCLUDE_IFRAME__: "true",
+      __RRWEB_EXCLUDE_SHADOW_DOM__: "true",
+      __SENTRY_EXCLUDE_REPLAY_WORKER__: "true",
+    },
+  },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

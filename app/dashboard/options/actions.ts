@@ -13,6 +13,7 @@ import { computeOption, legPremium, type OptionPositionRow } from "@/lib/options
 import { digestEmailHtml, upcomingExDate, type DigestData, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell } from "@/lib/email";
 import { isValidSymbol, isValidExchange } from "@/lib/import/csv";
+import { allowAction, RATE_LIMITS, RATE_LIMITED_MESSAGE } from "@/lib/rateLimit";
 
 // --- Notification preferences (options/dividend alerts + weekly income digest) ---
 export async function getNotificationPrefs(): Promise<{ email_alerts: boolean; email_digest: boolean }> {
@@ -31,6 +32,15 @@ export async function sendTestEmail(): Promise<{ ok: boolean; message: string }>
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.email) return { ok: false, message: "No email address is on your account." };
+  // Anyone can sign up with any address, so an unconfirmed one may belong to someone else — and
+  // without a limit this button would mail them from our sending domain as often as it's clicked.
+  // Confirmed addresses only, and a few tests per account per ten minutes.
+  if (!user.email_confirmed_at) {
+    return { ok: false, message: "Confirm your email address first — the sign-up link is in your inbox." };
+  }
+  if (!(await allowAction(user.id, RATE_LIMITS.testEmail))) {
+    return { ok: false, message: "A few test emails just went out. Give it a few minutes, then try again." };
+  }
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
 
@@ -136,6 +146,7 @@ export async function addOptionTransaction(formData: FormData): Promise<ActionRe
   // so a malformed underlying can't create junk reference rows (matches addTransaction / CSV import).
   if (!isValidSymbol(symbol) || !isValidExchange(exchange))
     return fail("That symbol or exchange doesn't look right.");
+  if (!(await allowAction(user.id, RATE_LIMITS.addOption))) return fail(RATE_LIMITED_MESSAGE);
 
   // Resolve the target portfolio (must belong to the signed-in user); default to the primary one.
   let portfolioId = "";

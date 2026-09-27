@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncInstrumentPriceHistory } from "@/lib/marketdata/sync";
+import { syncBenchmark } from "@/lib/marketdata/benchmark";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { recordSyncRun, isCronAuthorized } from "@/lib/cron";
 
@@ -46,9 +47,9 @@ export async function GET(request: Request) {
     if (!inst || !r.instrument_id || byId.has(r.instrument_id)) continue;
     byId.set(r.instrument_id, { id: r.instrument_id, symbol: inst.symbol, exchange: inst.exchange, type: inst.type, currency: inst.currency });
   }
-  // Crypto weekly history isn't reliably available via the equity price feed and is a negligible
-  // slice — skip it here (current value still shows on the dashboard).
-  const instruments = [...byId.values()].filter((i) => (i.type ?? "") !== "crypto");
+  // Crypto included: the nightly sync already prices it from the same feed, and skipping it left
+  // coins held since 2020 with no history before the nightly window.
+  const instruments = [...byId.values()];
 
   let ok = 0;
   let failed = 0;
@@ -66,7 +67,10 @@ export async function GET(request: Request) {
     );
   }
 
-  const summary = { backfilled: ok, failed, total: instruments.length, fromDays };
+  // The S&P 500 benchmark: deep history and ten years of dividends, whoever holds it.
+  const benchmark = await syncBenchmark(admin);
+
+  const summary = { backfilled: ok, failed, total: instruments.length, fromDays, benchmarkOk: benchmark.ok };
   await recordSyncRun(admin, "backfill", startedAt, summary);
   return Response.json(summary);
 }

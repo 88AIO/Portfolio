@@ -107,7 +107,8 @@ export interface MarketDataProvider {
   getFxRate(from: string, base: string): Promise<number>;
   searchInstrument(symbol: string, exchange: string): Promise<InstrumentMeta | null>;
   getDividendInfo?(symbol: string, exchange: string): Promise<DividendInfo | null>;
-  getDividendHistory?(symbol: string, exchange: string): Promise<DividendHistoryPoint[]>;
+  /** `years` defaults to 3 (the dividend-safety window); the S&P 500 benchmark asks for more. */
+  getDividendHistory?(symbol: string, exchange: string, years?: number): Promise<DividendHistoryPoint[]>;
   getSplitHistory?(symbol: string, exchange: string): Promise<SplitPoint[]>;
   getPriceHistory?(symbol: string, exchange: string, fromDays: number, knownCurrency?: string | null): Promise<PriceHistoryPoint[]>;
   getProfile?(symbol: string, exchange: string): Promise<InstrumentProfile | null>;

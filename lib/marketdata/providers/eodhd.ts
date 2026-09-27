@@ -21,6 +21,7 @@ import type {
   SplitPoint,
 } from "../types";
 import { normalizeCurrency, canonicalSector } from "../normalize";
+import { lastCloseOfEachWeek } from "../weekly";
 
 const EODHD_BASE = "https://eodhd.com/api";
 
@@ -217,11 +218,13 @@ async function getDividendInfo(symbol: string, exchange: string): Promise<Divide
 
 async function getDividendHistory(
   symbol: string,
-  exchange: string
+  exchange: string,
+  years = 3
 ): Promise<DividendHistoryPoint[]> {
-  // ~3 years back, matching the Yahoo provider, so dividend-safety scoring sees the same window.
+  // ~3 years back by default, matching the Yahoo provider, so dividend-safety scoring sees the same
+  // window; the S&P 500 benchmark asks for longer.
   const rows = await get<Array<{ date?: string; value?: unknown; currency?: string }>>(
-    `/div/${encodeURIComponent(ticker(symbol, exchange))}?from=${daysAgo(3 * 365)}`,
+    `/div/${encodeURIComponent(ticker(symbol, exchange))}?from=${daysAgo(years * 365)}`,
     86_400
   );
   if (!Array.isArray(rows)) return [];
@@ -269,12 +272,14 @@ async function getPriceHistory(
   fromDays: number,
   knownCurrency?: string | null
 ): Promise<PriceHistoryPoint[]> {
-  // Weekly bars (period=w) to match the Yahoo provider: ~52 points/year per instrument, light to
-  // store and to draw. The raw `close`, deliberately: adjusted_close is adjusted for dividends as
-  // well as splits, which is the wrong series for a value chart (see PriceHistoryPoint). Splits
-  // are applied by the sync from instrument_splits — capabilities.priceHistorySplitAdjusted: false.
+  // Daily bars reduced to each week's last close, to match the Yahoo provider: ~52 points/year,
+  // each on its real date (provider weekly bars are stamped with the week's start; see
+  // lib/marketdata/weekly.ts). The raw `close`, deliberately: adjusted_close is adjusted for
+  // dividends as well as splits, which is the wrong series for a value chart (see
+  // PriceHistoryPoint). Splits are applied by the sync from instrument_splits —
+  // capabilities.priceHistorySplitAdjusted: false.
   const rows = await get<Array<{ date?: string; close?: unknown }>>(
-    `/eod/${encodeURIComponent(ticker(symbol, exchange))}?period=w&from=${daysAgo(fromDays)}`,
+    `/eod/${encodeURIComponent(ticker(symbol, exchange))}?period=d&from=${daysAgo(fromDays)}`,
     86_400
   );
   if (!Array.isArray(rows)) return [];
@@ -286,8 +291,7 @@ async function getPriceHistory(
     if (!date || close == null) continue;
     out.push({ date, close: close / divisor });
   }
-  out.sort((a, b) => a.date.localeCompare(b.date));
-  return out;
+  return lastCloseOfEachWeek(out);
 }
 
 async function getProfile(symbol: string, exchange: string): Promise<InstrumentProfile | null> {

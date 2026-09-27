@@ -314,6 +314,23 @@ describe("RLS cross-tenant isolation", { skip }, () => {
     assert.notEqual(div.error, null, "authenticated write to dividends must be rejected");
   });
 
+  it("rate limits: only the service role can count, and the count is per user and per action", async () => {
+    // A user who could call the counter could pass a one-second window and reset their own limit
+    // between requests, so it must be closed to them entirely (supabase/schema.sql §14).
+    const direct = await clientA.rpc("hit_rate_limit", { p_user: A.id, p_bucket: "rls-test", p_limit: 1, p_window_seconds: 1 });
+    assert.notEqual(direct.error, null, "a signed-in user must not be able to call hit_rate_limit");
+    const peek = await clientA.from("rate_limits").select("*");
+    assert.equal((peek.data ?? []).length, 0, "rate_limits must never be client-readable");
+
+    const hit = async (user) => {
+      const { data, error } = await db.rpc("hit_rate_limit", { p_user: user.id, p_bucket: "rls-test", p_limit: 2, p_window_seconds: 60 });
+      assert.equal(error, null, `hit_rate_limit: ${error?.message}`);
+      return data;
+    };
+    assert.deepEqual([await hit(A), await hit(A), await hit(A)], [true, true, false], "the third hit in the window is over a limit of 2");
+    assert.equal(await hit(B), true, "one user's count must not spend another's");
+  });
+
   it("signed-out (anon) reads return nothing from every user table and view", async () => {
     const anon = createClient(URL, ANON, { auth: { persistSession: false } });
     for (const table of ["portfolios", "transactions", "option_transactions", "positions", "positions_all", "option_positions", "portfolio_value_history", "notification_prefs", "broker_accounts", "consent_log", "instruments"]) {

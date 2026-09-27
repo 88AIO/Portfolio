@@ -3,6 +3,7 @@
 // US-first: US tickers pass through unchanged; a small suffix map handles common intl exchanges.
 import YahooFinance from "yahoo-finance2";
 import { normalizeCurrency, canonicalSector } from "../normalize";
+import { lastCloseOfEachWeek } from "../weekly";
 import type {
   DividendHistoryPoint,
   DividendInfo,
@@ -209,10 +210,13 @@ async function getDividendInfo(symbol: string, exchange: string): Promise<Divide
 
 async function getDividendHistory(
   symbol: string,
-  exchange: string
+  exchange: string,
+  years = 3
 ): Promise<DividendHistoryPoint[]> {
   try {
-    const period1 = new Date(Date.now() - 3 * 365 * 24 * 60 * 60 * 1000); // ~3 years back
+    // ~3 years by default: the window dividend-safety scoring is built around. The S&P 500
+    // benchmark asks for longer, to reinvest SPY's payouts back to the first trade.
+    const period1 = new Date(Date.now() - years * 365 * 24 * 60 * 60 * 1000);
     // Daily interval so high-frequency (weekly) distribution funds — XDTE/YMAX/QDTE etc. —
     // return every payout; a monthly interval collapses weekly dividends and undercounts income.
     const res = (await yf.chart(toYahoo(symbol, exchange), {
@@ -281,10 +285,12 @@ async function getPriceHistory(
 ): Promise<PriceHistoryPoint[]> {
   try {
     const period1 = new Date(Date.now() - fromDays * 24 * 60 * 60 * 1000);
-    // Weekly bars keep ~1 year to ~52 points per instrument — light to store and to draw.
+    // Daily bars, reduced below to each week's last close: ~52 points a year, light to store and
+    // to draw, and each on its real date. Yahoo's own weekly bars are stamped with the week's
+    // Monday but carry its Friday close (see lib/marketdata/weekly.ts).
     const res = (await yf.chart(toYahoo(symbol, exchange), {
       period1,
-      interval: "1wk",
+      interval: "1d",
     })) as unknown as {
       meta?: { currency?: string };
       quotes?: Array<{ date?: Date; close?: number | null }>;
@@ -301,8 +307,7 @@ async function getPriceHistory(
       const close = q?.close;
       if (iso && typeof close === "number" && Number.isFinite(close)) out.push({ date: iso, close: close / divisor });
     }
-    out.sort((a, b) => a.date.localeCompare(b.date));
-    return out;
+    return lastCloseOfEachWeek(out);
   } catch {
     return [];
   }

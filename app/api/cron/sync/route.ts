@@ -13,6 +13,7 @@ import { runBrokerSyncForUser } from "@/lib/brokersync/run";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { snapshotPortfolioValues } from "@/lib/snapshots";
 import { syncFxRates } from "@/lib/fx";
+import { syncBenchmark } from "@/lib/marketdata/benchmark";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { takeProviderCallCount } from "@/lib/marketdata";
 import { recordSyncRun, listAllUserEmails, isCronAuthorized, opsAlertEmail } from "@/lib/cron";
@@ -250,6 +251,11 @@ async function runSync(admin: ReturnType<typeof createAdminClient>, startedAt: n
     );
   }
 
+  // The S&P 500 benchmark (SPY) is refreshed whether or not anyone holds it: every performance page
+  // is measured against it, and its dividends go back further than any holding's (total return).
+  const benchmark = await syncBenchmark(admin);
+  if (!benchmark.ok) console.error(`[cron:sync] benchmark sync failed: ${benchmark.error}`);
+
   // Refresh the FX cache from the live provider so pages never call it at render time. Isolated.
   let fxUpdated = 0;
   try {
@@ -271,7 +277,7 @@ async function runSync(admin: ReturnType<typeof createAdminClient>, startedAt: n
 
   // Housekeeping. None of these tables has a reader that looks further back than this, so the rows
   // are pure growth: IV rank uses a 365-day window, the health check reads the latest run, and a
-  // finder scan is stale after ten minutes.
+  // finder scan is stale after ten minutes, and no rate-limit window is longer than ten minutes.
   let pruned = 0;
   try {
     const dayMs = 86_400_000;
@@ -279,7 +285,8 @@ async function runSync(admin: ReturnType<typeof createAdminClient>, startedAt: n
     const r1 = await admin.from("iv_history").delete({ count: "exact" }).lt("captured_on", cutoff(400).slice(0, 10));
     const r2 = await admin.from("sync_runs").delete({ count: "exact" }).lt("started_at", cutoff(180));
     const r3 = await admin.from("finder_scans").delete({ count: "exact" }).lt("created_at", cutoff(1));
-    pruned = (r1.count ?? 0) + (r2.count ?? 0) + (r3.count ?? 0);
+    const r4 = await admin.from("rate_limits").delete({ count: "exact" }).lt("window_start", cutoff(1));
+    pruned = (r1.count ?? 0) + (r2.count ?? 0) + (r3.count ?? 0) + (r4.count ?? 0);
   } catch (e) {
     console.error("[cron:sync] prune failed:", e);
   }
@@ -297,6 +304,7 @@ async function runSync(admin: ReturnType<typeof createAdminClient>, startedAt: n
     // brokerOwners answers "did it even try" — brokerOptionLegs of 0 never distinguished a
     // clean run with no new legs from a sync that never ran at all.
     brokerOwners, brokerOptionLegs: brokerSynced, brokerError, valueSnapshots, snapshotError, fxUpdated, pruned,
+    benchmarkOk: benchmark.ok, benchmarkDeepHistory: benchmark.deep,
     // splitsUnstored > 0 means the provider returned splits that did not reach the database —
     // most likely supabase/schema.sql has not been applied since the splits feature shipped.
     splitsWritten, splitsUnstored,

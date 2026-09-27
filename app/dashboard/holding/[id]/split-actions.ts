@@ -17,6 +17,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { syncInstrumentSplits } from "@/lib/marketdata/sync";
 import { ensurePortfolio } from "../../actions";
 import { parseSplitRatio, MIN_RATIO, MAX_RATIO } from "@/lib/corporate/splits";
+import { allowAction, RATE_LIMITS, RATE_LIMITED_MESSAGE } from "@/lib/rateLimit";
 
 export async function addSplit(formData: FormData) {
   const supabase = await createClient();
@@ -106,6 +107,7 @@ export async function checkSplits(instrumentId: string): Promise<{ ok: boolean; 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, message: "Please sign in again." };
   if (!instrumentId) return { ok: false, message: "Missing holding." };
+  if (!(await allowAction(user.id, RATE_LIMITS.checkSplits))) return { ok: false, message: RATE_LIMITED_MESSAGE };
 
   const { data: inst } = await supabase
     .from("instruments")

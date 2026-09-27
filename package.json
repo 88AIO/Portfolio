@@ -15,25 +15,25 @@
     "verify:eodhd": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-eodhd.mjs"
   },
   "dependencies": {
-    "@sentry/nextjs": "^10.74.0",
+    "@sentry/nextjs": "^10.75.3",
     "@supabase/ssr": "^0.12.7",
-    "@supabase/supabase-js": "^2.116.0",
-    "next": "^16.3.4",
+    "@supabase/supabase-js": "^2.117.2",
+    "next": "^16.3.6",
     "papaparse": "^5.7.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "recharts": "^3.10.1",
-    "snaptrade-typescript-sdk": "^12.2.6",
+    "snaptrade-typescript-sdk": "^12.2.12",
     "yahoo-finance2": "^4.0.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/papaparse": "^5.5.2",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "eslint": "^9",
-    "eslint-config-next": "^16.3.4",
+    "eslint-config-next": "^16.3.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

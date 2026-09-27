@@ -243,23 +243,26 @@ create table if not exists public.instrument_splits (
 );
 create index if not exists instrument_splits_instrument_idx on public.instrument_splits(instrument_id);
 
--- Exact product aggregate. Two splits on one holding have to compose (a 2-for-1 then a 3-for-1 is
--- 6x), and Postgres has no built-in product. The obvious exp(sum(ln(x))) trick returns a float
--- with rounding dust — 4.000000000000001 shares is not a share count anyone should see — so this
--- multiplies numerics exactly instead.
--- search_path pinned empty: closes the Supabase security-advisor "function search_path mutable"
--- lint. Harmless here either way (a * b resolves through pg_catalog regardless), but cheap to fix.
--- The product() aggregate below can't take the same fix directly (Postgres rejects `alter function`
--- on an aggregate) — it's not independently exploitable since sfunc is bound to numeric_mul's OID
--- at creation time, not looked up by name per call, so pinning numeric_mul secures both.
-create or replace function public.numeric_mul(a numeric, b numeric)
-  returns numeric language sql immutable strict set search_path = '' as $$ select a * b $$;
+-- Split factor: the exact product of the split ratios that apply to one trade. Two splits on one
+-- holding compose (a 2-for-1 then a 3-for-1 is 6x), and the obvious exp(sum(ln(x))) returns a float
+-- with rounding dust (4.000000000000001 shares), so this multiplies numerics exactly. Nulls are
+-- skipped and no splits at all is a factor of 1. It replaced a custom product() aggregate, which
+-- can't carry a pinned search_path and so kept the security advisor's "function search_path
+-- mutable" warning permanently lit; the two drops retire it on databases that still have it
+-- (cascade: the views that used it are dropped and recreated below anyway).
 drop aggregate if exists public.product(numeric) cascade;
-create aggregate public.product(numeric) (
-  sfunc = public.numeric_mul,
-  stype = numeric,
-  initcond = '1'
-);
+drop function if exists public.numeric_mul(numeric, numeric);
+create or replace function public.split_factor(ratios numeric[])
+  returns numeric language plpgsql immutable set search_path = '' as $$
+declare
+  f numeric := 1;
+  r numeric;
+begin
+  foreach r in array coalesce(ratios, '{}'::numeric[]) loop
+    if r is not null then f := f * r; end if;
+  end loop;
+  return f;
+end $$;
 
 -- 7d. PORTFOLIO SPLITS (a user's own corrections) --------------
 -- instrument_splits above is SHARED reference data. A user-entered split must never go in it: one
@@ -398,7 +401,7 @@ tx as (
     -- The shared provider rows, plus this user's own entries. A user row on the same ex-date
     -- REPLACES the provider's rather than compounding with it — two rows for one split would
     -- multiply the share count twice, which is a worse error than the gap it was added to fill.
-    select public.product(s.ratio) as factor
+    select public.split_factor(array_agg(s.ratio)) as factor
     from (
       select g.ex_date, g.ratio
         from public.instrument_splits g
@@ -849,3 +852,49 @@ create table if not exists public.finder_scans (
   created_at timestamptz not null default now()
 );
 alter table public.finder_scans enable row level security;
+
+-- ============================================================
+-- 14. RATE LIMITS — per-user caps on server actions that cost something
+-- ============================================================
+-- Adding a holding, importing a file, refreshing prices, scanning the put finder and checking
+-- splits all call the market-data provider; the test email sends mail from our domain. The shared
+-- caches bound most of that, but a signed-in script calling a server action in a loop could still
+-- exhaust the free provider feed every user depends on. One row per (user, action): a fixed window
+-- that resets once it has elapsed.
+--
+-- Only the service role may count. If the function took the caller's own parameters through
+-- PostgREST, a user could call it with a one-second window to reset their counter between
+-- requests; so server actions call it with the admin client and the user id they already verified.
+create table if not exists public.rate_limits (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  bucket text not null,
+  window_start timestamptz not null default now(),
+  hits int not null default 0,
+  primary key (user_id, bucket)
+);
+alter table public.rate_limits enable row level security;
+revoke all on public.rate_limits from anon, authenticated;
+
+create or replace function public.hit_rate_limit(p_user uuid, p_bucket text, p_limit int, p_window_seconds int)
+  returns boolean language sql volatile set search_path = '' as $$
+  insert into public.rate_limits as r (user_id, bucket, window_start, hits)
+  values (p_user, p_bucket, now(), 1)
+  on conflict (user_id, bucket) do update set
+    hits = case when r.window_start <= now() - make_interval(secs => p_window_seconds) then 1 else r.hits + 1 end,
+    window_start = case when r.window_start <= now() - make_interval(secs => p_window_seconds) then now() else r.window_start end
+  returning hits <= p_limit
+$$;
+revoke all on function public.hit_rate_limit(uuid, text, int, int) from public, anon, authenticated;
+grant execute on function public.hit_rate_limit(uuid, text, int, int) to service_role;
+
+-- Service-role-only tables say so explicitly. RLS with no policy already denies every client; the
+-- explicit deny documents the intent where the next reader looks (and clears the advisor's
+-- "RLS enabled, no policy" notice, which cannot tell intent from omission).
+do $$
+declare t text;
+begin
+  foreach t in array array['broker_connections', 'sent_notifications', 'sync_runs', 'finder_scans', 'rate_limits'] loop
+    execute format('drop policy if exists "service role only" on public.%I', t);
+    execute format('create policy "service role only" on public.%I for all to anon, authenticated using (false) with check (false)', t);
+  end loop;
+end $$;
