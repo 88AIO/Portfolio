@@ -21,6 +21,7 @@ import { isValidYmd, todayIso } from "@/lib/date";
 import { assertUniformRowShape } from "@/lib/supabase/rowShape";
 import { quoteAsOf } from "@/lib/marketdata/sync";
 import { ok, fail, type ActionResult } from "@/lib/actionResult";
+import { allowAction, RATE_LIMITS, RATE_LIMITED_MESSAGE } from "@/lib/rateLimit";
 
 const TRANSACTION_TYPES = new Set(["buy", "sell", "dividend"]);
 
@@ -69,13 +70,16 @@ export async function addTransaction(formData: FormData): Promise<ActionResult> 
   if (!isValidSymbol(symbol) || !isValidExchange(exchange)) return fail("That symbol or exchange doesn't look right.");
   // A supplied date must be a real calendar date (empty is fine — we default to today).
   if (executed_at && !isValidYmd(executed_at)) return fail("That trade date isn't a valid date.");
+  if (!(await allowAction(user.id, RATE_LIMITS.addTransaction))) return fail(RATE_LIMITED_MESSAGE);
 
   const portfolio = await ensurePortfolio();
 
   // Find or create the instrument (shared reference table, written with service role)
   let { data: inst } = await admin
     .from("instruments").select("*").eq("symbol", symbol).eq("exchange", exchange).maybeSingle();
+  let isNew = false;
   if (!inst) {
+    isNew = true;
     const meta = await searchInstrument(symbol, exchange);
     const { data: newInst } = await admin.from("instruments").insert({
       symbol, exchange, name: meta?.name ?? symbol,
@@ -111,8 +115,16 @@ export async function addTransaction(formData: FormData): Promise<ActionResult> 
       change_pct: q.changePct, as_of: quoteAsOf(q.asOf),
     });
   }
-  await syncInstrumentDividends(admin, inst.id, symbol, exchange, inst.currency);
-  await syncInstrumentPriceHistory(admin, inst.id, symbol, exchange, undefined, inst.currency);
+  // Dividends and weekly history only when nobody has synced this instrument yet. An instrument
+  // someone already holds is kept current by the nightly sync, so re-fetching both on every add
+  // was two provider calls per click that bought nothing.
+  const { count: historyRows } = isNew
+    ? { count: 0 }
+    : await admin.from("price_history").select("instrument_id", { count: "exact", head: true }).eq("instrument_id", inst.id);
+  if (isNew || !historyRows) {
+    await syncInstrumentDividends(admin, inst.id, symbol, exchange, inst.currency);
+    await syncInstrumentPriceHistory(admin, inst.id, symbol, exchange, undefined, inst.currency);
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/performance");
@@ -124,6 +136,9 @@ export async function refreshPrices() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login"); // don't let anon calls drive provider fan-out
+  // Over the limit: leave prices as they are. The freshness gate below makes most repeat clicks
+  // free already; this caps a loop that outruns it.
+  if (!(await allowAction(user.id, RATE_LIMITS.refreshPrices))) return;
 
   const admin = createAdminClient();
   const { data: allPos } = await supabase
@@ -179,6 +194,9 @@ export async function importTransactions(formData: FormData): Promise<ImportResu
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+  if (!(await allowAction(user.id, RATE_LIMITS.importCsv))) {
+    return { imported: 0, duplicates: 0, failed: 0, total: 0, errors: [{ line: 0, message: RATE_LIMITED_MESSAGE }] };
+  }
 
   const { rows, errors } = parseTransactionsCsv(await file.text());
   if (rows.length === 0) {

@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { MIN_AGE } from "@/lib/legal";
 import { safeNextPath } from "@/lib/safeNext";
+import Turnstile, { CAPTCHA_REQUIRED } from "@/components/Turnstile";
 
 type Msg = { text: string; tone: "error" | "info" | "success" };
 
@@ -36,6 +37,22 @@ export default function LoginPage() {
   });
   const [loading, setLoading] = useState(false);
   const note = (text: string, tone: Msg["tone"] = "info") => setMsg({ text, tone });
+  // CAPTCHA token for Supabase Auth (components/Turnstile.tsx); undefined while it's switched off.
+  // Tokens are single-use, so every attempt remounts the widget for a fresh one.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaKey, setCaptchaKey] = useState(0);
+  const captchaMissing = () => {
+    if (CAPTCHA_REQUIRED && !captchaToken) {
+      note("Please complete the security check first.", "error");
+      return true;
+    }
+    return false;
+  };
+  const renewCaptcha = () => {
+    if (!CAPTCHA_REQUIRED) return;
+    setCaptchaToken(null);
+    setCaptchaKey((k) => k + 1);
+  };
 
   // Lands here two ways: fresh from the password form below, or bounced back by proxy.ts because
   // an already-signed-in session hasn't cleared its second factor yet (e.g. a bookmark straight to
@@ -79,12 +96,15 @@ export default function LoginPage() {
       note("Enter your email above first, then tap Forgot password.", "error");
       return;
     }
+    if (captchaMissing()) return;
     setLoading(true);
     setMsg(null);
     const supabase = createClient();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/auth/callback?next=/auth/reset`,
+      captchaToken: captchaToken ?? undefined,
     });
+    renewCaptcha();
     setLoading(false);
     if (error) note(error.message, "error");
     else note("Check your email for a link to reset your password.", "success");
@@ -96,6 +116,7 @@ export default function LoginPage() {
       note(`Please confirm you're ${MIN_AGE}+ and agree to the Terms and Privacy Policy.`, "error");
       return;
     }
+    if (captchaMissing()) return;
     setLoading(true);
     setMsg(null);
     const supabase = createClient();
@@ -112,6 +133,7 @@ export default function LoginPage() {
           // for a session. Without this it lands wherever the Supabase project's Site URL points —
           // on the marketing page with a dangling ?code= and no session, if that was never set.
           emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+          captchaToken: captchaToken ?? undefined,
         },
       });
       if (error) {
@@ -131,7 +153,11 @@ export default function LoginPage() {
         note("Almost there. We sent a confirmation link to your email. Open it and you're in.", "success");
       }
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+        options: { captchaToken: captchaToken ?? undefined },
+      });
       if (error) {
         note(error.message, "error");
       } else {
@@ -147,6 +173,7 @@ export default function LoginPage() {
         }
       }
     }
+    renewCaptcha();
     setLoading(false);
   }
 
@@ -245,6 +272,7 @@ export default function LoginPage() {
                 </label>
               </>
             )}
+            <Turnstile key={captchaKey} onToken={setCaptchaToken} />
             <button
               type="submit" disabled={loading}
               aria-busy={loading}

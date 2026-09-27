@@ -13,6 +13,7 @@ import { computeOption, legPremium, type OptionPositionRow } from "@/lib/options
 import { digestEmailHtml, upcomingExDate, type DigestData, type PositionLite } from "@/lib/notifications/build";
 import { sendEmail, emailShell } from "@/lib/email";
 import { isValidSymbol, isValidExchange } from "@/lib/import/csv";
+import { allowAction, RATE_LIMITS, RATE_LIMITED_MESSAGE } from "@/lib/rateLimit";
 
 // --- Notification preferences (options/dividend alerts + weekly income digest) ---
 export async function getNotificationPrefs(): Promise<{ email_alerts: boolean; email_digest: boolean }> {
@@ -33,18 +34,13 @@ export async function sendTestEmail(): Promise<{ ok: boolean; message: string }>
   if (!user?.email) return { ok: false, message: "No email address is on your account." };
   // Anyone can sign up with any address, so an unconfirmed one may belong to someone else — and
   // without a limit this button would mail them from our sending domain as often as it's clicked.
-  // Confirmed addresses only, and one test per account per ten-minute window.
+  // Confirmed addresses only, and a few tests per account per ten minutes.
   if (!user.email_confirmed_at) {
     return { ok: false, message: "Confirm your email address first — the sign-up link is in your inbox." };
   }
-  const admin = createAdminClient();
-  const slot = { user_id: user.id, dedupe_key: `test-email:${Math.floor(Date.now() / 600_000)}` };
-  const { data: claimed, error: claimError } = await admin
-    .from("sent_notifications")
-    .upsert(slot, { onConflict: "user_id,dedupe_key", ignoreDuplicates: true })
-    .select("dedupe_key");
-  if (claimError) return { ok: false, message: "Couldn't send right now. Please try again." };
-  if (!claimed?.length) return { ok: false, message: "A test email was just sent. Give it a few minutes, then try again." };
+  if (!(await allowAction(user.id, RATE_LIMITS.testEmail))) {
+    return { ok: false, message: "A few test emails just went out. Give it a few minutes, then try again." };
+  }
   const portfolio = await ensurePortfolio();
   const base = portfolio.base_currency || "USD";
 
@@ -88,8 +84,6 @@ export async function sendTestEmail(): Promise<{ ok: boolean; message: string }>
   const res = await sendEmail(user.email, "Snowfolio — test email", emailShell("Test email", intro + digestEmailHtml(digest)));
 
   if (res.sent) return { ok: true, message: `Sent to ${user.email}. Check your inbox (and spam folder).` };
-  // Nothing went out, so don't make them wait out the window to retry.
-  await admin.from("sent_notifications").delete().eq("user_id", slot.user_id).eq("dedupe_key", slot.dedupe_key);
   if (res.skipped) return { ok: false, message: `Email isn't enabled on this instance yet (${res.skipped}). A RESEND_API_KEY needs to be set.` };
   return { ok: false, message: `Couldn't send: ${res.error ?? "unknown error"}.` };
 }
@@ -152,6 +146,7 @@ export async function addOptionTransaction(formData: FormData): Promise<ActionRe
   // so a malformed underlying can't create junk reference rows (matches addTransaction / CSV import).
   if (!isValidSymbol(symbol) || !isValidExchange(exchange))
     return fail("That symbol or exchange doesn't look right.");
+  if (!(await allowAction(user.id, RATE_LIMITS.addOption))) return fail(RATE_LIMITED_MESSAGE);
 
   // Resolve the target portfolio (must belong to the signed-in user); default to the primary one.
   let portfolioId = "";

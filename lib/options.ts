@@ -234,6 +234,8 @@ export type FinderResult = {
   // capabilities.options in lib/marketdata). Without it an empty scan is indistinguishable from
   // "no liquid puts today", and the UI would explain a missing feed as a quiet market.
   optionsUnavailable?: boolean;
+  // Set when this user has run more scans than the per-user limit allows (lib/rateLimit.ts).
+  rateLimited?: boolean;
 };
 
 export function statusLabel(s: OptionStatus): string {

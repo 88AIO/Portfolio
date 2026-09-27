@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { deleteAccount } from "@/app/dashboard/settings/actions";
+import Turnstile, { CAPTCHA_REQUIRED } from "@/components/Turnstile";
 
 // Danger-zone control: reveals a confirm step and only enables deletion once the user types
 // DELETE, so an account (and all its data) can't be wiped by a stray click.
@@ -11,6 +12,9 @@ export default function DeleteAccountButton() {
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The password re-check is a Supabase sign-in, so it needs a CAPTCHA token once that's switched on.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaKey, setCaptchaKey] = useState(0);
 
   if (!open) {
     return (
@@ -36,6 +40,9 @@ export default function DeleteAccountButton() {
           setError("We couldn't delete the account just now. Nothing was changed — please try again.");
         } finally {
           setPending(false);
+          // A token is spent by the attempt; a retry needs a fresh one.
+          setCaptchaToken(null);
+          setCaptchaKey((k) => k + 1);
         }
       }}
       className="space-y-3"
@@ -64,11 +71,13 @@ export default function DeleteAccountButton() {
         autoComplete="off"
         className="w-full max-w-xs rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
       />
+      <input type="hidden" name="captchaToken" value={captchaToken ?? ""} />
+      <Turnstile key={captchaKey} onToken={setCaptchaToken} />
       {error && <p role="alert" className="text-xs text-rose-600">{error}</p>}
       <div className="flex gap-2">
         <button
           type="submit"
-          disabled={confirm !== "DELETE" || !password || pending}
+          disabled={confirm !== "DELETE" || !password || pending || (CAPTCHA_REQUIRED && !captchaToken)}
           className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-700 disabled:opacity-50"
         >
           {pending ? "Deleting…" : "Permanently delete"}

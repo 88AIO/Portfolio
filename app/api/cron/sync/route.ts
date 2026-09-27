@@ -271,7 +271,7 @@ async function runSync(admin: ReturnType<typeof createAdminClient>, startedAt: n
 
   // Housekeeping. None of these tables has a reader that looks further back than this, so the rows
   // are pure growth: IV rank uses a 365-day window, the health check reads the latest run, and a
-  // finder scan is stale after ten minutes.
+  // finder scan is stale after ten minutes, and no rate-limit window is longer than ten minutes.
   let pruned = 0;
   try {
     const dayMs = 86_400_000;
@@ -279,7 +279,8 @@ async function runSync(admin: ReturnType<typeof createAdminClient>, startedAt: n
     const r1 = await admin.from("iv_history").delete({ count: "exact" }).lt("captured_on", cutoff(400).slice(0, 10));
     const r2 = await admin.from("sync_runs").delete({ count: "exact" }).lt("started_at", cutoff(180));
     const r3 = await admin.from("finder_scans").delete({ count: "exact" }).lt("created_at", cutoff(1));
-    pruned = (r1.count ?? 0) + (r2.count ?? 0) + (r3.count ?? 0);
+    const r4 = await admin.from("rate_limits").delete({ count: "exact" }).lt("window_start", cutoff(1));
+    pruned = (r1.count ?? 0) + (r2.count ?? 0) + (r3.count ?? 0) + (r4.count ?? 0);
   } catch (e) {
     console.error("[cron:sync] prune failed:", e);
   }

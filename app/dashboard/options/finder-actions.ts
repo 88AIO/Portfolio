@@ -8,6 +8,7 @@ import { dividendSafety, type DividendPoint } from "@/lib/dividends/safety";
 import { computeIvRank, IV_RANK_WINDOW_DAYS, type IvSample } from "@/lib/options/iv-rank";
 import { FINDER_UNIVERSE, FINDER_MAX_UNIVERSE } from "@/lib/options/finder-universe";
 import { todayIso } from "@/lib/date";
+import { allowAction, RATE_LIMITS } from "@/lib/rateLimit";
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
@@ -37,6 +38,9 @@ export async function scanPutFinder(input?: {
   // cached under a provider that had chains isn't replayed under one that doesn't.
   if (!providerSupportsOptions()) {
     return { rows: [], scanned: 0, truncated: false, targetDte, otmPct, optionsUnavailable: true };
+  }
+  if (!(await allowAction(user.id, RATE_LIMITS.putFinder))) {
+    return { rows: [], scanned: 0, truncated: false, targetDte, otmPct, rateLimited: true };
   }
 
   const { data: pos } = await supabase

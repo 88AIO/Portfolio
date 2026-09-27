@@ -35,7 +35,13 @@ export async function deleteAccount(formData: FormData): Promise<ActionResult | 
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     { auth: { persistSession: false, autoRefreshToken: false } }
   );
-  const { data: check, error: checkError } = await verifier.auth.signInWithPassword({ email: user.email, password });
+  // With CAPTCHA on in Supabase Auth, this sign-in needs the token the form's widget produced.
+  const captchaToken = String(formData.get("captchaToken") ?? "") || undefined;
+  const { data: check, error: checkError } = await verifier.auth.signInWithPassword({
+    email: user.email,
+    password,
+    options: { captchaToken },
+  });
   if (checkError || check.user?.id !== user.id) return fail("That password didn't match.");
   // Don't leave the verification session alive server-side.
   await verifier.auth.signOut({ scope: "local" }).catch(() => {});

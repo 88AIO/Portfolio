@@ -68,7 +68,13 @@ export default function PutFinder() {
         </div>
       )}
 
-      {res && !res.optionsUnavailable && (
+      {res?.rateLimited && (
+        <p role="status" className="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          You&apos;ve run a lot of scans in the last few minutes. Give it a few minutes, then scan again.
+        </p>
+      )}
+
+      {res && !res.optionsUnavailable && !res.rateLimited && (
         <div className="mt-5">
           <p className="mb-3 text-xs text-slate-400">
             Ranked by annualized return-on-capital · scanned {res.scanned} names at ~{res.targetDte} DTE, ~{res.otmPct}% OTM
