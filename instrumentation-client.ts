@@ -1,15 +1,17 @@
 // Sentry in the browser. Same options as the server; no replay, no tracing (see lib/observability).
-// Loaded once the page has finished loading rather than ahead of it (lib/sentryClient.ts); anything
-// thrown in the meantime is held here and reported when the SDK arrives.
+// Loaded only when there is something to report (lib/sentryClient.ts), the way Sentry's own lazy
+// loader works: most visits never throw, and booting the SDK on every page cost a mid-range phone
+// 100–190 ms of blocked main thread plus 62 KB it never used. The error that triggers the load is
+// held here, with anything else thrown while it arrives, and sent once it has.
 import { sentryClient } from "@/lib/sentryClient";
 
 const early: unknown[] = [];
-const onError = (e: ErrorEvent) => early.push(e.error ?? new Error(e.message));
-const onRejection = (e: PromiseRejectionEvent) => early.push(e.reason);
-addEventListener("error", onError);
-addEventListener("unhandledrejection", onRejection);
+let loading = false;
 
-function start() {
+function hold(error: unknown) {
+  early.push(error);
+  if (loading) return;
+  loading = true;
   sentryClient()
     .then((Sentry) => {
       // Sentry's own handlers are installed now; stop holding and send what was held.
@@ -20,9 +22,16 @@ function start() {
     .catch(() => {});
 }
 
-// After load, when the browser is idle, so reporting never competes with the page for the main
-// thread. The timeout bounds the wait on a page that never goes idle.
-const whenIdle = () =>
-  "requestIdleCallback" in window ? requestIdleCallback(start, { timeout: 4000 }) : setTimeout(start, 1500);
-if (document.readyState === "complete") whenIdle();
-else addEventListener("load", whenIdle, { once: true });
+function onError(e: ErrorEvent) {
+  // A cross-origin script (usually a browser extension) reports only "Script error." with nothing
+  // to act on, and Sentry drops it by default — not worth fetching the SDK for.
+  if (!e.error && /^Script error\.?$/.test(e.message)) return;
+  hold(e.error ?? new Error(e.message));
+}
+
+function onRejection(e: PromiseRejectionEvent) {
+  hold(e.reason);
+}
+
+addEventListener("error", onError);
+addEventListener("unhandledrejection", onRejection);

@@ -23,8 +23,8 @@ reaches once the owner steps at the bottom are done.
 | Database & tenant isolation | 92 | **100** | 100 | — |
 | API endpoints & auth gates | 90 | **100** | 100 | — (merge the branch) |
 | Data pipeline (crons) | 90 | **100** | 100 | — |
-| Hosting & scaling (Vercel) | 75 | **90** | 100 | domain + firewall on launch day (owner) |
-| Auth hardening | 65 | **85** | 100 | leaked-password check, min length 8, Turnstile keys, your own 2FA (owner) |
+| Hosting & scaling (Vercel) | 75 | **90** | 100 | domain + firewall (owner; the API refuses until the Firewall tab is opened once) |
+| Auth hardening | 65 | **88** | 100 | leaked-password check, min length 8, Turnstile keys, your own 2FA (owner) |
 | Observability & alerting | 70 | **80** | 100 | uptime monitor once public; confirm Sentry alerts reach you (owner) |
 | Backups & disaster recovery | 55 | 55 | 100 | one test restore (owner) |
 | Repo hygiene | 50 | 60 | 100 | make the repo private, protect `main` (owner) |
@@ -34,9 +34,9 @@ reaches once the owner steps at the bottom are done.
 | Monetization | 15 | 15 | — | not needed for a free launch |
 | Data accuracy (prices, sync) | — | **100** | 100 | 2 price-history bugs found and fixed (see QC pass 3) |
 | Benchmark & return math | — | **100** | 100 | TWR + XIRR + S&P total return; opening-lot inflation removed |
-| Page speed (Core Web Vitals) | — | **95** | 100 | all "good"; lab blocking time 238–353 ms vs 200 ms target |
-| **Engineering core** | **89** | **98** | 100 | |
-| **Public-launch readiness** | **59** | **67** | 100 | the owner steps below |
+| Page speed (Core Web Vitals) | — | **100** | 100 | Lighthouse mobile 98–99, every metric "good" (pass 4) |
+| **Engineering core** | **89** | **100** | 100 | |
+| **Public-launch readiness** | **59** | **68** | 100 | the owner steps below |
 
 *Second pass (same day):* every live figure was re-read from Vercel and Supabase and a
 column-level drift check was added; corrections are folded in (migration count, email
@@ -127,6 +127,46 @@ namespace import had produced a 192 KB chunk; now 62 KB, errors during load stil
 headline font no longer reflows the hero on slow first visits. Vercel's observability data isn't
 enabled on this project, so production latency percentiles weren't available; the region move
 to sfo1 removes a cross-country round trip from every database call once merged.
+
+## Pass 4 — speed to target, sign-in fix (same day)
+
+**Speed, measured with Lighthouse itself** (v12, mobile preset: 4× CPU, slow 4G, standard
+simulated throttling), production build served over HTTP/2 like Vercel serves it:
+
+| Page | Score | First paint | Largest paint (≤ 2.5 s) | Blocking time (< 200 ms) | Layout shift (≤ 0.1) |
+|---|---:|---:|---:|---:|---:|
+| `/` | 98 | 0.9 s | 2.1 s | 80 ms | 0 |
+| `/login` | 99 | 0.9 s | 2.3 s | 60 ms | 0 |
+| `/pricing` | 99 | 0.9 s | 2.2 s | 60 ms | 0 |
+| `/about` | 98 | 0.9 s | 2.2 s | 70 ms | 0 |
+| `/blog` | 99 | 0.9 s | 2.2 s | 60 ms | 0 |
+
+Cross-checked with applied throttling (the browser really slowed down rather than simulated):
+largest paint 1.9–2.0 s, blocking 100–150 ms, shift 0. Pass 3's 0.8–0.9 s paint figures came from
+a lighter hand-rolled harness; the table above is the standard number PageSpeed Insights reports.
+Signed-in dashboard pages weren't measured: this sandbox can't reach the database.
+
+- **Sentry now loads only when there is an error to report**, the way Sentry's own lazy loader
+  works. Deferred to idle time it still cost every visit 100–190 ms of blocked main thread and a
+  62 KB download. Verified: a page with no errors fetches nothing from Sentry; an error thrown
+  during load, a later error and an unhandled rejection all reach Sentry. The cost: no breadcrumbs
+  from before the first error.
+- **The interface font no longer reflows text** on a slow first visit (0.06 shift on the pricing
+  cards). Both fonts now use `display: optional`, like the headline font in pass 3.
+- What remains of the blocking time is React and Next.js starting up (~110 KB compressed); nothing
+  of ours is left on that path.
+
+**Sign-in bug fixed.** The sign-in form demanded 8+ characters from the password box, so anyone
+with a 6–7 character password (Supabase's own minimum is 6, and 8 isn't set there yet) was stopped
+by the browser before sign-in was even tried. The rule now applies to new passwords only (sign-up
+and reset), which is also how it behaves once Supabase enforces 8.
+
+**Tried and blocked.**
+- **Vercel Firewall:** the API answers "config not found" to both creating and updating it; the
+  Firewall tab has to be opened once in the dashboard first. Exact settings are in step 8 below.
+- **Site URL:** no change needed. `lib/site.ts` falls back to Vercel's production-domain variable,
+  which switches to the custom domain by itself once one is attached, so canonical tags, the
+  sitemap and social cards follow the domain without `NEXT_PUBLIC_SITE_URL`.
 
 ## Current configuration (verified live)
 
@@ -235,10 +275,10 @@ Everything here needs your accounts, your money or a professional. Rough time in
    matches the support address the legal pages already use. Buy it in Vercel → Domains so DNS is
    automatic, then add it to the `portfolio` project as the production domain. This alone makes
    the site public; the `*.vercel.app` URLs stay behind your login.
-3. **Point everything at it** [10 min]. Vercel env: `NEXT_PUBLIC_SITE_URL=https://snowfolio.app`
-   (and `NEXT_PUBLIC_LEGAL_CONTACT_EMAIL` if not `support@snowfolio.app`); redeploy. Supabase →
-   Authentication → URL Configuration: Site URL `https://snowfolio.app`, redirect
-   `https://snowfolio.app/auth/callback`.
+3. **Point auth at it** [5 min]. Supabase → Authentication → URL Configuration: Site URL
+   `https://snowfolio.app`, redirect `https://snowfolio.app/auth/callback`. The site's own links
+   follow the domain automatically; set `NEXT_PUBLIC_LEGAL_CONTACT_EMAIL` in Vercel only if the
+   support address isn't `support@snowfolio.app`.
 4. **Email** [20 min]. Resend → add domain → paste its DNS records (SPF, DKIM, DMARC) into Vercel
    DNS → verify. Vercel env `EMAIL_FROM=Snowfolio <alerts@snowfolio.app>`. Supabase →
    Authentication → SMTP: host `smtp.resend.com`, port 465, user `resend`, password = a Resend
@@ -250,8 +290,11 @@ Everything here needs your accounts, your money or a professional. Rough time in
 7. **CAPTCHA** [10 min]: Cloudflare → Turnstile → add widget for snowfolio.app → Vercel env
    `NEXT_PUBLIC_TURNSTILE_SITE_KEY` = site key → redeploy → **then** Supabase → Authentication →
    Bot and Abuse Protection → Turnstile, paste the secret key. In that order, or sign-in breaks.
-8. **Vercel Firewall** [5 min, launch day]: Firewall → Bot Protection on (challenge), plus a
-   bypass rule for path `/api/health` so an uptime monitor isn't challenged.
+8. **Vercel Firewall** [5 min]: Project → Firewall (opening it once creates the config) →
+   Bot Protection: **Challenge**. Then one custom rule, action **Bypass**: path starts with
+   `/api/cron/`, OR path is one of `/api/health`, `/api/backfill`, `/robots.txt`, `/sitemap.xml`,
+   `/opengraph-image`, `/manifest.webmanifest`. That keeps the nightly jobs, the uptime monitor,
+   search engines and link previews from being challenged. Publish.
 9. **Uptime monitor** [5 min]: any free one on `https://snowfolio.app/api/health`, alert on non-200.
 10. **GitHub** [5 min]: make `88AIO/Portfolio` private (history has real holdings); Settings →
     Branches → protect `main`, require the CI checks.

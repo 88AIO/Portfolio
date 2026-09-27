@@ -241,7 +241,10 @@ export default function LoginForm({
               <input
                 id="login-password"
                 type={showPassword ? "text" : "password"}
-                required placeholder="Password" value={password} minLength={8}
+                required placeholder="Password" value={password}
+                // New passwords only: an account made before the 8-character rule (Supabase's own
+                // floor is 6) must still be able to sign in with the password it has.
+                minLength={mode === "signup" ? 8 : undefined}
                 autoComplete={mode === "signin" ? "current-password" : "new-password"}
                 onChange={(e) => setPassword(e.target.value)}
                 className={`${input} pr-16`}

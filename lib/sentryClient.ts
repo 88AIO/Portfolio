@@ -1,9 +1,10 @@
-// Sentry in the browser, loaded after the page instead of before it.
+// Sentry in the browser, loaded only when something needs reporting.
 //
-// The SDK is ~55 KB of compressed JavaScript — a quarter of what every page shipped — and loading
-// it up front made each page parse and run it before it could respond. It now arrives once the
-// page has loaded (instrumentation-client.ts) or the moment something needs to report, whichever
-// comes first. Errors thrown before it arrives are queued there and sent when it does.
+// The SDK is ~60 KB of compressed JavaScript — a quarter of what every page shipped — and running
+// it on every visit blocked the main thread for 100–190 ms on a mid-range phone, even deferred to
+// idle time. It now arrives on the first uncaught error (instrumentation-client.ts) or the first
+// error boundary that reports, like Sentry's own lazy loader. The trade: no breadcrumbs from
+// before the error, and no session-based release health (not used here).
 import { SENTRY_BASE_OPTIONS } from "@/lib/observability";
 
 type SentryModule = typeof import("./sentryBrowser");
