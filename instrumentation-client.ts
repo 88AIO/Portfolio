@@ -9,7 +9,8 @@ const early: unknown[] = [];
 let loading = false;
 
 function hold(error: unknown) {
-  early.push(error);
+  // Capped: if the SDK can't arrive (offline) a page throwing in a loop must not grow this forever.
+  if (early.length < 20) early.push(error);
   if (loading) return;
   loading = true;
   sentryClient()
