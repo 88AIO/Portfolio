@@ -243,23 +243,26 @@ create table if not exists public.instrument_splits (
 );
 create index if not exists instrument_splits_instrument_idx on public.instrument_splits(instrument_id);
 
--- Exact product aggregate. Two splits on one holding have to compose (a 2-for-1 then a 3-for-1 is
--- 6x), and Postgres has no built-in product. The obvious exp(sum(ln(x))) trick returns a float
--- with rounding dust — 4.000000000000001 shares is not a share count anyone should see — so this
--- multiplies numerics exactly instead.
--- search_path pinned empty: closes the Supabase security-advisor "function search_path mutable"
--- lint. Harmless here either way (a * b resolves through pg_catalog regardless), but cheap to fix.
--- The product() aggregate below can't take the same fix directly (Postgres rejects `alter function`
--- on an aggregate) — it's not independently exploitable since sfunc is bound to numeric_mul's OID
--- at creation time, not looked up by name per call, so pinning numeric_mul secures both.
-create or replace function public.numeric_mul(a numeric, b numeric)
-  returns numeric language sql immutable strict set search_path = '' as $$ select a * b $$;
+-- Split factor: the exact product of the split ratios that apply to one trade. Two splits on one
+-- holding compose (a 2-for-1 then a 3-for-1 is 6x), and the obvious exp(sum(ln(x))) returns a float
+-- with rounding dust (4.000000000000001 shares), so this multiplies numerics exactly. Nulls are
+-- skipped and no splits at all is a factor of 1. It replaced a custom product() aggregate, which
+-- can't carry a pinned search_path and so kept the security advisor's "function search_path
+-- mutable" warning permanently lit; the two drops retire it on databases that still have it
+-- (cascade: the views that used it are dropped and recreated below anyway).
 drop aggregate if exists public.product(numeric) cascade;
-create aggregate public.product(numeric) (
-  sfunc = public.numeric_mul,
-  stype = numeric,
-  initcond = '1'
-);
+drop function if exists public.numeric_mul(numeric, numeric);
+create or replace function public.split_factor(ratios numeric[])
+  returns numeric language plpgsql immutable set search_path = '' as $$
+declare
+  f numeric := 1;
+  r numeric;
+begin
+  foreach r in array coalesce(ratios, '{}'::numeric[]) loop
+    if r is not null then f := f * r; end if;
+  end loop;
+  return f;
+end $$;
 
 -- 7d. PORTFOLIO SPLITS (a user's own corrections) --------------
 -- instrument_splits above is SHARED reference data. A user-entered split must never go in it: one
@@ -398,7 +401,7 @@ tx as (
     -- The shared provider rows, plus this user's own entries. A user row on the same ex-date
     -- REPLACES the provider's rather than compounding with it — two rows for one split would
     -- multiply the share count twice, which is a worse error than the gap it was added to fill.
-    select public.product(s.ratio) as factor
+    select public.split_factor(array_agg(s.ratio)) as factor
     from (
       select g.ex_date, g.ratio
         from public.instrument_splits g

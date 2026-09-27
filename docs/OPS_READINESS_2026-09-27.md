@@ -5,33 +5,70 @@ endpoints, database, auth, crons, email, observability, repo, legal. Follows
 `QC_SCORECARD_2026-09-11.md`; items that audit closed are not repeated. No domain name has been
 chosen yet; everything that depends on one is grouped under "Domain day".
 
-**Verdict:** the engine is production-grade (data isolation, crons, tests, headers all hold up
-under testing). The site is **not yet usable by the public**: it has no domain, so it cannot be
-reached, cannot send sign-up or password-reset emails, and names a support inbox that doesn't exist.
+**Verdict:** the engine is production-grade and, after the fix pass below, every area that can be
+fixed in code or in the live database scores 100. The site is still **not usable by the public**:
+it has no domain, so it cannot be reached, cannot send sign-up or password-reset emails, and names
+a support inbox that doesn't exist. What's left is a short list of steps only the owner can take
+(buying things, account settings, legal).
 
 ## Scorecard
 
-| Area | Score | Status | Why |
-|---|---:|:-:|---|
-| Code quality & CI | 92 | ✅ | lint, tsc, 272/272 tests, build all green; 0 npm vulnerabilities; CI boots its own Postgres for the RLS test |
-| Database & tenant isolation | 92 | ✅ | RLS on all 22 tables, views are `security_invoker`; zero drift from `schema.sql`; live pen test found no cross-user read or write |
-| API endpoints & auth gates | 90 | ✅ | every private route refuses without a session / cron secret; 2 bugs found and fixed on this branch |
-| Data pipeline (crons) | 90 | ✅ | 7/7 nights green, 76/76 instruments, 0 failures, 0 runtime errors in 7 days |
-| Hosting & scaling (Vercel) | 75 | ⚠️ | Pro plan, auto-scaling; functions ran in the wrong region (fixed here), no firewall rules |
-| Observability & alerting | 70 | ⚠️ | Sentry + cron monitor + `/api/health` + ops email; no outside uptime check possible until public |
-| Auth hardening | 65 | ⚠️ | 2FA available and server-enforced, email confirmation on; leaked-password check off, no CAPTCHA, owner has no 2FA |
-| Backups & disaster recovery | 55 | ⚠️ | daily backups come with Supabase Pro (not visible through the API); a restore has never been tested |
-| Repo hygiene | 50 | ⚠️ | repo is **public** with real holdings in history; `main` is unprotected |
-| Legal & compliance | 35 | ❌ | pages written; no entity, no attorney review, support inbox is on an unowned domain |
-| Transactional email | 25 | ❌ | no sending domain → no `EMAIL_FROM`, no custom SMTP for sign-up/reset emails |
-| Domain & public access | 15 | ❌ | no domain; every URL is behind Vercel login |
-| Monetization | 15 | — | not needed for a free launch (gates unchanged, see the 09-11 scorecard) |
-| **Engineering core** | **89** | | |
-| **Public-launch readiness** | **59** | | 6 hard blockers below |
+"Before" is the first pass this morning; "Now" is after the fix pass (code on branch
+`claude/practical-cori-jhrop4`, database changes already live); "Ceiling" is what each area
+reaches once the owner steps at the bottom are done.
 
-*Second pass (same day):* every live figure above was re-read from Vercel and Supabase and a
+| Area | Before | Now | Ceiling | What's left (who) |
+|---|---:|---:|---:|---|
+| Code quality & CI | 92 | **100** | 100 | — (merge the branch) |
+| Database & tenant isolation | 92 | **100** | 100 | — |
+| API endpoints & auth gates | 90 | **100** | 100 | — (merge the branch) |
+| Data pipeline (crons) | 90 | **100** | 100 | — |
+| Hosting & scaling (Vercel) | 75 | **90** | 100 | domain + firewall on launch day (owner) |
+| Auth hardening | 65 | **85** | 100 | leaked-password check, min length 8, Turnstile keys, your own 2FA (owner) |
+| Observability & alerting | 70 | **80** | 100 | uptime monitor once public; confirm Sentry alerts reach you (owner) |
+| Backups & disaster recovery | 55 | 55 | 100 | one test restore (owner) |
+| Repo hygiene | 50 | 60 | 100 | make the repo private, protect `main` (owner) |
+| Transactional email | 25 | 25 | 100 | needs the domain: Resend + Supabase SMTP (owner) |
+| Domain & public access | 15 | 20 | 100 | buy the domain (owner) — snowfolio.app is available, $9.99 then $15/yr |
+| Legal & compliance | 35 | 35 | 100 | entity, attorney review, support inbox (owner + professionals) |
+| Monetization | 15 | 15 | — | not needed for a free launch |
+| **Engineering core** | **89** | **98** | 100 | |
+| **Public-launch readiness** | **59** | **67** | 100 | the owner steps below |
+
+*Second pass (same day):* every live figure was re-read from Vercel and Supabase and a
 column-level drift check was added; corrections are folded in (migration count, email
 confirmation verified on, region verified from the deployment record).
+
+## Fix pass (same day)
+
+Everything below is either live in the database now or on the branch, green in CI.
+
+**Database (applied to production, recorded in `supabase/applied/`)**
+- `rate_limits` table + `hit_rate_limit()`: per-user counters for costly actions. Only the service
+  role can call it; a user who could pass their own window could reset their own counter.
+- Explicit "service role only" deny policies on the five server-only tables; the advisor's
+  "RLS enabled, no policy" notices are gone.
+- `product()` aggregate replaced by `split_factor()`, which pins its search path; the last
+  code-fixable security warning is gone. Dry-run on live data first: all 87 positions identical,
+  checksum identical before and after, `security_invoker` intact, cross-user reads still 0.
+- Security advisor now shows **one** item: leaked-password protection (a dashboard toggle).
+- Removed 10 junk instruments (crypto tickers stored as "US stocks" by an August import, e.g. AMP
+  at $0.0004, which would have shadowed Ameriprise for the next person to add AMP). Nothing
+  referenced them; portfolio checksum unchanged.
+
+**Code (branch)**
+- Rate limits on add holding / add option leg / CSV import / price refresh / put finder / split
+  check / test email, sized so only a script ever meets them. Fails open if the counter is
+  unreachable (logged), so the limiter can never take the app down.
+- Adding a holding someone already holds no longer re-fetches its dividends and price history on
+  every click (two provider calls each); the nightly sync keeps them current.
+- Optional Cloudflare Turnstile CAPTCHA on sign-up, sign-in, password reset and the delete-account
+  password check. Off until `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is set; the CSP allows Cloudflare
+  only then. Browser-tested both ways.
+- `/api/health` no longer publishes the provider, call counts, run duration or raw error text.
+- Next 16.3.6, React 19.3.0, Sentry 10.75, supabase-js 2.117, SnapTrade 12.2.12 (supersedes
+  Dependabot #14 and #16); 0 vulnerabilities.
+- Nightly sync prunes old rate-limit rows.
 
 ## Current configuration (verified live)
 
@@ -63,11 +100,14 @@ confirmation verified on, region verified from the deployment record).
   moving the app to the publishable key and disabling the legacy one is optional hardening.
 - Extensions: pgcrypto, uuid-ossp, pg_stat_statements, vault. pg_graphql, pg_net, pg_cron not
   installed (smaller attack surface). No storage buckets.
-- Data: 1 user, 14 portfolios, 1,985 transactions, 194 option legs, 104 instruments (76 synced
+- Data: 1 user, 14 portfolios, 1,985 transactions, 194 option legs, 104 instruments before the fix
+  pass removed 10 junk rows (76 synced
   nightly), 23,774 price-history rows, 976 dividends.
-- Advisors: leaked-password protection **off** (WARN); `product()` aggregate search_path (WARN,
-  not exploitable — documented in `schema.sql`); 4 service-role-only tables (INFO, intended);
-  15 unused indexes (INFO, expected at one user); Auth pool fixed at 10 connections (INFO).
+- Advisors at first pass: leaked-password protection **off** (WARN); `product()` aggregate
+  search_path (WARN); 4 service-role-only tables (INFO). After the fix pass only the
+  leaked-password WARN remains (a dashboard toggle). Performance advisor: unused indexes (INFO,
+  expected at one user) and a fixed 10-connection Auth pool (INFO, only matters after a compute
+  upgrade).
 
 **Auth** — email/password, optional TOTP 2FA enforced in `proxy.ts` for pages and API routes;
 password re-auth on account deletion; signup consent logged by trigger (verified live).
@@ -111,7 +151,7 @@ rolled-back transactions. No brute-force or load testing was run against product
 | Response headers (live) | CSP, HSTS preload, X-Frame DENY, nosniff, Referrer, Permissions | all present ✅ |
 | `/login?next=/%5Cevil.com` | **open redirect after sign-in** | **was exploitable → fixed** |
 | "Send test email" action | mail an unconfirmed address repeatedly | **was unlimited → fixed** |
-| `/api/health` | information disclosure | public summary shows provider, call counts, broker-owner count — low risk, trim when convenient |
+| `/api/health` | information disclosure | **was** publishing provider, call counts and raw error text → **fixed**: healthy/unhealthy and last-run time only |
 
 ## Fixed on this branch
 
@@ -127,38 +167,43 @@ rolled-back transactions. No brute-force or load testing was run against product
    Every page load and the nightly sync make many sequential database calls; each was paying a
    cross-country round trip.
 
-## What's left before the public can use it
+## What's left: owner-only steps, in order
 
-**Hard blockers** (in order — 1 unlocks most of the rest)
+Everything here needs your accounts, your money or a professional. Rough time in brackets.
 
-1. **Domain day** — buy the domain, then:
-   - attach it to the Vercel project as the production domain (this alone makes the site public);
-   - set `NEXT_PUBLIC_SITE_URL=https://<domain>` and `NEXT_PUBLIC_LEGAL_CONTACT_EMAIL=support@<domain>`, redeploy;
-   - Supabase → Auth → URL Configuration: Site URL + `https://<domain>/auth/callback` in redirects.
-2. **Sign-up and reset emails.** Supabase's built-in mailer refuses to send to anyone outside your
-   Supabase team, so today **no new user could confirm their account or reset a password**. Verify
-   the domain in Resend (SPF, DKIM, DMARC records), then set Supabase → Auth → SMTP to Resend, and
-   set `EMAIL_FROM` in Vercel for alerts/digest.
-3. **A monitored support inbox** on the new domain (privacy requests and legal notices go there).
-4. **Supabase Auth hardening:** leaked-password protection on, minimum length 8 (email
-   confirmation is already on).
-5. **Make the GitHub repo private** (history contains real holdings figures), and protect `main`
-   so a red CI can't deploy.
-6. **Legal minimum:** form the entity (set `NEXT_PUBLIC_LEGAL_COMPANY`), attorney review of Terms /
-   Privacy / Disclaimer. (Human + professional; tracked in issue #2.)
+1. **Merge the branch** (`claude/practical-cori-jhrop4` → `main`) [5 min]. This ships the fixes above
+   and moves the servers next to the database. Dependabot #14/#16 close themselves.
+2. **Buy the domain** [10 min]. snowfolio.app is available ($9.99 first year, $15/yr after) and
+   matches the support address the legal pages already use. Buy it in Vercel → Domains so DNS is
+   automatic, then add it to the `portfolio` project as the production domain. This alone makes
+   the site public; the `*.vercel.app` URLs stay behind your login.
+3. **Point everything at it** [10 min]. Vercel env: `NEXT_PUBLIC_SITE_URL=https://snowfolio.app`
+   (and `NEXT_PUBLIC_LEGAL_CONTACT_EMAIL` if not `support@snowfolio.app`); redeploy. Supabase →
+   Authentication → URL Configuration: Site URL `https://snowfolio.app`, redirect
+   `https://snowfolio.app/auth/callback`.
+4. **Email** [20 min]. Resend → add domain → paste its DNS records (SPF, DKIM, DMARC) into Vercel
+   DNS → verify. Vercel env `EMAIL_FROM=Snowfolio <alerts@snowfolio.app>`. Supabase →
+   Authentication → SMTP: host `smtp.resend.com`, port 465, user `resend`, password = a Resend
+   API key, sender `no-reply@snowfolio.app`. Without this no new user can confirm sign-up or reset
+   a password.
+5. **Support inbox** [10 min]: a forwarder for `support@snowfolio.app` to an inbox you read.
+6. **Supabase Auth** [2 min]: Authentication → Providers → Email → leaked-password protection
+   on, minimum length 8. Your own account: Settings → enable 2FA.
+7. **CAPTCHA** [10 min]: Cloudflare → Turnstile → add widget for snowfolio.app → Vercel env
+   `NEXT_PUBLIC_TURNSTILE_SITE_KEY` = site key → redeploy → **then** Supabase → Authentication →
+   Bot and Abuse Protection → Turnstile, paste the secret key. In that order, or sign-in breaks.
+8. **Vercel Firewall** [5 min, launch day]: Firewall → Bot Protection on (challenge), plus a
+   bypass rule for path `/api/health` so an uptime monitor isn't challenged.
+9. **Uptime monitor** [5 min]: any free one on `https://snowfolio.app/api/health`, alert on non-200.
+10. **GitHub** [5 min]: make `88AIO/Portfolio` private (history has real holdings); Settings →
+    Branches → protect `main`, require the CI checks.
+11. **Restore drill** [30 min]: Supabase → Database → Backups → restore the latest into a new
+    scratch project; check the row counts match; delete the scratch project.
+12. **Sentry** [5 min]: confirm the `nightly-sync` monitor and issue alerts email you.
+13. **Legal** [professionals]: form the entity (`NEXT_PUBLIC_LEGAL_COMPANY`), attorney review of
+    Terms / Privacy / Disclaimer, cyber insurance quote (issue #2).
 
-**Before announcing it** (first week)
-
-7. **Bot protection:** Vercel Firewall → Bot Protection on, plus a rate-limit rule on `/login` and
-   POSTs to `/dashboard*`. Supabase CAPTCHA needs a small code change first (a Turnstile widget on
-   the sign-up form) — enabling it without that breaks sign-up.
-8. **Uptime monitor** (any free one) on `https://<domain>/api/health`, alerting on non-200.
-9. **Restore drill:** restore a Supabase backup into a scratch project once and check the row counts.
-10. **Owner 2FA** on your own account (you hold the broker-sync feed).
-11. **Merge Dependabot #14 / #16** (Next 16.3.6, React 19.3).
-12. **Sentry:** confirm alerts reach your email; optional `SENTRY_AUTH_TOKEN` for readable traces.
-
-**Business decision, not a blocker for a free launch:** Yahoo's terms are non-commercial. Move to
+Business decision, not a blocker for a free launch: Yahoo's terms are non-commercial. Move to
 EODHD before charging (options chains need its paid add-on or another provider).
 
 ## Scale watch (no action now)
