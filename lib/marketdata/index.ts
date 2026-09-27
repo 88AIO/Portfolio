@@ -108,9 +108,9 @@ export function getDividendInfo(symbol: string, exchange: string) {
   return provider.getDividendInfo ? counted(provider.getDividendInfo(symbol, exchange)) : Promise.resolve(null);
 }
 
-export function getDividendHistory(symbol: string, exchange: string) {
+export function getDividendHistory(symbol: string, exchange: string, years?: number) {
   const provider = getProvider();
-  return provider.getDividendHistory ? counted(provider.getDividendHistory(symbol, exchange)) : Promise.resolve([]);
+  return provider.getDividendHistory ? counted(provider.getDividendHistory(symbol, exchange, years)) : Promise.resolve([]);
 }
 
 export function getSplitHistory(symbol: string, exchange: string) {

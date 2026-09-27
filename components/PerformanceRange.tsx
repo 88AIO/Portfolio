@@ -16,7 +16,15 @@ import {
 } from "@/lib/performance/ranges";
 import { money, pct } from "@/lib/format";
 
-type Point = { date: string; value: number; invested: number; benchmark?: number };
+type Point = {
+  date: string;
+  value: number;
+  invested: number;
+  benchmark?: number;
+  /** Growth-of-1 indexes (time-weighted): yours and the S&P 500's. */
+  twr?: number;
+  spy?: number;
+};
 
 export default function PerformanceRange({
   data,
@@ -43,6 +51,15 @@ export default function PerformanceRange({
   );
   const tickFormatter = useMemo(() => tickFormatterFor(shown), [shown]);
   const change = useMemo(() => rangeChange(shown), [shown]);
+  // Time-weighted returns over the visible window: the ratio of each growth-of-1 index between
+  // the first and last points that carry both.
+  const twrChange = useMemo(() => {
+    const withIdx = shown.filter((p) => p.twr != null && p.spy != null);
+    if (withIdx.length < 2) return null;
+    const a = withIdx[0];
+    const b = withIdx[withIdx.length - 1];
+    return { you: (b.twr! / a.twr! - 1) * 100, spy: (b.spy! / a.spy! - 1) * 100 };
+  }, [shown]);
 
   const btn = (active: boolean) =>
     [
@@ -117,6 +134,11 @@ export default function PerformanceRange({
               {money(Math.abs(change.valueAbs), currency)}
               {change.valuePct != null && <> ({pct(change.valuePct)})</>}
             </div>
+            {twrChange && (
+              <div className="text-xs tabular-nums text-slate-500">
+                Time-weighted: you {pct(twrChange.you)} · S&amp;P 500 {pct(twrChange.spy)}
+              </div>
+            )}
             <div className="text-xs text-slate-400">
               value over this range
               {Math.abs(change.valueAbs - change.gainAbs) > 1 && (

@@ -15,6 +15,7 @@ import {
 } from "@/lib/marketdata";
 import { inferDivFrequency } from "@/lib/dividends/cadence";
 import { splitFactor, type Split } from "@/lib/corporate/splits";
+import { datesToReplace } from "./weekly";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -95,6 +96,21 @@ export async function syncInstrumentPriceHistory(
       { onConflict: "instrument_id,d" }
     );
   }
+  // Within the window just refreshed, the fetch is now the whole truth: one completed close per
+  // week, on its real date. Anything else stored there is a leftover — a week-start stamp carrying
+  // a later close (look-ahead) or an intraday price once saved as a close (lib/marketdata/weekly.ts).
+  // Best-effort; the next night retries.
+  const first = history[0].date;
+  const last = history[history.length - 1].date;
+  const { data: stored, error: readError } = await admin
+    .from("price_history").select("d").eq("instrument_id", instrumentId).gte("d", first).lte("d", last);
+  if (readError) return;
+  const leftovers = datesToReplace(history, ((stored ?? []) as { d: string }[]).map((r) => r.d));
+  for (let i = 0; i < leftovers.length; i += 200) {
+    const { error } = await admin
+      .from("price_history").delete().eq("instrument_id", instrumentId).in("d", leftovers.slice(i, i + 200));
+    if (error) console.error(`[sync] ${symbol}.${exchange}: clearing leftover history rows failed: ${error.message}`);
+  }
 }
 
 // Sync an instrument's share splits.
@@ -138,11 +154,12 @@ export async function syncInstrumentDividends(
   instrumentId: string,
   symbol: string,
   exchange: string,
-  currency: string
+  currency: string,
+  historyYears?: number
 ) {
   const [info, history] = await Promise.all([
     getDividendInfo(symbol, exchange),
-    getDividendHistory(symbol, exchange),
+    getDividendHistory(symbol, exchange, historyYears),
   ]);
   const patch: Record<string, unknown> = {};
   if (info) {

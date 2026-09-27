@@ -42,9 +42,9 @@ export type PerformanceSeries = {
 };
 
 /** Cumulative shares held on each transaction date, for one instrument (dates ascending). */
-type ShareStep = { date: string; shares: number };
+export type ShareStep = { date: string; shares: number };
 
-function buildShareTimeline(txs: PerfTransaction[], splits?: Split[]): ShareStep[] {
+export function buildShareTimeline(txs: PerfTransaction[], splits?: Split[]): ShareStep[] {
   const sorted = [...txs].sort((a, b) => a.executed_at.localeCompare(b.executed_at));
   const steps: ShareStep[] = [];
   let shares = 0;
@@ -66,7 +66,7 @@ function buildShareTimeline(txs: PerfTransaction[], splits?: Split[]): ShareStep
 }
 
 /** Shares held as of `date` (the last step on or before it). */
-function sharesAsOf(steps: ShareStep[], date: string): number {
+export function sharesAsOf(steps: ShareStep[], date: string): number {
   let held = 0;
   for (const s of steps) {
     if (s.date <= date) held = s.shares;
@@ -76,7 +76,7 @@ function sharesAsOf(steps: ShareStep[], date: string): number {
 }
 
 /** Forward-filled close on or before `date` (null until the first known close). */
-function closeAsOf(closes: PerfClose[], date: string): number | null {
+export function closeAsOf(closes: PerfClose[], date: string): number | null {
   let val: number | null = null;
   for (const c of closes) {
     if (c.date <= date) val = c.close;
@@ -169,35 +169,51 @@ export function benchmarkCoverage(
  * Dollar-for-dollar S&P 500 benchmark: the same cash you actually deployed (each buy minus each
  * sell, on the date it happened) invested into SPY instead. Answers "did my picks beat just buying
  * the index with the same money at the same times?" Returns date → benchmark value (base currency).
- * Price return only (price_history is not dividend-adjusted), matched against the portfolio's own
- * price-only appreciation; dividends on both sides are counted elsewhere.
+ * With `dividends`, every SPY payout is reinvested on its ex-date (total return, the way the index
+ * itself is quoted); without them it is price return only.
  * @param txs         your buys/sells (the cash flows); other types ignored
  * @param benchCloses SPY weekly closes, ascending, in the base currency
  * @param fx          currency → base multiplier (applied to your cash flows)
  * @param dates       the dates to value the benchmark on (use the same grid as your value line)
+ * @param dividends   SPY dividends per share (ex-date, amount), for total return
+ * @param cashFor     overrides the cash a trade moved (base currency) — used to put a broker's
+ *                    opening-balance lot in at its market value that day rather than its old cost
  */
 export function buildBenchmarkSeries(
   txs: PerfTransaction[],
   benchCloses: PerfClose[],
   fx: (currency: string) => number,
   dates: string[],
+  dividends: { exDate: string; amount: number }[] = [],
+  cashFor?: (t: PerfTransaction) => number | null,
 ): Map<string, number> {
-  const flows = txs
-    .filter((t) => t.type === "buy" || t.type === "sell")
-    .sort((a, b) => a.executed_at.localeCompare(b.executed_at));
+  // One ordered event list. A payout goes before a same-day trade: shares bought ON the ex-date
+  // don't receive that dividend.
+  type Ev = { date: string; order: number; tx?: PerfTransaction; div?: number };
+  const events: Ev[] = [
+    ...dividends.map((d) => ({ date: d.exDate, order: 0, div: d.amount })),
+    ...txs.filter((t) => t.type === "buy" || t.type === "sell").map((t) => ({ date: t.executed_at, order: 1, tx: t })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order);
 
-  // Accumulate equivalent SPY shares: a buy of $X buys X/price_SPY shares that day; a sell redeems.
+  // Accumulate equivalent SPY shares: a buy of $X buys X/price_SPY shares that day; a sell redeems;
+  // a dividend of $d a share buys d/price more of every share held.
   const steps: ShareStep[] = [];
   let spyShares = 0;
-  for (const t of flows) {
-    const close = closeAsOf(benchCloses, t.executed_at);
+  for (const e of events) {
+    const close = closeAsOf(benchCloses, e.date);
     if (!close || close <= 0) continue; // no SPY price yet on/before this date
-    const r = fx(t.currency);
-    const cash = t.type === "buy" ? t.quantity * t.price + t.fees : t.quantity * t.price - t.fees;
-    spyShares += (t.type === "buy" ? 1 : -1) * (cash * r) / close;
+    if (e.div != null) {
+      if (spyShares <= 0) continue;
+      spyShares += (spyShares * e.div) / close;
+    } else if (e.tx) {
+      const t = e.tx;
+      const r = fx(t.currency);
+      const cash = cashFor?.(t) ?? (t.type === "buy" ? t.quantity * t.price + t.fees : t.quantity * t.price - t.fees) * r;
+      spyShares += (t.type === "buy" ? 1 : -1) * cash / close;
+    }
     const last = steps[steps.length - 1];
-    if (last && last.date === t.executed_at) last.shares = spyShares;
-    else steps.push({ date: t.executed_at, shares: spyShares });
+    if (last && last.date === e.date) last.shares = spyShares;
+    else steps.push({ date: e.date, shares: spyShares });
   }
 
   const out = new Map<string, number>();

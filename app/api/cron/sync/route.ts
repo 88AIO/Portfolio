@@ -13,6 +13,7 @@ import { runBrokerSyncForUser } from "@/lib/brokersync/run";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { snapshotPortfolioValues } from "@/lib/snapshots";
 import { syncFxRates } from "@/lib/fx";
+import { syncBenchmark } from "@/lib/marketdata/benchmark";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { takeProviderCallCount } from "@/lib/marketdata";
 import { recordSyncRun, listAllUserEmails, isCronAuthorized, opsAlertEmail } from "@/lib/cron";
@@ -250,6 +251,11 @@ async function runSync(admin: ReturnType<typeof createAdminClient>, startedAt: n
     );
   }
 
+  // The S&P 500 benchmark (SPY) is refreshed whether or not anyone holds it: every performance page
+  // is measured against it, and its dividends go back further than any holding's (total return).
+  const benchmark = await syncBenchmark(admin);
+  if (!benchmark.ok) console.error(`[cron:sync] benchmark sync failed: ${benchmark.error}`);
+
   // Refresh the FX cache from the live provider so pages never call it at render time. Isolated.
   let fxUpdated = 0;
   try {
@@ -298,6 +304,7 @@ async function runSync(admin: ReturnType<typeof createAdminClient>, startedAt: n
     // brokerOwners answers "did it even try" — brokerOptionLegs of 0 never distinguished a
     // clean run with no new legs from a sync that never ran at all.
     brokerOwners, brokerOptionLegs: brokerSynced, brokerError, valueSnapshots, snapshotError, fxUpdated, pruned,
+    benchmarkOk: benchmark.ok, benchmarkDeepHistory: benchmark.deep,
     // splitsUnstored > 0 means the provider returned splits that did not reach the database —
     // most likely supabase/schema.sql has not been applied since the splits feature shipped.
     splitsWritten, splitsUnstored,
