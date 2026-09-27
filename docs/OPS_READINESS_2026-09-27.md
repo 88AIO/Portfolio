@@ -14,20 +14,24 @@ reached, cannot send sign-up or password-reset emails, and names a support inbox
 | Area | Score | Status | Why |
 |---|---:|:-:|---|
 | Code quality & CI | 92 | ✅ | lint, tsc, 272/272 tests, build all green; 0 npm vulnerabilities; CI boots its own Postgres for the RLS test |
-| Database & tenant isolation | 90 | ✅ | RLS on all 22 tables, views are `security_invoker`; live pen test below found no cross-user read or write |
+| Database & tenant isolation | 92 | ✅ | RLS on all 22 tables, views are `security_invoker`; zero drift from `schema.sql`; live pen test found no cross-user read or write |
 | API endpoints & auth gates | 90 | ✅ | every private route refuses without a session / cron secret; 2 bugs found and fixed on this branch |
 | Data pipeline (crons) | 90 | ✅ | 7/7 nights green, 76/76 instruments, 0 failures, 0 runtime errors in 7 days |
 | Hosting & scaling (Vercel) | 75 | ⚠️ | Pro plan, auto-scaling; functions ran in the wrong region (fixed here), no firewall rules |
 | Observability & alerting | 70 | ⚠️ | Sentry + cron monitor + `/api/health` + ops email; no outside uptime check possible until public |
-| Auth hardening | 60 | ⚠️ | 2FA available and server-enforced; leaked-password check off, no CAPTCHA, owner has no 2FA |
-| Backups & disaster recovery | 55 | ⚠️ | Supabase Pro daily backups exist; a restore has never been tested |
+| Auth hardening | 65 | ⚠️ | 2FA available and server-enforced, email confirmation on; leaked-password check off, no CAPTCHA, owner has no 2FA |
+| Backups & disaster recovery | 55 | ⚠️ | daily backups come with Supabase Pro (not visible through the API); a restore has never been tested |
 | Repo hygiene | 50 | ⚠️ | repo is **public** with real holdings in history; `main` is unprotected |
 | Legal & compliance | 35 | ❌ | pages written; no entity, no attorney review, support inbox is on an unowned domain |
 | Transactional email | 25 | ❌ | no sending domain → no `EMAIL_FROM`, no custom SMTP for sign-up/reset emails |
 | Domain & public access | 15 | ❌ | no domain; every URL is behind Vercel login |
 | Monetization | 15 | — | not needed for a free launch (gates unchanged, see the 09-11 scorecard) |
-| **Engineering core** | **88** | | |
-| **Public-launch readiness** | **58** | | 6 hard blockers below |
+| **Engineering core** | **89** | | |
+| **Public-launch readiness** | **59** | | 6 hard blockers below |
+
+*Second pass (same day):* every live figure above was re-read from Vercel and Supabase and a
+column-level drift check was added; corrections are folded in (migration count, email
+confirmation verified on, region verified from the deployment record).
 
 ## Current configuration (verified live)
 
@@ -39,16 +43,24 @@ reached, cannot send sign-up or password-reset emails, and names a support inbox
   public on that domain automatically; the `*.vercel.app` URLs stay protected.
 - Firewall: no custom rules configured. Password protection / trusted IPs: off.
 - Functions ran in **iad1** (Washington DC) while the database is in **us-west-1** (N. California):
-  every query crossed the country. This branch pins `regions: ["sfo1"]` in `vercel.json`.
+  every query crossed the country. This branch pins `regions: ["sfo1"]` in `vercel.json`; Vercel
+  read it (the branch's deployment record shows `sfo1`), but an Ignored Build Step skips every
+  non-`main` build, so the change first runs when merged.
 - Crons (UTC): sync 06:00 daily · alerts 13:00 daily · digest 14:00 Mondays. `maxDuration` 300s.
-- Env var names could not be listed (connector lacks permission). Inferred from the sync record:
+- Env var names could not be listed (the Vercel connector gets 403 on environment variables, on
+  both passes of this audit). Inferred from the sync record:
   `CRON_SECRET` ✅, `RESEND_API_KEY` ✅, `EMAIL_FROM` ❌ (test sender), SnapTrade ✅ (1 owner),
   provider = `yahoo`, `NEXT_PUBLIC_SITE_URL` ❌ (canonical tags point at the vercel.app URL).
 
 **Database — Supabase** (org "My Projects", **Pro**; project "Stock Portfolio" `rkndtwhdafgeznlmpthd`)
 - us-west-1, Postgres 17.6, ACTIVE_HEALTHY, 19 MB. 22 tables + 4 computed views, RLS on every table.
-- 36 recorded migrations; live objects match `schema.sql` (the only extras are Supabase's own
-  `ensure_rls` event trigger, which auto-enables RLS on new tables — a good thing).
+- 37 recorded migrations. **No drift from `schema.sql`**, checked object by object: every column
+  of all 22 tables, all 18 RLS policies, every index and all 10 CHECK constraints. The only extra
+  is Supabase's own `ensure_rls` event trigger, which auto-enables RLS on new tables.
+- Logs (24h): no 4xx/5xx at the API edge; one few-second PostgREST reconnect at 04:08 UTC on
+  Supabase's side, self-recovered.
+- Keys: the legacy anon JWT and the newer `sb_publishable_` key are both enabled. Fine as is;
+  moving the app to the publishable key and disabling the legacy one is optional hardening.
 - Extensions: pgcrypto, uuid-ossp, pg_stat_statements, vault. pg_graphql, pg_net, pg_cron not
   installed (smaller attack surface). No storage buckets.
 - Data: 1 user, 14 portfolios, 1,985 transactions, 194 option legs, 104 instruments (76 synced
@@ -59,7 +71,10 @@ reached, cannot send sign-up or password-reset emails, and names a support inbox
 
 **Auth** — email/password, optional TOTP 2FA enforced in `proxy.ts` for pages and API routes;
 password re-auth on account deletion; signup consent logged by trigger (verified live).
-Owner account has **no 2FA enrolled**.
+Email confirmation is **on** (verified: the owner's confirmation email was sent at signup and
+clicked 9 s later). Owner account has **no 2FA enrolled**. `broker_connections` has a plaintext
+`provider_user_secret` column — empty today (broker sync uses the owner's env key); encrypt it
+(Supabase Vault) before per-user broker sync ships.
 
 **Email — Resend**: API key present, but the only verified domain on the account is
 `asianmall.com` (a different project). Alerts/digest can reach only the Resend account owner.
@@ -68,7 +83,7 @@ Owner account has **no 2FA enrolled**.
 tested but not switched on. Options chains are Yahoo-only.
 
 **Observability**: Sentry (org `88aio`, project `snowfolio`) from every runtime + a cron monitor
-on the nightly sync — could not be checked from here (Sentry connector not authorized).
+on the nightly sync — could not be checked from here (no Sentry connector in this session).
 `/api/health` live: 200, last sync 22h old, no problems. Vercel: 0 runtime errors in 7 days.
 
 **Code — GitHub `88AIO/Portfolio`**: **public**, `main` unprotected. Open: Dependabot
@@ -125,7 +140,8 @@ rolled-back transactions. No brute-force or load testing was run against product
    the domain in Resend (SPF, DKIM, DMARC records), then set Supabase → Auth → SMTP to Resend, and
    set `EMAIL_FROM` in Vercel for alerts/digest.
 3. **A monitored support inbox** on the new domain (privacy requests and legal notices go there).
-4. **Supabase Auth hardening:** leaked-password protection on, minimum length 8, email confirmation on.
+4. **Supabase Auth hardening:** leaked-password protection on, minimum length 8 (email
+   confirmation is already on).
 5. **Make the GitHub repo private** (history contains real holdings figures), and protect `main`
    so a red CI can't deploy.
 6. **Legal minimum:** form the entity (set `NEXT_PUBLIC_LEGAL_COMPANY`), attorney review of Terms /
