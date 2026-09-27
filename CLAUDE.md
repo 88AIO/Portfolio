@@ -78,6 +78,7 @@ LATER — advanced analytics (opt-in), rebalancing, US tax report,
 
 ## Strategy & capture docs (docs/)
 In this repo:
+- OPS_READINESS_2026-09-27.md ..... operational-readiness audit: live config, pen test, scorecard, public-launch blockers
 - QC_SCORECARD_2026-09-11.md ...... the hard-QC scorecard (what was fixed, what remains, monetization gates)
 - API_BLUEPRINT.md ............... reverse-engineered Snowball API/data model (the target model above; the only API_* capture in the repo)
 - SPEC_options-selling.md ........ the options-selling PRD (O1/O2/O3)

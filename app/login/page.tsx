@@ -6,13 +6,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { MIN_AGE } from "@/lib/legal";
-
-// Only ever send someone to a path on this site after sign-in. `next` comes from the URL, so a
-// value like "//evil.example" or "https://…" must never be followed.
-function safeNext(raw: string | null): string {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/dashboard";
-  return raw;
-}
+import { safeNextPath } from "@/lib/safeNext";
 
 type Msg = { text: string; tone: "error" | "info" | "success" };
 
@@ -24,7 +18,8 @@ type Msg = { text: string; tone: "error" | "info" | "success" };
 export default function LoginPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = safeNext(params.get("next"));
+  // Only ever a path on this site: `next` comes from the URL (see lib/safeNext.ts).
+  const next = safeNextPath(params.get("next"));
   const [mode, setMode] = useState<"signin" | "signup" | "mfa">(() =>
     params.get("mode") === "signup" ? "signup" : "signin"
   );
