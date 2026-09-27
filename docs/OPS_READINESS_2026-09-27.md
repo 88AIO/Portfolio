@@ -27,7 +27,7 @@ reaches once the owner steps at the bottom are done.
 | Auth hardening | 65 | **88** | 100 | leaked-password check, min length 8, Turnstile keys, your own 2FA (owner) |
 | Observability & alerting | 70 | **80** | 100 | uptime monitor once public; confirm Sentry alerts reach you (owner) |
 | Backups & disaster recovery | 55 | 55 | 100 | one test restore (owner) |
-| Repo hygiene | 50 | 60 | 100 | make the repo private, protect `main` (owner) |
+| Repo hygiene | 50 | 60 | 100 | make the repo private, protect `main`, Supabase auto-branching off (owner) |
 | Transactional email | 25 | 25 | 100 | needs the domain: Resend + Supabase SMTP (owner) |
 | Domain & public access | 15 | 20 | 100 | buy the domain (owner) — snowfolio.app is available, $9.99 then $15/yr |
 | Legal & compliance | 35 | 35 | 100 | entity, attorney review, support inbox (owner + professionals) |
@@ -160,6 +160,17 @@ Signed-in dashboard pages weren't measured: this sandbox can't reach the databas
 with a 6–7 character password (Supabase's own minimum is 6, and 8 isn't set there yet) was stopped
 by the browser before sign-in was even tried. The rule now applies to new passwords only (sign-up
 and reset), which is also how it behaves once Supabase enforces 8.
+
+**Found: Supabase preview branches can't build.** Supabase branching was switched on at 04:15 UTC
+today (GitHub integration → Automatic branching), so every PR now gets its own billed preview
+database (Micro compute, roughly $0.32 a day while the PR is open) and a "Supabase Preview" check.
+The check fails on every PR, whatever the code: a project that already has migration history builds
+branches by replaying it, and this project's history starts mid-life — its first entry renames
+portfolios in a table the history never creates, because the base schema went in before migrations
+were recorded. CI already tests the schema on a free throwaway database (`rls-isolation`), so the
+branches add cost without coverage. Turning Automatic branching off is step 10 below; the
+alternative, a baseline migration that reproduces `schema.sql` and matches production's 39 recorded
+versions, is a bigger change to how database changes ship and needs the owner's call.
 
 **Tried and blocked.**
 - **Vercel Firewall:** the API answers "config not found" to both creating and updating it; the
@@ -297,7 +308,9 @@ Everything here needs your accounts, your money or a professional. Rough time in
    search engines and link previews from being challenged. Publish.
 9. **Uptime monitor** [5 min]: any free one on `https://snowfolio.app/api/health`, alert on non-200.
 10. **GitHub** [5 min]: make `88AIO/Portfolio` private (history has real holdings); Settings →
-    Branches → protect `main`, require the CI checks.
+    Branches → protect `main`, require the `build` and `rls-isolation` checks. Supabase → Project
+    Settings → Integrations → GitHub: turn **Automatic branching** off (see pass 4), so PRs stop
+    creating preview databases that can't build.
 11. **Restore drill** [30 min]: Supabase → Database → Backups → restore the latest into a new
     scratch project; check the row counts match; delete the scratch project.
 12. **Sentry** [5 min]: confirm the `nightly-sync` monitor and issue alerts email you.
