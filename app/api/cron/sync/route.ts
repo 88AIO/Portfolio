@@ -13,7 +13,7 @@ import { runBrokerSyncForUser } from "@/lib/brokersync/run";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { snapshotPortfolioValues } from "@/lib/snapshots";
 import { syncFxRates } from "@/lib/fx";
-import { syncBenchmark } from "@/lib/marketdata/benchmark";
+import { syncBenchmark, BENCHMARK } from "@/lib/marketdata/benchmark";
 import { fetchAll } from "@/lib/supabase/paginate";
 import { takeProviderCallCount } from "@/lib/marketdata";
 import { recordSyncRun, listAllUserEmails, isCronAuthorized, opsAlertEmail } from "@/lib/cron";
@@ -201,13 +201,16 @@ async function runSync(admin: ReturnType<typeof createAdminClient>, startedAt: n
       held.slice(i, i + BATCH).map(async (p) => {
         try {
           if (await syncInstrumentQuote(admin, p.instrument_id, p.symbol, p.exchange, p.currency)) quotesWritten++;
-          await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
+          // SPY's dividends and closes are refreshed by syncBenchmark below, further back than this
+          // window, so a holder's copy of it would only fetch the same data twice.
+          const isBenchmark = p.symbol === BENCHMARK.symbol && p.exchange === BENCHMARK.exchange;
+          if (!isBenchmark) await syncInstrumentDividends(admin, p.instrument_id, p.symbol, p.exchange, p.currency);
           // Splits before price history: both feed the value chart, and a chart drawn from
           // adjusted closes against unadjusted share counts has a cliff in it on the split date.
           const written = await syncInstrumentSplits(admin, p.instrument_id, p.symbol, p.exchange);
           if (written == null) splitsUnstored++;
           else splitsWritten += written;
-          await syncInstrumentPriceHistory(admin, p.instrument_id, p.symbol, p.exchange, undefined, p.currency);
+          if (!isBenchmark) await syncInstrumentPriceHistory(admin, p.instrument_id, p.symbol, p.exchange, undefined, p.currency);
 
           if (!p.sector && !p.sector_weights) {
             await enrichInstrumentProfile(admin, {

@@ -166,9 +166,11 @@ grants and views, headers, CSP, secrets. Security advisor: only the leaked-passw
 - **Data repair (production):** 3,933 old weekly rows for Hong Kong, Singapore, Malaysia, Taiwan
   and Shanghai stocks were dated on the Sunday before the week whose Friday close they carry (Yahoo's
   Monday-midnight stamp read in UTC). Verified by exact match against existing Friday rows, then 16
-  duplicates removed and 3,917 moved to their Friday. Zero misdated stock rows remain.
-- Not changed: the benchmark sync re-fetches SPY when someone also holds it (two extra provider calls
-  a night; not worth the complexity).
+  duplicates removed and 3,917 moved to their Friday. Two Taiwan rows dated Fri 2026-09-25 (a
+  Mid-Autumn Festival market holiday, so not a real close) were deleted; that week's close is its
+  Thursday. Zero misdated or duplicate stock weeks remain.
+- The nightly loop no longer fetches SPY's dividends and history when someone holds it: the
+  benchmark sync already does both, further back (two provider calls a night saved).
 
 **Legal/privacy:** the Privacy Policy now names Sentry and Cloudflare Turnstile, covers account
 emails through Resend, states log retention, and carries the California CalOPPA Do Not Track
