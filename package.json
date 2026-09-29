@@ -15,7 +15,7 @@
     "verify:eodhd": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-eodhd.mjs"
   },
   "dependencies": {
-    "@sentry/nextjs": "^10.75.3",
+    "@sentry/nextjs": "^11.0.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
     "next": "^16.3.6",
