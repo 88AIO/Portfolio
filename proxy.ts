@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { needsSecondFactor } from "@/lib/auth/secondFactor";
 
 // Refreshes the Supabase auth session on every request and guards /dashboard and the
 // session-authenticated API routes (exports, backfill).
@@ -50,18 +51,11 @@ export async function proxy(request: NextRequest) {
   // /dashboard — or download their whole ledger from /api/export — having only ever proven the
   // password. The login page's own mount check sends them straight back into the code-entry step
   // instead of the password form.
-  if (isApp && user) {
-    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== aal.nextLevel) return toLogin();
-  }
+  if (isApp && user && (await needsSecondFactor(supabase, user))) return toLogin();
 
   // Signed-in users skip the login page — but not mid-MFA: they still need to clear aal2 there.
-  if (path === "/login" && user) {
-    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    const needsMfa = aal && aal.nextLevel === "aal2" && aal.currentLevel !== aal.nextLevel;
-    if (!needsMfa) {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
-    }
+  if (path === "/login" && user && !(await needsSecondFactor(supabase, user))) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
   return response;
 }

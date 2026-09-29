@@ -25,8 +25,10 @@ export default function PrivacyPage() {
           account type, transaction history, and a <strong>masked</strong> account number (we store
           only the last four digits). We cannot place trades or move money.</li>
         <li><strong>Notification preferences</strong> — whether you opted into alert and digest emails.</li>
-        <li><strong>Technical data</strong> — standard server logs and strictly-necessary cookies used
-          to keep you signed in. We do not use advertising or cross-site tracking cookies.</li>
+        <li><strong>Technical data</strong> — standard server logs, strictly-necessary cookies used
+          to keep you signed in, and error reports when something breaks (the page or request that
+          failed and technical details about it; no screen recordings). We do not use advertising or
+          cross-site tracking cookies.</li>
       </UL>
 
       <H2>How we use it</H2>
@@ -48,7 +50,13 @@ export default function PrivacyPage() {
         <li><strong>Supabase</strong> — database, authentication, and storage.</li>
         <li><strong>Vercel</strong> — application hosting.</li>
         <li><strong>SnapTrade</strong> — brokerage account connections (only if you connect one).</li>
-        <li><strong>Resend</strong> — sending the emails you opt into.</li>
+        <li><strong>Resend</strong> — sending account emails (sign-up confirmation, password reset) and
+          the emails you opt into.</li>
+        <li><strong>Sentry</strong> — error monitoring, so we can find and fix what broke. Error
+          reports include the page or request involved and technical details of what failed; they
+          don&rsquo;t include your password, and we do not record your screen.</li>
+        <li><strong>Cloudflare Turnstile</strong> — where enabled on sign-up and sign-in, checks that a
+          visitor is a person rather than a bot, using signals from your browser.</li>
         <li><strong>Market-data providers</strong> (such as Yahoo Finance or EODHD) — we request prices,
           dividends, and reference data for the tickers in your portfolio.</li>
       </UL>
@@ -60,7 +68,8 @@ export default function PrivacyPage() {
         We keep your data while your account is active and as needed to provide the Service. Your daily
         value history is retained so your long-term performance record persists. You can delete your
         account and everything in it yourself at any time from Settings, or by contacting us; some
-        records may be retained where required by law.
+        records may be retained where required by law. Server logs and error reports are kept by our
+        providers for a limited period and then deleted.
       </P>
 
       <H2>Security</H2>
@@ -85,6 +94,14 @@ export default function PrivacyPage() {
           <a href={`mailto:${CONTACT_EMAIL}`} className="text-indigo-600 underline">{CONTACT_EMAIL}</a>.
           We will respond within the time required by applicable law.</li>
       </UL>
+
+      <H2>Do Not Track and other sites</H2>
+      <P>
+        We don&rsquo;t track you across other websites and don&rsquo;t allow third parties to collect
+        information about your activity across sites through {APP_NAME}, so there is no cross-site
+        tracking for a browser&rsquo;s &ldquo;Do Not Track&rdquo; or Global Privacy Control signal to
+        switch off. We treat those signals the same way we treat everyone: no tracking.
+      </P>
 
       <H2>Children</H2>
       <P>

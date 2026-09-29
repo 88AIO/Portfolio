@@ -20,7 +20,7 @@
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
 const URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -338,5 +338,75 @@ describe("RLS cross-tenant isolation", { skip }, () => {
       assert.equal(error, null, `${table}: anon read errored: ${error?.message}`);
       assert.equal((data ?? []).length, 0, `${table}: anon read returned rows`);
     }
+  });
+});
+
+// A TOTP code (RFC 6238: 30-second steps, 6 digits, HMAC-SHA1) for a base32 secret, so the test can
+// complete a real second factor the way an authenticator app would.
+function totp(base32Secret, at = Date.now()) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const ch of base32Secret.replace(/=+$/, "").toUpperCase()) bits += alphabet.indexOf(ch).toString(2).padStart(5, "0");
+  const key = Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(at / 1000 / 30)));
+  const h = createHmac("sha1", key).update(counter).digest();
+  const o = h[h.length - 1] & 0xf;
+  return String((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+describe("2FA at the data layer", { skip }, () => {
+  const db = haveCreds ? admin() : null;
+  const C = { email: `rls-mfa-${randomUUID().slice(0, 8)}@example.com`, password: randomUUID(), id: null, portfolioId: null };
+  let aal2 = null; // signed in and past the second factor
+  let aal1 = null; // the same account with only the password
+
+  before(async () => {
+    const { data, error } = await db.auth.admin.createUser({ email: C.email, password: C.password, email_confirm: true });
+    assert.equal(error, null, `createUser: ${error?.message}`);
+    C.id = data.user.id;
+    const { data: p, error: pe } = await db.from("portfolios").insert({ user_id: C.id, name: "MFA test" }).select("id").single();
+    assert.equal(pe, null, `seed portfolio: ${pe?.message}`);
+    C.portfolioId = p.id;
+
+    aal2 = await signInAs(C.email, C.password);
+    const { data: enrolled, error: ee } = await aal2.auth.mfa.enroll({ factorType: "totp" });
+    assert.equal(ee, null, `enroll: ${ee?.message}`);
+    const { error: ve } = await aal2.auth.mfa.challengeAndVerify({ factorId: enrolled.id, code: totp(enrolled.totp.secret) });
+    assert.equal(ve, null, `verify: ${ve?.message}`);
+    const { data: level } = await aal2.auth.mfa.getAuthenticatorAssuranceLevel();
+    assert.equal(level.currentLevel, "aal2", "the enrolling session should now be aal2");
+
+    aal1 = await signInAs(C.email, C.password);
+  });
+
+  after(async () => {
+    try {
+      if (C.id) await db.auth.admin.deleteUser(C.id);
+    } catch {
+      // Best-effort cleanup.
+    }
+  });
+
+  it("a password-only (aal1) session of an enrolled user sees none of its data", async () => {
+    for (const table of ["portfolios", "positions", "portfolio_totals", "notification_prefs", "consent_log"]) {
+      const { data, error } = await aal1.from(table).select("*").limit(5);
+      assert.equal(error, null, `${table}: aal1 read errored: ${error?.message}`);
+      assert.equal((data ?? []).length, 0, `${table}: aal1 session read rows past the second factor`);
+    }
+  });
+
+  it("a password-only (aal1) session can't write or delete either", async () => {
+    const { error: ie } = await aal1.from("portfolios").insert({ user_id: C.id, name: "should fail" });
+    assert.ok(ie, "aal1 insert should be refused");
+    await aal1.from("portfolios").delete().eq("id", C.portfolioId);
+    const { data } = await db.from("portfolios").select("id").eq("id", C.portfolioId);
+    assert.equal((data ?? []).length, 1, "aal1 delete must not remove the portfolio");
+  });
+
+  it("the same account after its second factor (aal2) sees its data", async () => {
+    const { data, error } = await aal2.from("portfolios").select("id");
+    assert.equal(error, null, `aal2 read errored: ${error?.message}`);
+    assert.deepEqual((data ?? []).map((r) => r.id), [C.portfolioId]);
   });
 });

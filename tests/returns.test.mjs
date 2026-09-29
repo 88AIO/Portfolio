@@ -165,6 +165,16 @@ test("a broker's opening-balance lot enters at market value, so old gains aren't
   near(xirr(flows), 0, 1e-6, "XIRR");
 });
 
+test("an opening lot dated mid-week takes that week's close, not its old cost", () => {
+  // The broker window starts Monday 2024-03-04; history is weekly and starts Friday 2024-03-08, so
+  // there is no close on or before the lot. Its fair value is that Friday's close.
+  const lot = tx({ type: "buy", quantity: 10, price: 30, executed_at: "2024-03-04", dedupe_key: "ref:snaptrade-recon:x" });
+  const value = openingLotValuer(new Map([["i1", closes(["2024-03-08", 120], ["2024-03-15", 121])]]), usd);
+  near(value(lot), 1200, 1e-9, "valued at the week's close");
+  const late = openingLotValuer(new Map([["i1", closes(["2024-04-19", 150])]]), usd);
+  assert.equal(late(lot), null, "a first close weeks later is not the lot's value");
+});
+
 // --- Benchmark: total return ------------------------------------------------------------------------
 
 test("total-return index reinvests each dividend at the ex-date close", () => {

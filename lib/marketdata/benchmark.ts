@@ -7,10 +7,11 @@
 // first trade (total return).
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { syncInstrumentDividends, syncInstrumentPriceHistory } from "./sync";
+import { BENCHMARK } from "./benchmarkConfig";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
-export const BENCHMARK = { symbol: "SPY", exchange: "US", currency: "USD", name: "SPDR S&P 500 ETF Trust", type: "etf" } as const;
+export { BENCHMARK } from "./benchmarkConfig";
 /** How far back SPY's dividends are kept, so total return covers long-held portfolios. */
 export const BENCHMARK_DIVIDEND_YEARS = 10;
 /** First-time depth of SPY's price history, matching /api/backfill's default. */

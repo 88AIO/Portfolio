@@ -9,6 +9,58 @@
 
 ---
 
+## Update — 2026-09-29
+
+A second pass over the live flows and the three legal pages, with the date-sensitive law re-checked.
+Everything in the original review below still stands except where this section says otherwise.
+
+**Bottom line unchanged:** the free, tracking-only launch is low-to-moderate risk once the
+"Before public launch" list is clear. The list is now shorter on the code side and unchanged on the
+owner side (entity, attorney review, a live `support@` inbox, insurance quote).
+
+**What changed in the law (verified 2026-09-29):**
+
+| Anchor | Status now | What it means for Snowfolio |
+|---|---|---|
+| **CCPA/CPRA applicability** | Applies only above **$26,625,000** revenue (2025–26 CPI adjustment), **or** 100,000+ California consumers/households a year, **or** 50%+ of revenue from selling/sharing personal information | **Snowfolio is under all three, so the CCPA likely does not apply yet.** The Privacy Policy offers the rights voluntarily, which is the right posture; revisit before crossing 100,000 California users. *(Correction to §4-C, which read as if the 2026 regulations applied now.)* |
+| **CalOPPA** (Bus. & Prof. Code §22575) | In force, **no size threshold**: any commercial site collecting personal information from California residents needs a conspicuous policy covering categories collected, third parties shared with, how to review/change data, how changes are notified, the effective date, **how the site responds to Do Not Track signals, and whether third parties track users across sites** | **Applies now.** The policy was missing the Do Not Track and third-party-tracking disclosures. **Fixed in this pass.** |
+| **FTC Click-to-Cancel** | Still vacated. The FTC published an ANPRM on **March 13, 2026** (comments closed April 13); no rule in force. ROSCA, FTC Act §5 and California's ARL still apply | Unchanged: build the compliant cancel flow before the first paying user |
+
+**Privacy Policy fixes shipped in this pass** (`app/legal/privacy/page.tsx`, "last updated" moved to
+September 29, 2026):
+- **Sentry was an undisclosed processor.** Error reports go to Sentry from the browser and the
+  server; it is now listed, with what a report contains (no passwords, no screen recording).
+- **Cloudflare Turnstile** is listed for when the CAPTCHA is switched on (it reads browser signals).
+- **Resend** now covers account emails (sign-up confirmation, password reset), which it will send
+  once Supabase is pointed at it.
+- **CalOPPA Do Not Track / cross-site tracking disclosure** added (no cross-site tracking, so both
+  signals are honored by default).
+- **Log and error-report retention** stated (kept for a limited period by the providers).
+
+**Checked and fine:** 18+ gate with logged consent; self-serve account deletion cascades to every
+user-owned table (the consent record goes with it, which favors privacy over evidence; flag for
+counsel if you'd rather keep a minimal consent record after deletion); CSV exports for portability;
+alert and digest emails are opt-in and say how to turn them off (they are about the user's own
+account, so they read as transactional under CAN-SPAM); no analytics, pixels or ad cookies; the
+Disclaimer and Terms keep the "track and inform, never advise" posture that the securities analysis
+in §4-A depends on.
+
+**Still open before public launch (owner / professionals):** form the entity and set
+`NEXT_PUBLIC_LEGAL_COMPANY`; a monitored `support@` inbox (the domain isn't bought yet, so the
+address every DSAR and legal notice points to does not exist today); attorney review of all three
+pages; cyber + tech E&O quote; incident-response contacts. Security: see the 2026-09-29 entries in
+`docs/OPS_READINESS_2026-09-27.md`.
+
+*Sources for this update:* CCPA thresholds, [Clym](https://www.clym.io/blog/ccpa-applicability-guide)
+and [Jackson Lewis](https://www.jacksonlewis.com/insights/navigating-california-consumer-privacy-act-30-essential-faqs-covered-businesses-including-clarifying-regulations-effective-1126);
+CalOPPA DNT disclosure, [IAPP](https://iapp.org/news/a/what-do-the-new-disclosure-requirements-under-caloppa-mean-for-your-busines)
+and [Alston & Bird](https://www.alstonprivacy.com/california-adopts-do-not-track-disclosure-law-a-b-370-amends-the-california-online-privacy-protection-act-caloppa-to-require-new-privacy-policy-disclosures-for-websites-online-services-and-mobile/);
+Click-to-Cancel, [Goodwin](https://www.goodwinlaw.com/en/insights/publications/2026/02/alerts-practices-ba-ftcs-click-to-cancel-rule-gets-new-life)
+and [Jones Day](https://www.jonesday.com/en/insights/2026/05/ftc-revives-clicktocancel-rule-new-risks-for-subscription-businesses).
+Still issue-spotting, not legal advice.
+
+---
+
 ## 1. Bottom line — you can launch, with gates
 
 **Recommendation: ship the free, tracking-only product publicly once you clear the "Before public launch" list below. It is a low-to-moderate-risk launch *as currently built* — no payments, no ads/tracking, no UGC, no AI, 18+, read-only data.** The two things that turn this from low-risk into serious risk are both *future* triggers, and both have clean gates:

@@ -24,6 +24,8 @@ import { ok, fail, type ActionResult } from "@/lib/actionResult";
 import { allowAction, RATE_LIMITS, RATE_LIMITED_MESSAGE } from "@/lib/rateLimit";
 
 const TRANSACTION_TYPES = new Set(["buy", "sell", "dividend"]);
+/** Price history older than this (in days) is refreshed when someone adds the instrument. */
+const HISTORY_STALE_DAYS = 10;
 
 // Get the user's default portfolio, creating one on first use.
 export async function ensurePortfolio() {
@@ -115,13 +117,16 @@ export async function addTransaction(formData: FormData): Promise<ActionResult> 
       change_pct: q.changePct, as_of: quoteAsOf(q.asOf),
     });
   }
-  // Dividends and weekly history only when nobody has synced this instrument yet. An instrument
-  // someone already holds is kept current by the nightly sync, so re-fetching both on every add
-  // was two provider calls per click that bought nothing.
-  const { count: historyRows } = isNew
-    ? { count: 0 }
-    : await admin.from("price_history").select("instrument_id", { count: "exact", head: true }).eq("instrument_id", inst.id);
-  if (isNew || !historyRows) {
+  // Dividends and weekly history only when this instrument's history isn't current. One someone
+  // holds is kept current by the nightly sync, so re-fetching on every add was two provider calls
+  // per click that bought nothing. But the sync only visits instruments someone holds, so one that
+  // was dropped by everyone can have history that stopped weeks ago: refresh that too.
+  const { data: latest } = isNew
+    ? { data: null }
+    : await admin.from("price_history").select("d").eq("instrument_id", inst.id).order("d", { ascending: false }).limit(1).maybeSingle();
+  const staleBefore = new Date(Date.now() - HISTORY_STALE_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const latestDay = (latest as { d: string } | null)?.d;
+  if (isNew || !latestDay || latestDay < staleBefore) {
     await syncInstrumentDividends(admin, inst.id, symbol, exchange, inst.currency);
     await syncInstrumentPriceHistory(admin, inst.id, symbol, exchange, undefined, inst.currency);
   }
