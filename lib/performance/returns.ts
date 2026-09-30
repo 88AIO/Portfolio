@@ -16,6 +16,7 @@
 import {
   buildShareTimeline,
   closeAsOf,
+  sharesAsOf,
   type PerfClose,
   type PerfTransaction,
   type ShareStep,
@@ -45,9 +46,26 @@ export function openingLotValuer(
 ): (t: PerfTransaction) => number | null {
   return (t) => {
     if (t.type !== "buy" || !isBrokerRestated(t.dedupe_key)) return null;
-    const close = closeAsOf(historyById.get(t.instrument_id) ?? [], t.executed_at);
+    const closes = historyById.get(t.instrument_id) ?? [];
+    // The lot is dated at the start of the broker's window, and closes are weekly, dated on each
+    // week's last trading day — so a lot dated mid-week usually has no close on or before it inside
+    // the loaded history. The week's own close, a few days on, is the fair value then; without it
+    // the lot fell back to its years-old cost and booked all the gains since as recent return.
+    const close = closeAsOf(closes, t.executed_at) ?? firstCloseWithin(closes, t.executed_at, OPENING_LOT_GRACE_DAYS);
     return close != null && close > 0 ? t.quantity * close * fx(t.currency) : null;
   };
+}
+
+/** How far after an opening lot's date its first close may fall and still value it (one week). */
+const OPENING_LOT_GRACE_DAYS = 7;
+
+/** The first close after `date` and no more than `days` later, or null. */
+function firstCloseWithin(closes: PerfClose[], date: string, days: number): number | null {
+  for (const c of closes) {
+    if (c.date <= date) continue;
+    return daysBetween(date, c.date) <= days ? c.close : null;
+  }
+  return null;
 }
 
 /**
@@ -176,9 +194,15 @@ export function timeWeightedReturn(opts: {
   const flows: CashFlow[] = []; // + money into the investments, − money out
   const income: CashFlow[] = [];
 
-  for (const id of new Set(txs.map((t) => t.instrument_id))) {
+  const txsById = new Map<string, PerfTransaction[]>();
+  for (const t of txs) {
+    const list = txsById.get(t.instrument_id);
+    if (list) list.push(t);
+    else txsById.set(t.instrument_id, [t]);
+  }
+
+  for (const [id, own] of txsById) {
     const closes = (historyById.get(id) ?? []).filter((c) => c.date <= today);
-    const own = txs.filter((t) => t.instrument_id === id);
     const steps = buildShareTimeline(own, splitsById?.get(id));
     if (!closes.length) {
       if ((steps[steps.length - 1]?.shares ?? 0) !== 0) unpricedValue += currentValueById?.get(id) ?? 0;
@@ -189,9 +213,7 @@ export function timeWeightedReturn(opts: {
     insts.push({ id, closes, steps, firstClose, rate });
 
     // Shares already held when the first price appears come in as one contribution at that price.
-    const before = dayBefore(firstClose);
-    let held = 0;
-    for (const s of steps) if (s.date <= before) held = s.shares;
+    const held = sharesAsOf(steps, dayBefore(firstClose));
     if (held !== 0) flows.push({ date: firstClose, amount: held * closes[0].close * rate });
 
     for (const t of own) {

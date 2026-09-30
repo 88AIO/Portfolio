@@ -32,6 +32,7 @@ import BackfillButton from "@/components/BackfillButton";
 import { isBrokerSyncOwner } from "@/lib/brokersync";
 import { fetchAll, fetchAllParallel } from "@/lib/supabase/paginate";
 import { todayIso } from "@/lib/date";
+import { BENCHMARK } from "@/lib/marketdata/benchmarkConfig";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // the one-time history backfill fetches several years of weekly closes
@@ -251,7 +252,7 @@ export default async function PerformancePage() {
     // (price_history and dividends below stay on the RLS client; their authenticated-read policies
     // are unchanged.)
     const { data: spyInst } = await createAdminClient()
-      .from("instruments").select("id").eq("symbol", "SPY").eq("exchange", "US").maybeSingle();
+      .from("instruments").select("id").eq("symbol", BENCHMARK.symbol).eq("exchange", BENCHMARK.exchange).maybeSingle();
     const spyId = (spyInst as { id: string } | null)?.id;
     if (spyId) {
       const [spyRows, { data: spyDivRows }] = await Promise.all([
@@ -287,7 +288,8 @@ export default async function PerformancePage() {
         const spyMwr = annual && benchEnd > 0
           ? xirr(investorFlows(txs.filter((t) => t.type === "buy" || t.type === "sell") as PerfTransaction[], fx, today, benchEnd, false, openingLot))
           : null;
-        const youMwr = annual ? xirr(investorFlows(txs as PerfTransaction[], fx, today, endValue, totalReturn, openingLot)) : null;
+        // With dividends in, this is the money-weighted return already computed above.
+        const youMwr = !annual ? null : totalReturn ? mwr : xirr(investorFlows(txs as PerfTransaction[], fx, today, endValue, false, openingLot));
 
         // Per-point growth-of-1 for both, so the chart's range picker can show the time-weighted
         // comparison for whatever window is selected.

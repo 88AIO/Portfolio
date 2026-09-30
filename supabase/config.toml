@@ -37,6 +37,11 @@ site_url = "http://127.0.0.1:3000"
 jwt_expiry = 3600
 enable_signup = true
 
+[auth.mfa.totp]
+# The RLS test enrolls a real TOTP factor to prove an aal1 session can't read an enrolled user's data.
+enroll_enabled = true
+verify_enabled = true
+
 [auth.email]
 enable_signup = true
 # The test provisions its two tenants through the admin API with email_confirm, so no mail is

@@ -91,10 +91,16 @@ export async function syncInstrumentPriceHistory(
     if (splits.length) adjust = (close, date) => close / splitFactor(splits, date);
   }
   for (let i = 0; i < history.length; i += 500) {
-    await admin.from("price_history").upsert(
+    const { error } = await admin.from("price_history").upsert(
       history.slice(i, i + 500).map((h) => ({ instrument_id: instrumentId, d: h.date, close: adjust(h.close, h.date) })),
       { onConflict: "instrument_id,d" }
     );
+    // Clearing leftovers below assumes the fresh closes are stored. If they aren't, deleting would
+    // leave weeks with no close at all, so stop here and let the next night try again.
+    if (error) {
+      console.error(`[sync] ${symbol}.${exchange}: price history write failed: ${error.message}`);
+      return;
+    }
   }
   // Within the window just refreshed, the fetch is now the whole truth: one completed close per
   // week, on its real date. Anything else stored there is a leftover — a week-start stamp carrying

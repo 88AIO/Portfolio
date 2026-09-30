@@ -169,6 +169,20 @@ function isoDate(d: Date | undefined | null): string | null {
   return `${t.getFullYear()}-${m}-${day}`;
 }
 
+/**
+ * A daily bar's trading date, in the exchange's own time zone. Yahoo stamps each bar with its
+ * session's opening instant; read in UTC, a session that opens before midnight UTC (Sydney in
+ * summer, Auckland) lands on the previous calendar day, and a Monday bar becomes the prior week's
+ * "last close" — a close from the future under an earlier date. `gmtoffset` is the exchange's
+ * current offset; a daylight-saving hour either way never moves a bar out of its trading day.
+ */
+function barDate(d: Date | undefined | null, gmtoffsetSeconds: number): string | null {
+  if (!d) return null;
+  const t = (d instanceof Date ? d : new Date(d)).getTime();
+  if (isNaN(t)) return null;
+  return new Date(t + gmtoffsetSeconds * 1000).toISOString().slice(0, 10);
+}
+
 async function getDividendInfo(symbol: string, exchange: string): Promise<DividendInfo | null> {
   try {
     const res = (await yf.quoteSummary(toYahoo(symbol, exchange), {
@@ -292,13 +306,14 @@ async function getPriceHistory(
       period1,
       interval: "1d",
     })) as unknown as {
-      meta?: { currency?: string };
+      meta?: { currency?: string; gmtoffset?: number };
       quotes?: Array<{ date?: Date; close?: number | null }>;
     };
     const { divisor } = normalizeCurrency(res?.meta?.currency);
+    const offset = typeof res?.meta?.gmtoffset === "number" ? res.meta.gmtoffset : 0;
     const out: PriceHistoryPoint[] = [];
     for (const q of res?.quotes ?? []) {
-      const iso = isoDate(q?.date ?? null);
+      const iso = barDate(q?.date ?? null, offset);
       // `close`, not `adjclose`. Yahoo's close is already restated for splits (what the value
       // chart needs); adjclose is ALSO adjusted for dividends, which depressed every historical
       // price of a dividend payer by the payouts since — a phantom loss on day one that decayed to

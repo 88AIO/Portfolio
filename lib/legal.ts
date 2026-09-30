@@ -17,4 +17,4 @@ export const COMPANY_IS_PLACEHOLDER = !process.env.NEXT_PUBLIC_LEGAL_COMPANY?.tr
 export const CONTACT_EMAIL = process.env.NEXT_PUBLIC_LEGAL_CONTACT_EMAIL?.trim() || "support@snowfolio.app";
 export const GOVERNING_LAW = "the State of California, United States";
 export const MIN_AGE = 18;
-export const LAST_UPDATED = "August 24, 2026";
+export const LAST_UPDATED = "September 29, 2026";

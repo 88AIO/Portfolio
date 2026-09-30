@@ -128,6 +128,56 @@ headline font no longer reflows the hero on slow first visits. Vercel's observab
 enabled on this project, so production latency percentiles weren't available; the region move
 to sfo1 removes a cross-country round trip from every database call once merged.
 
+## Review pass — 2026-09-29 (code review, security review, legal/privacy)
+
+Run with the `code-review`, `security-review` and `b2c-launch-risk-review` skills; every finding
+below was verified against the code and, where it touches data, against production before fixing.
+
+**Security — two high-severity 2FA bypasses, both fixed and live-verified.**
+1. **The 2FA gate trusted the browser's copy of the account.** `proxy.ts` asked Supabase for the
+   assurance level without a token, which reads the enrolled factors from the session cookie, and
+   the browser can edit that cookie. Someone with only the password could empty the factor list and
+   walk past the second factor into the dashboard, CSV exports and account deletion. The gate now
+   uses the factors from `getUser()`'s server response and the `aal` of the token that call just
+   validated, and fails closed (`lib/auth/secondFactor.ts`, tested in `tests/second-factor.test.mjs`).
+2. **The database never asked for the second factor.** The Supabase URL and anon key are public by
+   design, so a password sign-in could read and delete an enrolled user's data straight from the
+   Data API, never touching `proxy.ts`. A restrictive policy on all 11 user-data tables now hides an
+   enrolled user's rows from any session that hasn't completed 2FA (`supabase/applied/20260929093000_…`).
+   Checked on production inside a rolled-back transaction: without 2FA, access is unchanged (14
+   portfolios, 81 positions); with a factor enrolled, a password-only session sees 0 rows and a
+   completed-2FA session sees all of them. No user had 2FA enrolled when it went live, so nobody's
+   access changed. The CI RLS suite now enrolls a real TOTP factor and asserts the same.
+Everything else checked out: server actions, IDOR paths, cron and backfill auth, exports, schema
+grants and views, headers, CSP, secrets. Security advisor: only the leaked-password toggle remains.
+
+**Code review — fixed:**
+- Broker opening-balance lots dated mid-week had no close on or before them in the loaded history,
+  so they fell back to years-old cost (the inflated-return bug the benchmark work removed). They now
+  take their own week's close. Your own data was unaffected (all 26 priced lots had a prior close);
+  a new broker-synced user would have hit it.
+- The nightly sync could delete old price rows after failing to write the new ones; it now stops.
+- Yahoo daily bars are dated in the exchange's own time zone, so an Australian or New Zealand Monday
+  can no longer land in the previous week as a future close.
+- Adding a holding now refreshes its history if the last close is more than 10 days old (the nightly
+  sync only visits instruments someone holds).
+- Small: the benchmark ticker comes from one constant; a duplicate XIRR solve and a per-instrument
+  rescan of the ledger removed.
+- **Data repair (production):** 3,933 old weekly rows for Hong Kong, Singapore, Malaysia, Taiwan
+  and Shanghai stocks were dated on the Sunday before the week whose Friday close they carry (Yahoo's
+  Monday-midnight stamp read in UTC). Verified by exact match against existing Friday rows, then 16
+  duplicates removed and 3,917 moved to their Friday. Two Taiwan rows dated Fri 2026-09-25 (a
+  Mid-Autumn Festival market holiday, so not a real close) were deleted; that week's close is its
+  Thursday. Zero misdated or duplicate stock weeks remain.
+- The nightly loop no longer fetches SPY's dividends and history when someone holds it: the
+  benchmark sync already does both, further back (two provider calls a night saved).
+
+**Legal/privacy:** the Privacy Policy now names Sentry and Cloudflare Turnstile, covers account
+emails through Resend, states log retention, and carries the California CalOPPA Do Not Track
+disclosure it was missing. Details and the re-verified law (the CCPA's thresholds put Snowfolio
+outside it for now; CalOPPA applies regardless) are in the 2026-09-29 update at the top of
+`docs/LAUNCH_RISK_REVIEW.md`.
+
 ## Pass 4 — speed to target, sign-in fix (same day)
 
 **Speed, measured with Lighthouse itself** (v12, mobile preset: 4× CPU, slow 4G, standard
